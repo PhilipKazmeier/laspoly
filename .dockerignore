@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+packages/*/node_modules/
+
+# Build outputs
+dist/
+packages/*/dist/
+packages/client/.vite/
+
+# Java/Gradle build artifacts (old game)
+src/
+build/
+.gradle/
+gradle/
+gradlew
+gradlew.bat
+*.jar
+*.class
+libs/
+web/
+
+# Misc
+.git/
+.DS_Store
+*.log
+coverage/
+test-results/
+docs/
+scripts/

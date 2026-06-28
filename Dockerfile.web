@@ -1,0 +1,49 @@
+# ---- build stage ----
+FROM node:22-slim AS build
+WORKDIR /app
+
+# Copy root manifests
+COPY package.json package-lock.json ./
+
+# Copy package manifests (needed before npm ci for workspace resolution)
+COPY packages/shared/package.json packages/shared/
+COPY packages/server/package.json packages/server/
+COPY packages/client/package.json packages/client/
+
+# Install all deps (including devDeps needed for build)
+RUN npm ci
+
+# Copy sources
+COPY packages/ packages/
+COPY tsconfig.base.json ./
+
+# Build the client
+RUN npm run build -w @laspoly/client
+
+# ---- runtime stage ----
+FROM node:22-slim AS runtime
+WORKDIR /app
+
+# Copy root manifests and install prod deps + tsx (needed to run TS server)
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/server/package.json packages/server/
+COPY packages/client/package.json packages/client/
+
+# Install only what's needed at runtime (including tsx from root devDeps)
+RUN npm ci
+
+# Copy server + shared sources
+COPY packages/server/ packages/server/
+COPY packages/shared/ packages/shared/
+
+# Copy built client dist
+COPY --from=build /app/packages/client/dist packages/client/dist
+
+# Copy base tsconfig (tsx needs it for path resolution)
+COPY tsconfig.base.json ./
+
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["npx", "tsx", "packages/server/src/index.ts"]
