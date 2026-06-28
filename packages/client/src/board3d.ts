@@ -15,7 +15,7 @@ import {
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
-import type { GameState } from "@laspoly/shared";
+import type { GameState, FormattedEvent } from "@laspoly/shared";
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches FieldConfiguration.loadGroupColors from Java)
@@ -148,6 +148,19 @@ export class Board3D {
   // Car OBJ models (player tokens), keyed by car index 1-5
   private carModels: Map<number, AbstractMesh[]> = new Map();
   private carsLoaded = false;
+  private lastState: GameState | null = null;
+  private lastMyId: string | null = null;
+  private tokenLabels: Map<string, AbstractMesh> = new Map();
+  // Per-player: queue of [x, z] world positions to hop through
+  private moveQueues: Map<string, Array<[number, number]>> = new Map();
+  private moveAnimating: Set<string> = new Set();
+  private prevPositions: Map<string, number> = new Map();
+  // Dice
+  private diceCupMesh: AbstractMesh | null = null;
+  private dieMesh1: AbstractMesh | null = null;
+  private dieMesh2: AbstractMesh | null = null;
+  private diceAnimating = false;
+  private diceResultLabel: AbstractMesh | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true);
@@ -196,6 +209,9 @@ export class Board3D {
     // Preload car models (async, best-effort)
     this.preloadCarModels();
 
+    // Dice cup + dice (async, best-effort)
+    this.initDice();
+
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
   }
@@ -220,6 +236,10 @@ export class Board3D {
       }
     }
     this.carsLoaded = true;
+    // If update() was already called before models finished loading, rebuild tokens now
+    if (this.lastState) {
+      this.rebuildTokens(this.lastState, this.lastMyId);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -569,7 +589,7 @@ export class Board3D {
   /** Fallback token: a coloured cylinder (clearly visible on tile). */
   private makeFallbackToken(playerId: string, color: Color3): AbstractMesh {
     const mesh = MeshBuilder.CreateCylinder(
-      `token_${playerId}`,
+      `token_fb_${playerId}`,
       { diameter: 0.55, height: 0.65, tessellation: 8 },
       this.scene
     );
@@ -578,6 +598,104 @@ export class Board3D {
     mat.emissiveColor = color.scale(0.3); // glow a bit so tokens stand out
     mesh.material = mat;
     return mesh;
+  }
+
+  /** Floating billboard name label above a token. */
+  private addTokenLabel(playerId: string, name: string, color: string) {
+    const tex = new DynamicTexture(`lblTex_${playerId}`, { width: 128, height: 32 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, 128, 32);
+    ctx.fillStyle = color.startsWith("#") ? color : `#${color}`;
+    ctx.font = "bold 14px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(name, 64, 16);
+    tex.update();
+
+    const plane = MeshBuilder.CreatePlane(`lbl_${playerId}`, { width: 0.9, height: 0.22 }, this.scene);
+    plane.billboardMode = 7;
+    const mat = new StandardMaterial(`lblMat_${playerId}`, this.scene);
+    mat.diffuseTexture = tex;
+    mat.backFaceCulling = false;
+    mat.emissiveColor = new Color3(1, 1, 1);
+    plane.material = mat;
+    plane.isPickable = false;
+    this.tokenLabels.set(playerId, plane);
+  }
+
+  /** (Re)build all token meshes & labels from state, positioning non-animating tokens. */
+  private rebuildTokens(state: GameState, myId: string | null) {
+    // Remove tokens for players who left
+    for (const [id, mesh] of this.tokenMeshes) {
+      if (!state.players.find((p) => p.id === id)) {
+        mesh.dispose();
+        this.tokenMeshes.delete(id);
+        const lbl = this.tokenLabels.get(id);
+        if (lbl) { lbl.dispose(); this.tokenLabels.delete(id); }
+      }
+    }
+
+    // Group players by position for overlap offsets
+    const byPos: Map<number, string[]> = new Map();
+    for (const p of state.players) {
+      if (!p.alive) continue;
+      const arr = byPos.get(p.position) ?? [];
+      arr.push(p.id);
+      byPos.set(p.position, arr);
+    }
+
+    for (const player of state.players) {
+      if (!player.alive) {
+        const old = this.tokenMeshes.get(player.id);
+        if (old) { old.dispose(); this.tokenMeshes.delete(player.id); }
+        const lbl = this.tokenLabels.get(player.id);
+        if (lbl) { lbl.dispose(); this.tokenLabels.delete(player.id); }
+        continue;
+      }
+
+      const [x, z] = tileXZ(player.position);
+      const group = byPos.get(player.position) ?? [];
+      const i = group.indexOf(player.id);
+      const offsetX = (i % 2) * 0.5 - 0.25;
+      const offsetZ = Math.floor(i / 2) * 0.5 - 0.25;
+
+      // Upgrade a fallback cylinder to a car model once models load
+      const existing = this.tokenMeshes.get(player.id);
+      if (existing && this.carsLoaded && existing.name.startsWith("token_fb_")) {
+        existing.dispose();
+        this.tokenMeshes.delete(player.id);
+      }
+
+      let mesh = this.tokenMeshes.get(player.id);
+      if (!mesh) {
+        const colorHex = player.color.startsWith("#") ? player.color : `#${player.color}`;
+        const color = hexToColor3(colorHex);
+        const carIdx = (state.players.indexOf(player) % 5) + 1;
+        mesh = this.carsLoaded
+          ? (this.cloneCarToken(carIdx, color, player.id) ?? this.makeFallbackToken(player.id, color))
+          : this.makeFallbackToken(player.id, color);
+        this.tokenMeshes.set(player.id, mesh);
+        if (!this.tokenLabels.has(player.id)) {
+          this.addTokenLabel(player.id, player.name, player.color);
+        }
+      }
+
+      const targetX = x + offsetX;
+      const targetZ = z + offsetZ;
+      // Initialise prevPositions on first sight so first move animates from a real tile
+      if (!this.prevPositions.has(player.id)) {
+        this.prevPositions.set(player.id, player.position);
+      }
+      // Don't teleport tokens mid-animation; driveAnimation() handles positioning
+      if (!this.moveAnimating.has(player.id)) {
+        mesh.position.set(targetX, 0.35, targetZ);
+        const lbl = this.tokenLabels.get(player.id);
+        if (lbl) lbl.position.set(targetX, 1.1, targetZ);
+      }
+    }
+
+    void myId;
   }
 
   // -------------------------------------------------------------------------
@@ -635,59 +753,264 @@ export class Board3D {
   // Public update (called on every GameState message)
   // -------------------------------------------------------------------------
   update(state: GameState, _myId: string | null) {
+    this.lastState = state;
+    this.lastMyId = _myId;
     this.drawBoard(state.boardId);
-
-    // Remove tokens for players who left / died
-    for (const [id, mesh] of this.tokenMeshes) {
-      if (!state.players.find((p) => p.id === id)) {
-        mesh.dispose();
-        this.tokenMeshes.delete(id);
-      }
-    }
-
-    // Group players by position for overlap offsets
-    const byPos: Map<number, string[]> = new Map();
-    for (const p of state.players) {
-      if (!p.alive) continue;
-      const arr = byPos.get(p.position) ?? [];
-      arr.push(p.id);
-      byPos.set(p.position, arr);
-    }
-
-    for (const player of state.players) {
-      if (!player.alive) {
-        const old = this.tokenMeshes.get(player.id);
-        if (old) {
-          old.dispose();
-          this.tokenMeshes.delete(player.id);
-        }
-        continue;
-      }
-
-      const [x, z] = tileXZ(player.position);
-      const group = byPos.get(player.position) ?? [];
-      const i = group.indexOf(player.id);
-      const offsetX = (i % 2) * 0.38 - 0.19;
-      const offsetZ = Math.floor(i / 2) * 0.38 - 0.19;
-
-      let mesh = this.tokenMeshes.get(player.id);
-      if (!mesh) {
-        const colorHex = player.color.startsWith("#") ? player.color : `#${player.color}`;
-        const color = hexToColor3(colorHex);
-        const carIdx = (state.players.indexOf(player) % 5) + 1;
-
-        if (this.carsLoaded) {
-          mesh = this.cloneCarToken(carIdx, color, player.id) ?? this.makeFallbackToken(player.id, color);
-        } else {
-          mesh = this.makeFallbackToken(player.id, color);
-        }
-        this.tokenMeshes.set(player.id, mesh);
-      }
-
-      mesh.position.set(x + offsetX, 0.25, z + offsetZ);
-    }
-
+    this.rebuildTokens(state, _myId);
     this.updateBuildings(state);
+  }
+
+  // -------------------------------------------------------------------------
+  // Event-driven animations (movement, dice)
+  // -------------------------------------------------------------------------
+  handleEvents(events: FormattedEvent[]) {
+    for (const ev of events) {
+      if (ev.key === "rolled") {
+        const d1 = Number(ev.params?.["d1"] ?? 1);
+        const d2 = Number(ev.params?.["d2"] ?? 1);
+        this.playDiceAnimation(d1, d2);
+      } else if (ev.key === "moved" && ev.playerId) {
+        const destPos = Number(ev.params?.["pos"] ?? -1);
+        if (destPos < 0) continue;
+        const prevPos = this.prevPositions.get(ev.playerId) ?? -1;
+        if (prevPos >= 0 && prevPos !== destPos) {
+          this.enqueueMove(ev.playerId, prevPos, destPos);
+        }
+        this.prevPositions.set(ev.playerId, destPos);
+      } else if ((ev.key === "wentToJail" || ev.key === "actionCardMoveJail") && ev.playerId) {
+        const prevPos = this.prevPositions.get(ev.playerId) ?? -1;
+        if (prevPos >= 0) this.enqueueJailAnimation(ev.playerId);
+        this.prevPositions.set(ev.playerId, JAIL_POS);
+      }
+    }
+  }
+
+  private enqueueMove(playerId: string, from: number, to: number) {
+    const RING = 40;
+    const path: Array<[number, number]> = [];
+    let cur = from;
+    let guard = 0;
+    while (cur !== to && guard++ < RING) {
+      cur = (cur + 1) % RING;
+      path.push(tileXZ(cur));
+    }
+    if (path.length === 0) return;
+    const existing = this.moveQueues.get(playerId) ?? [];
+    this.moveQueues.set(playerId, [...existing, ...path]);
+    if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+  }
+
+  private enqueueJailAnimation(playerId: string) {
+    const jailXZ: [number, number] = [0, 0]; // cage is at world origin
+    const existing = this.moveQueues.get(playerId) ?? [];
+    this.moveQueues.set(playerId, [...existing, jailXZ]);
+    if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+  }
+
+  private driveAnimation(playerId: string) {
+    const mesh = this.tokenMeshes.get(playerId);
+    if (!mesh) { this.moveAnimating.delete(playerId); return; }
+
+    const queue = this.moveQueues.get(playerId);
+    if (!queue || queue.length === 0) { this.moveAnimating.delete(playerId); return; }
+
+    this.moveAnimating.add(playerId);
+    const next = queue.shift()!;
+    const targetX = next[0];
+    const targetZ = next[1];
+    this.moveQueues.set(playerId, queue);
+
+    const startX = mesh.position.x;
+    const startZ = mesh.position.z;
+    const startY = mesh.position.y;
+    const HOP_DURATION = 120; // ms per tile
+    const HOP_HEIGHT = 0.5;
+    let elapsed = 0;
+    let lastTime = performance.now();
+
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / HOP_DURATION, 1);
+      mesh.position.x = startX + (targetX - startX) * t;
+      mesh.position.z = startZ + (targetZ - startZ) * t;
+      mesh.position.y = startY + HOP_HEIGHT * 4 * t * (1 - t);
+
+      const lbl = this.tokenLabels.get(playerId);
+      if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
+
+      if (t >= 1) {
+        this.scene.onBeforeRenderObservable.remove(obs);
+        mesh.position.set(targetX, 0.35, targetZ);
+        if (lbl) lbl.position.set(targetX, 1.1, targetZ);
+        this.driveAnimation(playerId);
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Dice cup
+  // -------------------------------------------------------------------------
+  private async initDice(): Promise<void> {
+    const CX = 12, CZ = -5;
+
+    try {
+      const cupResult = await SceneLoader.ImportMeshAsync("", "/assets/", "DiceCup.obj", this.scene);
+      const cupMeshes = cupResult.meshes;
+      const cupMat = new StandardMaterial("cupMat", this.scene);
+      cupMat.diffuseColor = new Color3(0.15, 0.12, 0.08);
+      cupMat.specularColor = new Color3(0.4, 0.3, 0.2);
+      cupMeshes.forEach((m) => { m.scaling.setAll(0.01); m.isPickable = false; m.material = cupMat; });
+      if (cupMeshes[0]) {
+        this.diceCupMesh = cupMeshes[0];
+        this.diceCupMesh.position.set(CX, 0.4, CZ);
+      }
+    } catch {
+      const fallbackCup = MeshBuilder.CreateCylinder(
+        "cupFallback",
+        { diameterTop: 0.8, diameterBottom: 0.6, height: 1.0, tessellation: 12 },
+        this.scene
+      );
+      fallbackCup.position.set(CX, 0.5, CZ);
+      const cupMat = new StandardMaterial("cupMatFb", this.scene);
+      cupMat.diffuseColor = new Color3(0.2, 0.12, 0.05);
+      fallbackCup.material = cupMat;
+      this.diceCupMesh = fallbackCup;
+    }
+
+    for (let d = 0; d < 2; d++) {
+      try {
+        const diceResult = await SceneLoader.ImportMeshAsync("", "/assets/", "rounded-dice.obj", this.scene);
+        const diceMeshes = diceResult.meshes;
+        diceMeshes.forEach((m) => { m.scaling.setAll(0.015); m.isPickable = false; });
+        const dieMesh = diceMeshes[0];
+        if (dieMesh) {
+          dieMesh.position.set(CX + (d === 0 ? -0.25 : 0.25), 0.2, CZ + (d === 0 ? -0.1 : 0.1));
+          if (d === 0) this.dieMesh1 = dieMesh; else this.dieMesh2 = dieMesh;
+        }
+      } catch {
+        const fb = MeshBuilder.CreateBox(`dieFb_${d}`, { width: 0.35, height: 0.35, depth: 0.35 }, this.scene);
+        fb.position.set(CX + (d === 0 ? -0.25 : 0.25), 0.2, CZ + (d === 0 ? -0.1 : 0.1));
+        const dieMat = new StandardMaterial(`dieMatFb_${d}`, this.scene);
+        dieMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
+        fb.material = dieMat;
+        if (d === 0) this.dieMesh1 = fb; else this.dieMesh2 = fb;
+      }
+    }
+  }
+
+  /** Rotate a die mesh so the given face value faces up. */
+  private orientDie(mesh: AbstractMesh, face: number) {
+    const PI = Math.PI;
+    const H = PI / 2;
+    switch (face) {
+      case 1: mesh.rotation.set(0, 0, 0); break;
+      case 2: mesh.rotation.set(H, 0, 0); break;
+      case 3: mesh.rotation.set(0, 0, -H); break;
+      case 4: mesh.rotation.set(0, 0, H); break;
+      case 5: mesh.rotation.set(-H, 0, 0); break;
+      case 6: mesh.rotation.set(PI, 0, 0); break;
+    }
+  }
+
+  /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation). */
+  private playDiceAnimation(d1: number, d2: number) {
+    if (this.diceAnimating) return;
+    const cup = this.diceCupMesh;
+    if (!cup) return;
+    this.diceAnimating = true;
+
+    const die1 = this.dieMesh1;
+    const die2 = this.dieMesh2;
+    const baseY = cup.position.y;
+    const LIFT = 1.5;
+    const SHAKE_CYCLES = 4;
+    const SHAKE_AMP = 0.25;
+
+    let phase: "lift" | "shake" | "descend" | "settle" = "lift";
+    let elapsed = 0;
+    let lastTime = performance.now();
+
+    if (die1) die1.position.y = -1;
+    if (die2) die2.position.y = -1;
+
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      const dt = now - lastTime;
+      lastTime = now;
+
+      if (phase === "lift") {
+        elapsed += dt;
+        const t = Math.min(elapsed / 300, 1);
+        cup.position.y = baseY + LIFT * t;
+        cup.rotation.z = Math.sin(t * Math.PI * 2) * SHAKE_AMP * 0.5;
+        if (t >= 1) { elapsed = 0; phase = "shake"; }
+      } else if (phase === "shake") {
+        elapsed += dt;
+        const t = elapsed / (100 * SHAKE_CYCLES);
+        cup.rotation.z = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_AMP;
+        if (elapsed >= 100 * SHAKE_CYCLES * 4) { elapsed = 0; phase = "descend"; }
+      } else if (phase === "descend") {
+        elapsed += dt;
+        const t = Math.min(elapsed / 300, 1);
+        cup.position.y = baseY + LIFT * (1 - t);
+        cup.rotation.z = 0;
+        if (t >= 1) { elapsed = 0; phase = "settle"; }
+      } else {
+        const cx = cup.position.x;
+        const cz = cup.position.z;
+        if (die1) { die1.position.set(cx - 0.25, 0.2, cz - 0.1); this.orientDie(die1, d1); }
+        if (die2) { die2.position.set(cx + 0.25, 0.2, cz + 0.1); this.orientDie(die2, d2); }
+        elapsed += dt;
+        const decay = 1 - Math.min(elapsed / 300, 1);
+        const bounce = Math.abs(Math.sin((elapsed / 80) * Math.PI)) * 0.15 * decay;
+        if (die1) die1.position.y = 0.2 + bounce;
+        if (die2) die2.position.y = 0.2 + bounce;
+        if (elapsed >= 400) {
+          this.showDiceResultLabel(d1, d2, cup.position.x, cup.position.z);
+          this.scene.onBeforeRenderObservable.remove(obs);
+          this.diceAnimating = false;
+        }
+      }
+    });
+  }
+
+  private showDiceResultLabel(d1: number, d2: number, cx: number, cz: number) {
+    if (this.diceResultLabel) { this.diceResultLabel.dispose(); this.diceResultLabel = null; }
+    const tex = new DynamicTexture("diceResultTex", { width: 128, height: 32 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, 128, 32);
+    ctx.fillStyle = "#facc15";
+    ctx.font = "bold 18px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${d1} + ${d2} = ${d1 + d2}`, 64, 16);
+    tex.update();
+
+    const plane = MeshBuilder.CreatePlane("diceResultPlane", { width: 1.2, height: 0.3 }, this.scene);
+    plane.position.set(cx, 1.5, cz);
+    plane.billboardMode = 7;
+    const mat = new StandardMaterial("diceResultMat", this.scene);
+    mat.diffuseTexture = tex;
+    mat.backFaceCulling = false;
+    mat.emissiveColor = new Color3(1, 1, 1);
+    plane.material = mat;
+    this.diceResultLabel = plane;
+
+    let elapsed = 0;
+    let lastTime = performance.now();
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      if (elapsed > 2000) {
+        plane.dispose();
+        this.diceResultLabel = null;
+        this.scene.onBeforeRenderObservable.remove(obs);
+      }
+    });
   }
 }
 

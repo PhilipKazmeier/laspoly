@@ -25,6 +25,14 @@ net.onMessage((msg) => {
       ui.showRoom(msg.room);
       break;
     case "state":
+      board3d.handleEvents(msg.events);
+      // Show action card popup if any actionCard* event in this batch
+      for (const ev of msg.events) {
+        if (ev.key.startsWith("actionCard")) {
+          ui.showActionCard(ev.text);
+          break;
+        }
+      }
       board3d.update(msg.state, net.playerId);
       ui.updateGame(msg.state, msg.events, net.playerId);
       break;

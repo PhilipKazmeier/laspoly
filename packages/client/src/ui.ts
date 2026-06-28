@@ -61,6 +61,45 @@ const css = `
   .player-row { padding: 8px 10px; margin: 4px 0; border-radius: 6px; border: 1px solid #333; font-size: 13px; }
   .player-row.current-player { border-color: #facc15; background: rgba(250,204,21,0.1); }
   .player-row.dead { opacity: 0.4; }
+  .chip-stack { display:flex; align-items:center; gap:2px; flex-wrap:wrap; margin-top:2px; }
+  .chip-img { width:16px; height:16px; object-fit:contain; image-rendering:pixelated; }
+  .chip-count { font-size:10px; color:#aaa; margin-left:1px; }
+  .deed-strip { display:flex; flex-wrap:wrap; gap:2px; margin-top:3px; }
+  .deed-chip {
+    width:12px; height:16px; border-radius:2px;
+    display:inline-block; cursor:default;
+    border:1px solid rgba(255,255,255,0.15);
+  }
+  .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
+  #actionCardPopup {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 320px;
+    background: #1a1a2e; border: 2px solid #f97316; border-radius: 10px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    z-index: 100;
+  }
+  #actionCardPopup .ac-header {
+    background: #f97316; color: #fff; font-weight: bold; font-size: 15px;
+    padding: 10px 16px; border-radius: 8px 8px 0 0;
+    text-align: center;
+  }
+  #actionCardPopup .ac-body {
+    padding: 16px; color: #eee; font-size: 14px; line-height: 1.5;
+    text-align: center;
+  }
+  #actionCardPopup .ac-footer {
+    padding: 0 16px 14px; text-align: center;
+  }
+  #buyOfferPanel {
+    position: absolute; bottom: 100px; right: 16px;
+    width: 250px;
+    background: rgba(10,10,30,0.92); border: 2px solid #facc15;
+    border-radius: 8px; padding: 14px;
+    color: #eee;
+  }
+  #buyOfferPanel h3 { color: #facc15; margin: 0 0 8px; font-size: 14px; }
+  #buyOfferPanel .buy-detail { font-size: 12px; color: #ccc; margin: 3px 0; }
+  #buyOfferPanel .buy-btns { display:flex; gap:8px; margin-top:10px; }
   #eventLogPanel {
     position: absolute; bottom: 16px; left: 16px;
     width: 300px;
@@ -182,6 +221,9 @@ export class UI {
   private travelPanel!: HTMLDivElement;
   private tradePanel!: HTMLDivElement;
   private incomingSwapPanel!: HTMLDivElement;
+  private actionCardPopup!: HTMLDivElement;
+  private actionCardTimer: ReturnType<typeof setTimeout> | null = null;
+  private buyOfferPanel!: HTMLDivElement;
 
   constructor(root: HTMLDivElement, net: Net) {
     this.root = root;
@@ -197,6 +239,8 @@ export class UI {
     this.buildIncomingSwapPanel();
     this.buildVersion();
     this.buildError();
+    this.buildActionCardPopup();
+    this.buildBuyOfferPanel();
   }
 
   private injectStyles() {
@@ -440,6 +484,107 @@ export class UI {
     this.errorBanner = banner;
   }
 
+  private buildActionCardPopup() {
+    const popup = document.createElement("div");
+    popup.id = "actionCardPopup";
+    popup.innerHTML = `
+      <div class="ac-header">🃏 Aktionskarte</div>
+      <div class="ac-body" id="actionCardText"></div>
+      <div class="ac-footer">
+        <button id="actionCardConfirmBtn" style="background:#f97316;">Bestätigen</button>
+      </div>
+    `;
+    hide(popup);
+    this.root.appendChild(popup);
+    this.actionCardPopup = popup;
+
+    const confirmBtn = document.getElementById("actionCardConfirmBtn") as HTMLButtonElement;
+    confirmBtn.addEventListener("click", () => this.dismissActionCard());
+  }
+
+  showActionCard(text: string) {
+    const textEl = document.getElementById("actionCardText");
+    if (textEl) textEl.textContent = text;
+    show(this.actionCardPopup, "block");
+    if (this.actionCardTimer) clearTimeout(this.actionCardTimer);
+    this.actionCardTimer = setTimeout(() => this.dismissActionCard(), 4000);
+  }
+
+  private dismissActionCard() {
+    hide(this.actionCardPopup);
+    if (this.actionCardTimer) { clearTimeout(this.actionCardTimer); this.actionCardTimer = null; }
+  }
+
+  private buildBuyOfferPanel() {
+    const panel = document.createElement("div");
+    panel.id = "buyOfferPanel";
+    panel.innerHTML = `
+      <h3>Kaufangebot</h3>
+      <div class="buy-detail" id="buyTileName">—</div>
+      <div class="buy-detail" id="buyPrice">Preis: —</div>
+      <div class="buy-detail" id="buyBalance">Guthaben: —</div>
+      <div class="buy-btns">
+        <button id="buyOfferBuyBtn" style="background:#16a34a;">Kaufen</button>
+        <button id="buyOfferDeclineBtn" style="background:#991b1b;">Ablehnen</button>
+      </div>
+    `;
+    hide(panel);
+    this.gameHud.appendChild(panel);
+    this.buyOfferPanel = panel;
+
+    (document.getElementById("buyOfferBuyBtn") as HTMLButtonElement).addEventListener("click", () =>
+      this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } })
+    );
+    (document.getElementById("buyOfferDeclineBtn") as HTMLButtonElement).addEventListener("click", () =>
+      this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } })
+    );
+  }
+
+  private renderChipStack(money: number): string {
+    const denoms = [100, 10, 1];
+    const imgs = ["/assets/laspolydollar100.png", "/assets/laspolydollar10.png", "/assets/laspolydollar1.png"];
+    const MAX_ICONS = 5;
+    let parts: string[] = [];
+    let remaining = money;
+    for (let i = 0; i < denoms.length; i++) {
+      const d = denoms[i]!;
+      const img = imgs[i]!;
+      const count = Math.floor(remaining / d);
+      remaining -= count * d;
+      if (count <= 0) continue;
+      const show = Math.min(count, MAX_ICONS);
+      let icons = "";
+      for (let j = 0; j < show; j++) {
+        icons += `<img class="chip-img" src="${img}" alt="${d}LPD" />`;
+      }
+      if (count > MAX_ICONS) icons += `<span class="chip-count">×${count}</span>`;
+      parts.push(icons);
+    }
+    if (parts.length === 0) parts = [`<span class="chip-count">0</span>`];
+    return `<div class="chip-stack">${parts.join("")}</div>`;
+  }
+
+  private renderDeedStrip(state: GameState, playerId: string): string {
+    const board = getBoard(state.boardId);
+    const ownedPositions = Object.entries(state.ownership)
+      .filter(([, ownerId]) => ownerId === playerId)
+      .map(([pos]) => Number(pos))
+      .sort((a, b) => a - b);
+    if (ownedPositions.length === 0) return "";
+    const MAX_SHOW = 20;
+    const show = ownedPositions.slice(0, MAX_SHOW);
+    const extra = ownedPositions.length - show.length;
+    let chips = show.map((pos) => {
+      const tile = board.tiles[pos];
+      const group = (tile as { group?: string }).group ?? "station";
+      const color = this.groupCssColor(group);
+      const name = tile?.name ?? `Pos ${pos}`;
+      return `<span class="deed-chip" style="background:${color};" title="${name}"></span>`;
+    }).join("");
+    if (extra > 0) chips += `<span class="deed-more">+${extra}</span>`;
+    return `<div class="deed-strip">${chips}</div>`;
+  }
+
   private sendChat() {
     const text = this.chatInput.value.trim();
     if (text) {
@@ -551,7 +696,7 @@ export class UI {
       const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
       const rollStr = p.lastRoll[0] > 0 ? ` [${p.lastRoll[0]}+${p.lastRoll[1]}]` : "";
       const jail = p.inJail ? " (Knast)" : "";
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}<br><span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${this.renderChipStack(p.money)}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
       this.playerList.appendChild(row);
     }
 
@@ -583,6 +728,22 @@ export class UI {
 
     if (showRansom) { show(this.ransomBtn, "inline-block"); this.ransomBtn.disabled = false; }
     else { hide(this.ransomBtn); this.ransomBtn.disabled = true; }
+
+    // Buy offer panel (tile name / price / balance)
+    if (showBuy && myId && state.pendingPurchase !== null) {
+      const board = getBoard(state.boardId);
+      const tile = board.tiles[state.pendingPurchase];
+      const price = tile ? tilePrice(board, tile) : 0;
+      const tileNameEl = document.getElementById("buyTileName");
+      const priceEl = document.getElementById("buyPrice");
+      const balanceEl = document.getElementById("buyBalance");
+      if (tileNameEl) tileNameEl.textContent = tile?.name ?? "—";
+      if (priceEl) priceEl.textContent = `Preis: ${price} LPD`;
+      if (balanceEl) balanceEl.textContent = `Guthaben: ${me?.money ?? 0} LPD`;
+      show(this.buyOfferPanel, "block");
+    } else {
+      hide(this.buyOfferPanel);
+    }
 
     // Spectator banner
     if (myId && !amAlive && state.phase !== "finished") {
