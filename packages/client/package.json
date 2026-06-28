@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@babylonjs/core": "^7",
+    "@babylonjs/loaders": "^7",
     "@laspoly/shared": "*"
   },
   "devDependencies": {
