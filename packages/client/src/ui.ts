@@ -1,5 +1,18 @@
-import { VERSION, listBoards } from "@laspoly/shared";
-import type { RoomSummary, RoomView, GameState, FormattedEvent } from "@laspoly/shared";
+import {
+  VERSION,
+  listBoards,
+  getBoard,
+  mortgageValue,
+  tilePrice,
+  canBuild,
+  canSellBuilding,
+  canMortgage,
+  canUnmortgage,
+  canSellProperty,
+  ownedPropsOf,
+  canTravelFrom,
+} from "@laspoly/shared";
+import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } from "@laspoly/shared";
 import type { Net } from "./net.js";
 
 const css = `
@@ -93,6 +106,35 @@ const css = `
     background: rgba(180,0,0,0.85); padding: 8px 20px; border-radius: 6px;
     font-size: 13px; max-width: 400px; text-align: center;
   }
+  #myPropsPanel {
+    position: absolute; top: 16px; right: 16px;
+    width: 280px;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .prop-row { padding: 8px; border: 1px solid #333; border-radius: 4px; margin: 4px 0; font-size: 12px; }
+  .prop-row .prop-name { font-weight: bold; color: #eee; }
+  .prop-row .prop-detail { color: #aaa; font-size: 11px; margin: 2px 0; }
+  .prop-btn { font-size: 11px; padding: 3px 8px; margin: 2px 1px; }
+  .prop-btn.danger { background: #991b1b; }
+  .prop-btn.danger:hover { background: #7f1d1d; }
+  #travelPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 260px;
+  }
+  #tradePanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 340px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  #incomingSwapPanel {
+    position: absolute; bottom: 80px; right: 16px;
+    width: 300px;
+  }
+  .swap-section { margin: 8px 0; padding: 6px; background: rgba(255,255,255,0.05); border-radius: 4px; }
+  .swap-label { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+  .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
 `;
 
 function show(el: HTMLElement, displayValue = "block") {
@@ -135,6 +177,10 @@ export class UI {
   private errorBanner!: HTMLDivElement;
   private wasMyTurn = false;
   private myName: string | null = null;
+  private myPropsPanel!: HTMLDivElement;
+  private travelPanel!: HTMLDivElement;
+  private tradePanel!: HTMLDivElement;
+  private incomingSwapPanel!: HTMLDivElement;
 
   constructor(root: HTMLDivElement, net: Net) {
     this.root = root;
@@ -144,6 +190,10 @@ export class UI {
     this.buildRoomPanel();
     this.buildGameHud();
     this.buildGameOverBanner();
+    this.buildMyPropsPanel();
+    this.buildTravelPanel();
+    this.buildTradePanel();
+    this.buildIncomingSwapPanel();
     this.buildVersion();
     this.buildError();
   }
@@ -313,6 +363,42 @@ export class UI {
     hide(spectatorBanner);
     this.root.appendChild(spectatorBanner);
     this.spectatorBanner = spectatorBanner;
+  }
+
+  private buildMyPropsPanel() {
+    const panel = document.createElement("div");
+    panel.id = "myPropsPanel";
+    panel.className = "panel";
+    hide(panel);
+    this.gameHud.appendChild(panel);
+    this.myPropsPanel = panel;
+  }
+
+  private buildTravelPanel() {
+    const panel = document.createElement("div");
+    panel.id = "travelPanel";
+    panel.className = "panel";
+    hide(panel);
+    this.gameHud.appendChild(panel);
+    this.travelPanel = panel;
+  }
+
+  private buildTradePanel() {
+    const panel = document.createElement("div");
+    panel.id = "tradePanel";
+    panel.className = "panel";
+    hide(panel);
+    this.gameHud.appendChild(panel);
+    this.tradePanel = panel;
+  }
+
+  private buildIncomingSwapPanel() {
+    const panel = document.createElement("div");
+    panel.id = "incomingSwapPanel";
+    panel.className = "panel";
+    hide(panel);
+    this.gameHud.appendChild(panel);
+    this.incomingSwapPanel = panel;
   }
 
   private buildGameOverBanner() {
@@ -491,6 +577,32 @@ export class UI {
     } else {
       hide(this.spectatorBanner);
     }
+
+    // Incoming swap panel (visible regardless of whose turn it is)
+    if (myId) {
+      this.refreshIncomingSwapPanel(state, myId);
+    } else {
+      hide(this.incomingSwapPanel);
+    }
+
+    // My-properties panel + travel (only during my awaiting-roll turn, not in jail)
+    const showMgmt = isMyTurn && amAlive && state.phase === "awaiting-roll" && !(me?.inJail ?? false);
+    if (showMgmt && myId) {
+      this.refreshMyPropsPanel(state, myId);
+
+      // Travel panel: show if player is at a station
+      const travelDests = canTravelFrom(state, myId);
+      if (travelDests.length > 0) {
+        this.refreshTravelPanel(state, myId);
+        show(this.travelPanel, "block");
+      } else {
+        hide(this.travelPanel);
+      }
+    } else {
+      hide(this.myPropsPanel);
+      hide(this.travelPanel);
+      if (!isMyTurn) hide(this.tradePanel);
+    }
   }
 
   addChat(from: string, text: string) {
@@ -511,5 +623,402 @@ export class UI {
     const winnerEl = document.getElementById("gameOverWinner");
     if (winnerEl) winnerEl.textContent = `Gewinner: ${winnerName}`;
     show(this.gameOverBanner, "flex");
+  }
+
+  private groupCssColor(group: string): string {
+    const map: Record<string, string> = {
+      brown: "#8B4513", deeppink: "#FF1493", turquoise: "#40E0D0",
+      violet: "#EE82EE", mistyrose: "#FFE4E1", orange: "#FFA500",
+      lightgreen: "#90EE90", red: "#FF0000", yellow: "#FFFF00",
+      darkviolet: "#9400D3", darkgreen: "#006400", royalblue: "#4169E1",
+      station: "#888888", attraction: "#FFD700",
+    };
+    return map[group] ?? "#666";
+  }
+
+  private refreshMyPropsPanel(state: GameState, myId: string) {
+    const panel = this.myPropsPanel;
+    panel.innerHTML = "";
+
+    const board = getBoard(state.boardId);
+    const props = ownedPropsOf(state, myId).sort((a, b) => a - b);
+
+    if (props.length === 0) {
+      hide(panel);
+      return;
+    }
+
+    // Header with trade button
+    const header = document.createElement("div");
+    header.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
+    header.innerHTML = `<span style="font-size:13px;color:#facc15;font-weight:bold;">Meine Grundstücke</span>`;
+    const tradeBtn = document.createElement("button");
+    tradeBtn.className = "prop-btn";
+    tradeBtn.textContent = "Tauschen";
+    tradeBtn.addEventListener("click", () => {
+      const panelVisible = this.tradePanel.style.display !== "none";
+      if (panelVisible) {
+        hide(this.tradePanel);
+      } else {
+        this.refreshTradePanel(state, myId);
+        show(this.tradePanel, "block");
+      }
+    });
+    header.appendChild(tradeBtn);
+    panel.appendChild(header);
+
+    for (const pos of props) {
+      const tile = board.tiles[pos];
+      if (!tile) continue;
+      const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+      const isMortgaged = !!state.mortgaged[pos];
+
+      const row = document.createElement("div");
+      row.className = "prop-row";
+
+      const tileGroup = (tile as { group?: string }).group;
+      const groupColor = tileGroup
+        ? `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${this.groupCssColor(tileGroup)};margin-right:4px;"></span>`
+        : "";
+
+      let buildingStr = "";
+      if (b.hotel) buildingStr = "[Hotel]";
+      else if (b.factory) buildingStr = "[Fabrik]";
+      else if (b.houses > 0) buildingStr = `[${b.houses} Haus${b.houses > 1 ? "häuser" : ""}]`;
+      else buildingStr = "—";
+
+      const mortgageStr = isMortgaged ? " <span style='color:#f87171;'>[Hypothek]</span>" : "";
+
+      row.innerHTML = `
+        <div class="prop-name">${groupColor}${tile.name}${mortgageStr}</div>
+        <div class="prop-detail">Gebäude: ${buildingStr}</div>
+      `;
+
+      // Buttons
+      const btnRow = document.createElement("div");
+      btnRow.style.marginTop = "4px";
+
+      // BUILD buttons (only for streets with whole-group ownership)
+      if (tile.type === "street") {
+        const st = tile as StreetTile;
+        if (canBuild(state, pos, "house")) {
+          const btn = document.createElement("button");
+          btn.className = "prop-btn";
+          btn.textContent = `Haus (${st.houseCost} LPD)`;
+          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } }));
+          btnRow.appendChild(btn);
+        }
+        if (canBuild(state, pos, "hotel")) {
+          const btn = document.createElement("button");
+          btn.className = "prop-btn";
+          btn.textContent = `Hotel (${st.hotelCost} LPD)`;
+          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } }));
+          btnRow.appendChild(btn);
+        }
+        if (canBuild(state, pos, "factory")) {
+          const btn = document.createElement("button");
+          btn.className = "prop-btn";
+          btn.textContent = `Fabrik (${st.factoryCost} LPD)`;
+          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } }));
+          btnRow.appendChild(btn);
+        }
+        if (canSellBuilding(state, pos)) {
+          const btn = document.createElement("button");
+          btn.className = "prop-btn danger";
+          btn.textContent = "Gebäude verk.";
+          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "SELL_BUILDING", pos } }));
+          btnRow.appendChild(btn);
+        }
+      }
+
+      if (canMortgage(state, pos)) {
+        const mv = mortgageValue(board, tile);
+        const btn = document.createElement("button");
+        btn.className = "prop-btn";
+        btn.textContent = `Hypothek (+${mv})`;
+        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "MORTGAGE", pos } }));
+        btnRow.appendChild(btn);
+      }
+      if (canUnmortgage(state, pos)) {
+        const mv = mortgageValue(board, tile);
+        const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
+        const btn = document.createElement("button");
+        btn.className = "prop-btn";
+        btn.textContent = `Ablösen (-${cost})`;
+        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "UNMORTGAGE", pos } }));
+        btnRow.appendChild(btn);
+      }
+      if (canSellProperty(state, pos)) {
+        const refund = Math.floor(tilePrice(board, tile) / 2);
+        const btn = document.createElement("button");
+        btn.className = "prop-btn danger";
+        btn.textContent = `Verkaufen (+${refund})`;
+        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "SELL_PROPERTY", pos } }));
+        btnRow.appendChild(btn);
+      }
+
+      if (btnRow.children.length > 0) row.appendChild(btnRow);
+      panel.appendChild(row);
+    }
+
+    show(panel, "block");
+  }
+
+  private refreshTravelPanel(state: GameState, myId: string) {
+    const panel = this.travelPanel;
+    panel.innerHTML = "";
+
+    const dests = canTravelFrom(state, myId);
+    if (dests.length === 0) { hide(panel); return; }
+
+    const board = getBoard(state.boardId);
+    const stationPositions = [5, 15, 25, 35];
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
+    title.textContent = "Reisen nach…";
+    panel.appendChild(title);
+
+    for (const dest of dests) {
+      const tile = board.tiles[dest];
+      if (!tile) continue;
+      const destOwner = state.ownership[dest];
+      let ticketCost = 0;
+      if (destOwner && destOwner !== myId) {
+        const count = stationPositions.filter((p) => state.ownership[p] === destOwner).length;
+        ticketCost = board.rules.station.travel[Math.min(count - 1, 2)] ?? 0;
+      }
+
+      const btn = document.createElement("button");
+      btn.style.cssText = "display:block;width:100%;margin:4px 0;text-align:left;";
+      btn.textContent = ticketCost > 0
+        ? `${tile.name} (${ticketCost} LPD Ticket)`
+        : `${tile.name} (kostenlos)`;
+      btn.addEventListener("click", () => {
+        this.net.send({ t: "command", command: { type: "TRAVEL", toPos: dest } });
+        hide(panel);
+      });
+      panel.appendChild(btn);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.style.cssText = "display:block;width:100%;margin-top:8px;background:#555;";
+    closeBtn.textContent = "Schließen";
+    closeBtn.addEventListener("click", () => hide(panel));
+    panel.appendChild(closeBtn);
+  }
+
+  private refreshTradePanel(state: GameState, myId: string) {
+    const panel = this.tradePanel;
+    panel.innerHTML = "";
+
+    const board = getBoard(state.boardId);
+    const alivePlayers = state.players.filter((p) => p.alive && p.id !== myId);
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:10px;";
+    title.textContent = "Tauschangebot erstellen";
+    panel.appendChild(title);
+
+    // Target player selector
+    const targetLabel = document.createElement("label");
+    targetLabel.textContent = "Anbieten an:";
+    panel.appendChild(targetLabel);
+
+    const targetSelect = document.createElement("select");
+    for (const p of alivePlayers) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      targetSelect.appendChild(opt);
+    }
+    panel.appendChild(targetSelect);
+
+    // My props to give (unbuilt, unmortgaged only)
+    const myProps = ownedPropsOf(state, myId).filter((pos) => {
+      const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+      return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+    });
+
+    const giveSection = document.createElement("div");
+    giveSection.className = "swap-section";
+    giveSection.innerHTML = `<div class="swap-label">Ich gebe (Grundstücke):</div>`;
+
+    const giveChecks = new Map<number, HTMLInputElement>();
+    for (const pos of myProps) {
+      const tile = board.tiles[pos];
+      if (!tile) continue;
+      const row = document.createElement("div");
+      row.className = "swap-check-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      const lbl = document.createElement("label");
+      lbl.textContent = tile.name;
+      row.appendChild(cb);
+      row.appendChild(lbl);
+      giveSection.appendChild(row);
+      giveChecks.set(pos, cb);
+    }
+
+    const giveMoneyRow = document.createElement("div");
+    giveMoneyRow.className = "swap-check-row";
+    const giveMoneyInput = document.createElement("input");
+    giveMoneyInput.type = "number";
+    giveMoneyInput.min = "0";
+    giveMoneyInput.value = "0";
+    giveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
+    giveMoneyInput.id = "giveMoneyInput";
+    const giveMoneyLbl = document.createElement("label");
+    giveMoneyLbl.textContent = "Geld geben:";
+    giveMoneyRow.appendChild(giveMoneyLbl);
+    giveMoneyRow.appendChild(giveMoneyInput);
+    const giveMoneyUnit = document.createElement("span");
+    giveMoneyUnit.textContent = " LPD";
+    giveMoneyRow.appendChild(giveMoneyUnit);
+    giveSection.appendChild(giveMoneyRow);
+    panel.appendChild(giveSection);
+
+    // Target props to receive
+    const receiveSection = document.createElement("div");
+    receiveSection.className = "swap-section";
+    panel.appendChild(receiveSection);
+
+    const receiveMoneySection = document.createElement("div");
+    receiveMoneySection.className = "swap-section";
+    const receiveMoneyInput = document.createElement("input");
+    receiveMoneyInput.type = "number";
+    receiveMoneyInput.min = "0";
+    receiveMoneyInput.value = "0";
+    receiveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
+    receiveMoneyInput.id = "receiveMoneyInput";
+    const recvLbl = document.createElement("label");
+    recvLbl.textContent = "Geld erhalten:";
+    const recvUnit = document.createElement("span");
+    recvUnit.textContent = " LPD";
+    receiveMoneySection.innerHTML = `<div class="swap-label">Ich erhalte (Geld):</div>`;
+    const recvMoneyRow = document.createElement("div");
+    recvMoneyRow.className = "swap-check-row";
+    recvMoneyRow.appendChild(recvLbl);
+    recvMoneyRow.appendChild(receiveMoneyInput);
+    recvMoneyRow.appendChild(recvUnit);
+    receiveMoneySection.appendChild(recvMoneyRow);
+    panel.appendChild(receiveMoneySection);
+
+    const receiveChecks = new Map<number, HTMLInputElement>();
+
+    const rebuildReceiveSection = () => {
+      const tId = targetSelect.value;
+      const targetName = targetSelect.options[targetSelect.selectedIndex]?.text ?? "?";
+      receiveSection.innerHTML = `<div class="swap-label">Ich erhalte (Grundstücke von ${targetName}):</div>`;
+      receiveChecks.clear();
+      const theirProps = ownedPropsOf(state, tId).filter((pos) => {
+        const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+        return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+      });
+      for (const pos of theirProps) {
+        const tile = board.tiles[pos];
+        if (!tile) continue;
+        const row = document.createElement("div");
+        row.className = "swap-check-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        const lbl = document.createElement("label");
+        lbl.textContent = tile.name;
+        row.appendChild(cb);
+        row.appendChild(lbl);
+        receiveSection.appendChild(row);
+        receiveChecks.set(pos, cb);
+      }
+    };
+
+    rebuildReceiveSection();
+    targetSelect.addEventListener("change", rebuildReceiveSection);
+
+    // Offer + cancel buttons
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
+
+    const offerBtn = document.createElement("button");
+    offerBtn.textContent = "Anbieten";
+    offerBtn.addEventListener("click", () => {
+      const toId = targetSelect.value;
+      const giveProps = [...giveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
+      const recvProps = [...receiveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
+      const giveMoneyVal = parseInt(giveMoneyInput.value, 10) || 0;
+      const recvMoneyVal = parseInt(receiveMoneyInput.value, 10) || 0;
+      this.net.send({
+        t: "command",
+        command: {
+          type: "PROPOSE_SWAP",
+          toId,
+          give: { props: giveProps, money: giveMoneyVal },
+          receive: { props: recvProps, money: recvMoneyVal },
+        },
+      });
+      hide(panel);
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.style.cssText = "background:#555;";
+    cancelBtn.textContent = "Abbrechen";
+    cancelBtn.addEventListener("click", () => hide(panel));
+
+    btnRow.appendChild(offerBtn);
+    btnRow.appendChild(cancelBtn);
+    panel.appendChild(btnRow);
+  }
+
+  private refreshIncomingSwapPanel(state: GameState, myId: string) {
+    const panel = this.incomingSwapPanel;
+    const swap = state.pendingSwap;
+
+    if (!swap || swap.toId !== myId) {
+      hide(panel);
+      return;
+    }
+
+    panel.innerHTML = "";
+    const board = getBoard(state.boardId);
+    const from = state.players.find((p) => p.id === swap.fromId);
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
+    title.textContent = `Tauschangebot von ${from?.name ?? "?"}`;
+    panel.appendChild(title);
+
+    const giveNames = swap.give.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
+    const recvNames = swap.receive.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
+
+    const info = document.createElement("div");
+    info.style.cssText = "font-size:12px;color:#ccc;margin-bottom:10px;";
+    info.innerHTML = `
+      <div><strong>Du gibst:</strong> ${recvNames} + ${swap.receive.money} LPD</div>
+      <div><strong>Du erhältst:</strong> ${giveNames} + ${swap.give.money} LPD</div>
+    `;
+    panel.appendChild(info);
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;";
+
+    const acceptBtn = document.createElement("button");
+    acceptBtn.textContent = "Annehmen";
+    acceptBtn.addEventListener("click", () => {
+      this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: true } });
+      hide(panel);
+    });
+
+    const declineBtn = document.createElement("button");
+    declineBtn.style.background = "#991b1b";
+    declineBtn.textContent = "Ablehnen";
+    declineBtn.addEventListener("click", () => {
+      this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: false } });
+      hide(panel);
+    });
+
+    btnRow.appendChild(acceptBtn);
+    btnRow.appendChild(declineBtn);
+    panel.appendChild(btnRow);
+
+    show(panel, "block");
   }
 }
