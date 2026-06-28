@@ -67,6 +67,11 @@ const css = `
     position: absolute; bottom: 16px; right: 16px;
     text-align: right;
   }
+  #gameHud {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #gameHud > * { pointer-events: auto; }
   #gameOverBanner {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.75);
