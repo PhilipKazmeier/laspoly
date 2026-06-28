@@ -14,6 +14,7 @@ import {
 } from "@laspoly/shared";
 import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } from "@laspoly/shared";
 import type { Net } from "./net.js";
+import { clearSession } from "./net.js";
 
 const css = `
   .panel {
@@ -216,6 +217,7 @@ export class UI {
       <select id="boardId"></select>
       <label>Bot count</label>
       <select id="botCount">
+        <option value="0">0</option>
         <option value="1">1</option>
         <option value="2">2</option>
         <option value="3" selected>3</option>
@@ -246,13 +248,14 @@ export class UI {
       const nickname = this.nicknameInput.value.trim() || "Player";
       this.myName = nickname;
       const boardId = this.boardIdSelect.value || listBoards()[0]?.id || "vegas";
-      const botCount = parseInt(this.botCountSelect.value, 10) || 3;
+      const botCount = parseInt(this.botCountSelect.value, 10);
+      const safeBotCount = Number.isNaN(botCount) ? 3 : Math.max(0, Math.min(5, botCount));
       this.net.send({
         t: "createRoom",
         name: `${nickname}'s Room`,
         nickname,
         boardId,
-        botCount,
+        botCount: safeBotCount,
       });
     });
   }
@@ -279,6 +282,7 @@ export class UI {
 
     const leaveBtn = document.getElementById("leaveRoom") as HTMLButtonElement;
     leaveBtn.addEventListener("click", () => {
+      clearSession();
       this.net.send({ t: "leaveRoom" });
       this.showLobbyPanel();
     });
@@ -415,6 +419,7 @@ export class UI {
 
     const restartBtn = document.getElementById("gameOverRestart") as HTMLButtonElement;
     restartBtn.addEventListener("click", () => {
+      clearSession();
       hide(this.gameOverBanner);
       this.net.send({ t: "listRooms" });
     });
@@ -510,7 +515,15 @@ export class UI {
     // Show start button only if we're the host
     if (this.net.playerId === room.host) {
       show(this.startGameBtn, "block");
-      this.startGameBtn.disabled = false;
+      const humanCount = room.players.filter(p => !p.isBot).length;
+      const totalPlayers = humanCount + room.botCount;
+      if (totalPlayers < 2) {
+        this.startGameBtn.disabled = true;
+        this.startGameBtn.title = "Mindestens 2 Spieler nötig";
+      } else {
+        this.startGameBtn.disabled = false;
+        this.startGameBtn.title = "";
+      }
     } else {
       hide(this.startGameBtn);
     }

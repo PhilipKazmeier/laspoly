@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   createGame,
   applyCommand,
@@ -19,6 +20,7 @@ export interface LobbyPlayer {
   nickname: string;
   isBot: boolean;
   connected: boolean;
+  token: string; // session resume token
 }
 
 let _nextRoomId = 1;
@@ -43,12 +45,30 @@ export class GameRoom {
 
   addHuman(nickname: string): string {
     const id = `h${_nextPlayerId++}`;
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true };
+    const token = randomBytes(16).toString("hex");
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
     }
     return id;
+  }
+
+  /** Returns the token for the given human playerId, or null if not found. */
+  getToken(playerId: string): string | null {
+    const p = this.players.find((p) => p.id === playerId);
+    return p?.token ?? null;
+  }
+
+  /**
+   * Validates the session token and reconnects the player.
+   * Returns the player's nickname on success, or null on failure.
+   */
+  resumeHuman(playerId: string, token: string): string | null {
+    const p = this.players.find((pp) => pp.id === playerId && !pp.isBot);
+    if (!p || p.token !== token) return null;
+    p.connected = true;
+    return p.nickname;
   }
 
   removeHuman(playerId: string): void {
@@ -77,7 +97,7 @@ export class GameRoom {
     // Add bot lobby entries
     for (let i = 0; i < botsNeeded; i++) {
       const id = `b${_nextPlayerId++}`;
-      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false });
+      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "" });
     }
 
     const allPlayers = this.players.map((p, idx) => ({

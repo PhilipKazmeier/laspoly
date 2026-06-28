@@ -38,7 +38,8 @@ export type ClientMessage =
   | { t: "startGame" }
   | { t: "command"; command: Command }
   | { t: "chat"; text: string }
-  | { t: "listRooms" };
+  | { t: "listRooms" }
+  | { t: "resume"; roomId: string; playerId: string; token: string };
 
 export interface FormattedEvent {
   key: string;
@@ -48,9 +49,10 @@ export interface FormattedEvent {
 
 export type ServerMessage =
   | { t: "rooms"; rooms: RoomSummary[] }
-  | { t: "joined"; roomId: string; playerId: string }
+  | { t: "joined"; roomId: string; playerId: string; token: string }
   | { t: "room"; room: RoomView }
   | { t: "state"; state: GameState; events: FormattedEvent[] }
   | { t: "chat"; from: string; text: string }
   | { t: "error"; message: string }
-  | { t: "gameOver"; winnerId: string; winnerName: string };
+  | { t: "gameOver"; winnerId: string; winnerName: string }
+  | { t: "resumed"; roomId: string; playerId: string };

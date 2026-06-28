@@ -4,6 +4,32 @@ const WS_URL = `ws://${location.hostname}:8080`;
 
 type Handler = (msg: ServerMessage) => void;
 
+export interface SavedSession {
+  roomId: string;
+  playerId: string;
+  token: string;
+}
+
+const SESSION_KEY = "laspoly_session";
+
+export function loadSession(): SavedSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as SavedSession;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(s: SavedSession): void {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+}
+
+export function clearSession(): void {
+  localStorage.removeItem(SESSION_KEY);
+}
+
 export class Net {
   private ws: WebSocket;
   private handlers: Handler[] = [];
@@ -13,7 +39,13 @@ export class Net {
     this.ws = new WebSocket(url);
     this.ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data as string) as ServerMessage;
-      if (msg.t === "joined") this.playerId = msg.playerId;
+      if (msg.t === "joined") {
+        this.playerId = msg.playerId;
+        saveSession({ roomId: msg.roomId, playerId: msg.playerId, token: msg.token });
+      }
+      if (msg.t === "resumed") {
+        this.playerId = msg.playerId;
+      }
       for (const h of this.handlers) h(msg);
     };
   }

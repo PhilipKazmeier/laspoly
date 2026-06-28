@@ -112,4 +112,26 @@ describe("GameRoom", () => {
     expect(view.host).toBe(playerId);
     expect(view.players).toHaveLength(1);
   });
+
+  it("issues a token on addHuman and resume validates it", () => {
+    const { room, playerId } = makeRoom(1);
+    const token = room.getToken(playerId);
+    expect(token).toBeTruthy();
+    expect(typeof token).toBe("string");
+    expect(token!.length).toBe(32); // 16 bytes hex
+
+    // Wrong token should fail
+    expect(room.resumeHuman(playerId, "badtoken")).toBeNull();
+
+    // Correct token should succeed
+    room.start(1);
+    // Mark disconnected first (simulates reload)
+    room.removeHuman(playerId);
+    const p = room.players.find(pp => pp.id === playerId);
+    expect(p?.connected).toBe(false);
+
+    const nickname = room.resumeHuman(playerId, token!);
+    expect(nickname).toBe("Alice");
+    expect(p?.connected).toBe(true);
+  });
 });
