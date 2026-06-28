@@ -768,6 +768,10 @@ export class Board3D {
   // Public update (called on every GameState message)
   // -------------------------------------------------------------------------
   update(state: GameState, _myId: string | null) {
+    // Diff against the previous state to drive animations BEFORE meshes are
+    // repositioned. (FormattedEvent carries no params, so we read the data we
+    // need straight from the authoritative GameState.)
+    this.applyStateDiffs(state);
     this.lastState = state;
     this.lastMyId = _myId;
     this.drawBoard(state.boardId);
@@ -775,28 +779,49 @@ export class Board3D {
     this.updateBuildings(state);
   }
 
-  // -------------------------------------------------------------------------
-  // Event-driven animations (movement, dice)
-  // -------------------------------------------------------------------------
-  handleEvents(events: FormattedEvent[]) {
-    for (const ev of events) {
-      if (ev.key === "rolled") {
-        const d1 = Number(ev.params?.["d1"] ?? 1);
-        const d2 = Number(ev.params?.["d2"] ?? 1);
-        this.playDiceAnimation(d1, d2);
-      } else if (ev.key === "moved" && ev.playerId) {
-        const destPos = Number(ev.params?.["pos"] ?? -1);
-        if (destPos < 0) continue;
-        const prevPos = this.prevPositions.get(ev.playerId) ?? -1;
-        if (prevPos >= 0 && prevPos !== destPos) {
-          this.enqueueMove(ev.playerId, prevPos, destPos);
+  /**
+   * Called by main.ts with the just-arrived FormattedEvent batch.
+   * FormattedEvent only carries {key, text, playerId}; the movement and dice
+   * data we need is read from the authoritative GameState in applyStateDiffs()
+   * (invoked from update()). This hook is retained as the documented entry
+   * point for event-keyed board effects and is intentionally a no-op for now.
+   */
+  handleEvents(_events: FormattedEvent[]) {
+    // Animations are driven by state diffs in update()/applyStateDiffs().
+    void _events;
+  }
+
+  /** Detect per-player position changes and enqueue movement / jail animations. */
+  private applyStateDiffs(state: GameState) {
+    // Dice: trigger on any player's lastRoll changing (covers bots too).
+    if (this.lastState) {
+      for (const p of state.players) {
+        const prev = this.lastState.players.find((pl) => pl.id === p.id);
+        if (p.lastRoll[0] > 0 && prev && (prev.lastRoll[0] !== p.lastRoll[0] || prev.lastRoll[1] !== p.lastRoll[1])) {
+          this.playDiceAnimation(p.lastRoll[0], p.lastRoll[1]);
         }
-        this.prevPositions.set(ev.playerId, destPos);
-      } else if ((ev.key === "wentToJail" || ev.key === "actionCardMoveJail") && ev.playerId) {
-        const prevPos = this.prevPositions.get(ev.playerId) ?? -1;
-        if (prevPos >= 0) this.enqueueJailAnimation(ev.playerId);
-        this.prevPositions.set(ev.playerId, JAIL_POS);
       }
+    }
+
+    for (const p of state.players) {
+      const prevPos = this.prevPositions.get(p.id);
+      const newPos = p.inJail ? JAIL_POS : p.position;
+      if (prevPos === undefined) {
+        this.prevPositions.set(p.id, newPos);
+        continue;
+      }
+      if (prevPos === newPos) continue;
+
+      if (newPos === JAIL_POS) {
+        this.enqueueJailAnimation(p.id);
+      } else if (prevPos === JAIL_POS) {
+        // Leaving jail: single slide to the destination tile.
+        this.moveQueues.set(p.id, [...(this.moveQueues.get(p.id) ?? []), tileXZ(newPos)]);
+        if (!this.moveAnimating.has(p.id)) this.driveAnimation(p.id);
+      } else {
+        this.enqueueMove(p.id, prevPos, newPos);
+      }
+      this.prevPositions.set(p.id, newPos);
     }
   }
 
