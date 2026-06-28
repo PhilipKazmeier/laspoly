@@ -4,7 +4,7 @@ import { UI } from "./ui.js";
 
 const net = new Net();
 const board3d = new Board3D(document.getElementById("renderCanvas") as HTMLCanvasElement);
-const ui = new UI(document.getElementById("ui") as HTMLDivElement, net);
+const ui = new UI(document.getElementById("ui") as HTMLDivElement, net, board3d);
 
 // Track whether we are attempting a session resume (suppress initial lobby flash)
 let resuming = false;

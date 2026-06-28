@@ -14,6 +14,7 @@ import {
 } from "@laspoly/shared";
 import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } from "@laspoly/shared";
 import type { Net } from "./net.js";
+import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
 
 const css = `
@@ -92,12 +93,18 @@ const css = `
   }
   #buyOfferPanel {
     position: absolute; bottom: 100px; right: 16px;
-    width: 250px;
-    background: rgba(10,10,30,0.92); border: 2px solid #facc15;
-    border-radius: 8px; padding: 14px;
-    color: #eee;
+    width: 260px;
+    background: rgba(10,10,30,0.95); border: 2px solid #facc15;
+    border-radius: 10px; padding: 0;
+    color: #eee; overflow: hidden;
   }
-  #buyOfferPanel h3 { color: #facc15; margin: 0 0 8px; font-size: 14px; }
+  #buyOfferPanel .buy-header {
+    background: #facc15; color: #1a1a2e;
+    font-weight: bold; font-size: 13px;
+    padding: 8px 14px;
+  }
+  #buyOfferPanel .buy-body { padding: 10px 14px; }
+  #buyOfferPanel h3 { color: #facc15; margin: 0 0 6px; font-size: 14px; display: none; }
   #buyOfferPanel .buy-detail { font-size: 12px; color: #ccc; margin: 3px 0; }
   #buyOfferPanel .buy-btns { display:flex; gap:8px; margin-top:10px; }
   #eventLogPanel {
@@ -133,7 +140,7 @@ const css = `
   }
   #gameOverBanner h1 { font-size: 2.5rem; color: #facc15; }
   #spectatorBanner {
-    position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
     background: rgba(100,0,0,0.7); padding: 8px 20px; border-radius: 8px;
     font-size: 14px;
   }
@@ -189,6 +196,73 @@ const css = `
   .swap-section { margin: 8px 0; padding: 6px; background: rgba(255,255,255,0.05); border-radius: 4px; }
   .swap-label { font-size: 12px; color: #aaa; margin-bottom: 4px; }
   .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
+  #gameHeader {
+    position: absolute; top: 0; left: 0; width: 100%; height: 48px;
+    background: linear-gradient(to bottom, #c2410c, #ea580c);
+    border-bottom: 2px solid #f97316;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px;
+    box-sizing: border-box;
+    z-index: 50;
+    pointer-events: none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  #gameHeader > * { pointer-events: auto; }
+  #headerLeft { display: flex; flex-direction: column; gap: 1px; min-width: 160px; }
+  #headerLeft .room-label { font-size: 13px; font-weight: bold; color: #fff; line-height: 1.2; }
+  #headerLeft .board-label { font-size: 11px; color: rgba(255,255,255,0.75); line-height: 1.2; }
+  #headerCenter { flex: 1; text-align: center; padding: 0 8px; }
+  #headerTurnStatus {
+    font-size: 15px; font-weight: bold; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    line-height: 1.2;
+  }
+  #headerRound { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 1px; }
+  #headerEvent { font-size: 11px; color: #fde68a; margin-top: 1px; }
+  #headerRight { display: flex; align-items: center; gap: 6px; min-width: 200px; justify-content: flex-end; }
+  .hdr-btn {
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3);
+    color: #fff; border-radius: 5px; padding: 4px 8px;
+    font-size: 12px; cursor: pointer; white-space: nowrap;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  .hdr-btn:hover { background: rgba(0,0,0,0.45); }
+  #headerVersion { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 4px; }
+  #turnToast {
+    position: absolute; bottom: 90px; right: 16px;
+    background: rgba(15, 15, 35, 0.92);
+    border: 1px solid #f97316;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #fff;
+    max-width: 240px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 60;
+  }
+  #turnToast.visible { opacity: 1; }
+  #helpOverlay {
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    width: 320px;
+    background: rgba(10,10,30,0.95); border: 1px solid #f97316;
+    border-radius: 8px; padding: 16px;
+    color: #eee; font-size: 13px; line-height: 1.6;
+    z-index: 80;
+  }
+  #helpOverlay h3 { color: #f97316; margin: 0 0 10px; font-size: 14px; }
+  #helpOverlay ul { margin: 0; padding-left: 18px; }
+  #helpOverlay li { margin: 4px 0; }
+  #settingsOverlay {
+    position: absolute; top: 56px; right: 12px;
+    width: 200px;
+    background: rgba(10,10,30,0.95); border: 1px solid #444;
+    border-radius: 8px; padding: 12px;
+    color: #eee; font-size: 13px;
+    z-index: 80;
+  }
+  #settingsOverlay label { color: #aaa; font-size: 12px; margin-top: 6px; }
 `;
 
 function show(el: HTMLElement, displayValue = "block") {
@@ -202,6 +276,9 @@ function hide(el: HTMLElement) {
 export class UI {
   private root: HTMLDivElement;
   private net: Net;
+  private board3d: Board3D;
+  private currentView: 'standard' | 'top' = 'standard';
+  private currentRoom: { name: string; boardId: string } | null = null;
 
   // Lobby elements
   private lobby!: HTMLDivElement;
@@ -239,10 +316,20 @@ export class UI {
   private actionCardTimer: ReturnType<typeof setTimeout> | null = null;
   private buyOfferPanel!: HTMLDivElement;
   private specialEventBanner!: HTMLDivElement;
+  private gameHeader!: HTMLDivElement;
+  private headerTurnStatus!: HTMLDivElement;
+  private headerRound!: HTMLDivElement;
+  private headerEvent!: HTMLDivElement;
+  private headerViewBtn!: HTMLButtonElement;
+  private turnToast!: HTMLDivElement;
+  private turnToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private helpOverlay!: HTMLDivElement;
+  private settingsOverlay!: HTMLDivElement;
 
-  constructor(root: HTMLDivElement, net: Net) {
+  constructor(root: HTMLDivElement, net: Net, board3d: Board3D) {
     this.root = root;
     this.net = net;
+    this.board3d = board3d;
     this.injectStyles();
     this.buildLobby();
     this.buildRoomPanel();
@@ -433,6 +520,167 @@ export class UI {
     hide(eventBanner);
     hud.appendChild(eventBanner);
     this.specialEventBanner = eventBanner;
+
+    this.buildGameHeader();
+    this.buildTurnToast();
+  }
+
+  private buildGameHeader() {
+    const hdr = document.createElement("div");
+    hdr.id = "gameHeader";
+
+    // Left: room name + board name
+    const left = document.createElement("div");
+    left.id = "headerLeft";
+    left.innerHTML = `
+      <div class="room-label" id="headerRoomLabel">LasPoly</div>
+      <div class="board-label" id="headerBoardLabel">—</div>
+    `;
+    hdr.appendChild(left);
+
+    // Center: turn status + round + event
+    const center = document.createElement("div");
+    center.id = "headerCenter";
+    center.innerHTML = `
+      <div id="headerTurnStatus"></div>
+      <div id="headerRound"></div>
+      <div id="headerEvent"></div>
+    `;
+    hdr.appendChild(center);
+    this.headerTurnStatus = center.querySelector("#headerTurnStatus") as HTMLDivElement;
+    this.headerRound = center.querySelector("#headerRound") as HTMLDivElement;
+    this.headerEvent = center.querySelector("#headerEvent") as HTMLDivElement;
+
+    // Right: view toggle, settings, help, leave, version
+    const right = document.createElement("div");
+    right.id = "headerRight";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.className = "hdr-btn";
+    viewBtn.id = "headerViewBtn";
+    viewBtn.textContent = "🗺 Standard-Ansicht";
+    viewBtn.addEventListener("click", () => {
+      if (this.currentView === "standard") {
+        this.currentView = "top";
+        viewBtn.textContent = "🗺 Vogel-Ansicht";
+        this.board3d.setView("top");
+      } else {
+        this.currentView = "standard";
+        viewBtn.textContent = "🗺 Standard-Ansicht";
+        this.board3d.setView("standard");
+      }
+    });
+    this.headerViewBtn = viewBtn;
+    right.appendChild(viewBtn);
+
+    const settingsBtn = document.createElement("button");
+    settingsBtn.className = "hdr-btn";
+    settingsBtn.textContent = "⚙";
+    settingsBtn.title = "Einstellungen";
+    settingsBtn.addEventListener("click", () => {
+      const visible = this.settingsOverlay.style.display !== "none";
+      if (visible) hide(this.settingsOverlay);
+      else show(this.settingsOverlay, "block");
+      hide(this.helpOverlay);
+    });
+    right.appendChild(settingsBtn);
+
+    const helpBtn = document.createElement("button");
+    helpBtn.className = "hdr-btn";
+    helpBtn.textContent = "?";
+    helpBtn.title = "Hilfe";
+    helpBtn.addEventListener("click", () => {
+      const visible = this.helpOverlay.style.display !== "none";
+      if (visible) hide(this.helpOverlay);
+      else show(this.helpOverlay, "block");
+      hide(this.settingsOverlay);
+    });
+    right.appendChild(helpBtn);
+
+    const leaveBtn = document.createElement("button");
+    leaveBtn.className = "hdr-btn";
+    leaveBtn.textContent = "✕ Verlassen";
+    leaveBtn.style.background = "rgba(153,27,27,0.6)";
+    leaveBtn.addEventListener("click", () => {
+      clearSession();
+      this.net.send({ t: "leaveRoom" });
+      hide(this.gameHud);
+      hide(this.helpOverlay);
+      hide(this.settingsOverlay);
+      this.net.send({ t: "listRooms" });
+    });
+    right.appendChild(leaveBtn);
+
+    const ver = document.createElement("span");
+    ver.id = "headerVersion";
+    ver.textContent = `v${VERSION}`;
+    right.appendChild(ver);
+
+    hdr.appendChild(right);
+    this.gameHud.appendChild(hdr);
+    this.gameHeader = hdr;
+
+    // Help overlay (non-modal, toggled)
+    const help = document.createElement("div");
+    help.id = "helpOverlay";
+    help.innerHTML = `
+      <h3>Spielregeln &amp; Steuerung</h3>
+      <ul>
+        <li><strong>Würfeln:</strong> Klick auf „Würfeln"</li>
+        <li><strong>Kaufen:</strong> Kaufangebot erscheint rechts – „Kaufen" oder „Ablehnen"</li>
+        <li><strong>Bauen:</strong> Dein Grundstück → Haus/Hotel/Fabrik-Taste</li>
+        <li><strong>Tauschen:</strong> „Tauschen" in der Grundstücksliste</li>
+        <li><strong>Reisen:</strong> Von einem Bahnhof aus „Reisen nach…"</li>
+        <li><strong>Ansicht:</strong> Schaltfläche oben rechts wechselt zwischen Schräg- und Vogelperspektive</li>
+        <li><strong>Chat:</strong> Eingabefeld unten links</li>
+      </ul>
+    `;
+    hide(help);
+    this.gameHud.appendChild(help);
+    this.helpOverlay = help;
+
+    // Settings overlay (non-modal, toggled)
+    const settings = document.createElement("div");
+    settings.id = "settingsOverlay";
+    settings.innerHTML = `
+      <div style="font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;">Einstellungen</div>
+      <label>Sprache / Locale</label>
+      <div style="display:flex;gap:6px;margin-top:4px;">
+        <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;background:rgba(255,255,255,0.25);">🇩🇪 DE</button>
+        <button id="localeENBtn" class="hdr-btn" style="font-size:12px;">🇬🇧 EN</button>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#888;">Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.</div>
+    `;
+    hide(settings);
+    this.gameHud.appendChild(settings);
+    this.settingsOverlay = settings;
+
+    // Wire locale buttons as visual-only toggle (server formats events)
+    settings.querySelector("#localeDEBtn")!.addEventListener("click", () => {
+      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background = "rgba(255,255,255,0.25)";
+      (settings.querySelector("#localeENBtn") as HTMLElement).style.background = "";
+    });
+    settings.querySelector("#localeENBtn")!.addEventListener("click", () => {
+      (settings.querySelector("#localeENBtn") as HTMLElement).style.background = "rgba(255,255,255,0.25)";
+      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background = "";
+    });
+  }
+
+  private buildTurnToast() {
+    const toast = document.createElement("div");
+    toast.id = "turnToast";
+    this.gameHud.appendChild(toast);
+    this.turnToast = toast;
+  }
+
+  private showToast(text: string) {
+    this.turnToast.textContent = text;
+    this.turnToast.classList.add("visible");
+    if (this.turnToastTimer) clearTimeout(this.turnToastTimer);
+    this.turnToastTimer = setTimeout(() => {
+      this.turnToast.classList.remove("visible");
+      this.turnToastTimer = null;
+    }, 3000);
   }
 
   private buildMyPropsPanel() {
@@ -541,13 +789,15 @@ export class UI {
     const panel = document.createElement("div");
     panel.id = "buyOfferPanel";
     panel.innerHTML = `
-      <h3>Kaufangebot</h3>
-      <div class="buy-detail" id="buyTileName">—</div>
-      <div class="buy-detail" id="buyPrice">Preis: —</div>
-      <div class="buy-detail" id="buyBalance">Guthaben: —</div>
-      <div class="buy-btns">
-        <button id="buyOfferBuyBtn" style="background:#16a34a;">Kaufen</button>
-        <button id="buyOfferDeclineBtn" style="background:#991b1b;">Ablehnen</button>
+      <div class="buy-header">Kaufangebot</div>
+      <div class="buy-body">
+        <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:#facc15;margin-bottom:6px;font-size:13px;">—</div>
+        <div class="buy-detail" id="buyPrice">Preis: —</div>
+        <div class="buy-detail" id="buyBalance">Dein Kapital: —</div>
+        <div class="buy-btns">
+          <button id="buyOfferBuyBtn" style="background:#16a34a;flex:1;">Kaufen</button>
+          <button id="buyOfferDeclineBtn" style="background:#991b1b;flex:1;">Ablehnen</button>
+        </div>
       </div>
     `;
     hide(panel);
@@ -668,6 +918,7 @@ export class UI {
 
   showRoom(room: RoomView) {
     this.currentHostId = room.host;
+    this.currentRoom = { name: room.name, boardId: room.boardId };
     hide(this.lobby);
     show(this.roomPanel);
     hide(this.gameHud);
@@ -706,6 +957,35 @@ export class UI {
     const me = myId ? state.players.find(p => p.id === myId) : null;
     const amAlive = me?.alive ?? false;
 
+    // Update header bar
+    if (this.gameHeader) {
+      const roomLabel = document.getElementById("headerRoomLabel");
+      const boardLabel = document.getElementById("headerBoardLabel");
+      if (roomLabel && this.currentRoom) roomLabel.textContent = this.currentRoom.name;
+      if (boardLabel) boardLabel.textContent = state.boardId;
+
+      const turnText = isMyTurn && amAlive
+        ? "Du bist am Zug"
+        : `${currentPlayer?.name ?? "?"} ist am Zug`;
+      this.headerTurnStatus.textContent = turnText;
+      this.headerRound.textContent = `Runde ${state.round}`;
+
+      // Special event label in header
+      if (state.activeEvent) {
+        const eventLabels: Record<string, string> = {
+          circus: '🎪 Zirkus in der Stadt',
+          boom: '📈 Wirtschaftsboom',
+          recession: '📉 Rezession',
+          jackpot: '🎰 Casino-Jackpot-Nacht',
+          buildingSale: '🏗️ Bau-Rabatt',
+          quietDay: '😴 Ruhiger Tag',
+        };
+        this.headerEvent.textContent = eventLabels[state.activeEvent.id] ?? state.activeEvent.id;
+      } else {
+        this.headerEvent.textContent = '';
+      }
+    }
+
     // Update player list
     this.playerList.innerHTML = "";
     for (let i = 0; i < state.players.length; i++) {
@@ -731,6 +1011,12 @@ export class UI {
     if (isMyTurn && !this.wasMyTurn && amAlive) {
       const name = me?.name ?? this.myName ?? "Du";
       this.appendEventLine(`${name} ist an der Reihe.`);
+      this.showToast("Du bist am Zug");
+    } else if (!isMyTurn && this.wasMyTurn) {
+      // Our turn just ended — show whose turn it is now
+      if (currentPlayer) {
+        this.showToast(`${currentPlayer.name} ist am Zug`);
+      }
     }
     this.wasMyTurn = isMyTurn && amAlive;
 
@@ -761,7 +1047,7 @@ export class UI {
       const balanceEl = document.getElementById("buyBalance");
       if (tileNameEl) tileNameEl.textContent = tile?.name ?? "—";
       if (priceEl) priceEl.textContent = `Preis: ${price} LPD`;
-      if (balanceEl) balanceEl.textContent = `Guthaben: ${me?.money ?? 0} LPD`;
+      if (balanceEl) balanceEl.textContent = `Dein Kapital: ${me?.money ?? 0} LPD`;
       show(this.buyOfferPanel, "block");
     } else {
       hide(this.buyOfferPanel);
@@ -774,22 +1060,8 @@ export class UI {
       hide(this.spectatorBanner);
     }
 
-    // Special event banner
-    if (state.activeEvent) {
-      const labels: Record<string, string> = {
-        circus: '🎪 Zirkus in der Stadt',
-        boom: '📈 Wirtschaftsboom',
-        recession: '📉 Rezession',
-        jackpot: '🎰 Casino-Jackpot-Nacht',
-        buildingSale: '🏗️ Bau-Rabatt',
-        quietDay: '😴 Ruhiger Tag',
-      };
-      const label = labels[state.activeEvent.id] ?? state.activeEvent.id;
-      this.specialEventBanner.textContent = `Runde ${state.round}: ${label}`;
-      show(this.specialEventBanner, 'block');
-    } else {
-      hide(this.specialEventBanner);
-    }
+    // Special event banner (replaced by header center display)
+    hide(this.specialEventBanner);
 
     // Incoming swap panel (visible regardless of whose turn it is)
     if (myId) {
