@@ -14,6 +14,7 @@ import { makeRng, nextInt, rollDie, shuffle } from "./rng.js";
 import type {
   Buildings,
   Command,
+  EventId,
   GameEvent,
   GameState,
   NewGameOptions,
@@ -23,6 +24,22 @@ import type {
 } from "./types.js";
 
 const GO_TO_JAIL_POS = 30;
+
+// ---- special events -------------------------------------------------------
+
+const EVENT_IDS: EventId[] = [
+  'circus',
+  'boom',
+  'recession',
+  'jackpot',
+  'buildingSale',
+  'quietDay',
+];
+
+function drawEvent(state: GameState): { id: EventId } {
+  const idx = nextInt(state.rng, 0, EVENT_IDS.length - 1);
+  return { id: EVENT_IDS[idx]! };
+}
 
 // ---- Action card definitions -----------------------------------------------
 
@@ -94,7 +111,9 @@ export function createGame(opts: NewGameOptions): GameState {
     color: p.color,
   }));
   const rng = makeRng(opts.seed);
-  // Action deck starts in sorted order; it will be shuffled on first draw (in drawActionCard)
+  // Draw the first round's event before building state so it consumes the RNG in order
+  const firstEventIdx = nextInt(rng, 0, EVENT_IDS.length - 1);
+  const firstEvent: { id: EventId } = { id: EVENT_IDS[firstEventIdx]! };
   const actionDeck: number[] = [];
   return {
     boardId: opts.boardId,
@@ -114,6 +133,8 @@ export function createGame(opts: NewGameOptions): GameState {
     actionDeck,
     actionDiscard: [],
     pendingSwap: null,
+    round: 1,
+    activeEvent: firstEvent,
   };
 }
 
@@ -308,11 +329,18 @@ function streetRent(state: GameState, board: BoardDefinition, pos: number): numb
   const b = state.buildings[pos];
   const ownerId = state.ownership[pos]!;
   if (b?.factory) return 0; // factory pays its owner, never charges visitors
-  if (b?.hotel) return tile.rent[5];
-  if (b && b.houses > 0) return tile.rent[b.houses]!; // rent[1..4]
+  if (b?.hotel) {
+    const r = tile.rent[5];
+    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+  }
+  if (b && b.houses > 0) {
+    const r = tile.rent[b.houses]!;
+    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+  }
   // no buildings: base rent, doubled if owner holds the whole colour group
   const base = tile.rent[0];
-  return ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
+  const fullGroupRent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
+  return state.activeEvent?.id === 'recession' ? Math.floor(fullGroupRent / 2) : fullGroupRent;
 }
 
 function stationRent(state: GameState, board: BoardDefinition, pos: number): number {
@@ -323,9 +351,10 @@ function stationRent(state: GameState, board: BoardDefinition, pos: number): num
 
 function attractionRent(state: GameState, board: BoardDefinition, pos: number, diceSum: number): number {
   const ownerId = state.ownership[pos]!;
-  const both = ownsWholeGroup(state, board, ownerId, "attraction");
+  const both = ownsWholeGroup(state, board, ownerId, 'attraction');
   const factor = both ? board.rules.attraction.factorBoth : board.rules.attraction.factorOne;
-  return diceSum * factor;
+  const base = diceSum * factor;
+  return state.activeEvent?.id === 'circus' ? base * 2 : base;
 }
 
 // ---- money / bankruptcy --------------------------------------------------
@@ -624,12 +653,17 @@ function resolveLanding(
 function resolveCasino(state: GameState, board: BoardDefinition, player: PlayerState, events: GameEvent[]): void {
   const [d1, d2] = player.lastRoll;
   if (d1 >= 1 && d1 === d2) {
-    const share = d1 === 6 ? Math.floor(state.casinoPool / 2) : Math.floor(state.casinoPool / 4);
-    player.money += share;
-    state.casinoPool -= share;
-    events.push({ key: "casinoWin", params: { player: player.name, amount: share }, playerId: player.id });
+    const baseFraction = d1 === 6 ? 2 : 4; // pool / 2 or pool / 4
+    const rawShare = Math.floor(state.casinoPool / baseFraction);
+    const share = state.activeEvent?.id === 'jackpot'
+      ? Math.floor(rawShare * 1.5)
+      : rawShare;
+    const actualShare = Math.min(share, state.casinoPool); // never exceed pool
+    player.money += actualShare;
+    state.casinoPool -= actualShare;
+    events.push({ key: 'casinoWin', params: { player: player.name, amount: actualShare }, playerId: player.id });
   } else {
-    events.push({ key: "casinoNoWin", params: { player: player.name }, playerId: player.id });
+    events.push({ key: 'casinoNoWin', params: { player: player.name }, playerId: player.id });
   }
 }
 
@@ -649,16 +683,19 @@ function moveBy(state: GameState, board: BoardDefinition, player: PlayerState, s
   player.position = to;
   // passed or landed on GO (wrapped past 0)
   if (to < from || steps >= 40) {
+    const boomMult = state.activeEvent?.id === 'boom' ? 2 : 1;
     if (to === 0) {
-      player.money += board.rules.goLandMoney;
-      events.push({ key: "goLanded", params: { player: player.name, amount: board.rules.goLandMoney }, playerId: player.id });
+      const amount = board.rules.goLandMoney * boomMult;
+      player.money += amount;
+      events.push({ key: 'goLanded', params: { player: player.name, amount }, playerId: player.id });
     } else {
-      player.money += board.rules.goPassMoney;
-      events.push({ key: "goPassed", params: { player: player.name, amount: board.rules.goPassMoney }, playerId: player.id });
+      const amount = board.rules.goPassMoney * boomMult;
+      player.money += amount;
+      events.push({ key: 'goPassed', params: { player: player.name, amount }, playerId: player.id });
     }
   }
   const tile = tileAt(board, to);
-  events.push({ key: "moved", params: { player: player.name, tile: tile.name, pos: to }, playerId: player.id });
+  events.push({ key: 'moved', params: { player: player.name, tile: tile.name, pos: to }, playerId: player.id });
 }
 
 /** Move out of jail re-entering the track from GO (no GO bonus), then resolve. */
@@ -704,11 +741,23 @@ function continueOrAdvance(state: GameState, events: GameEvent[]): void {
     return;
   }
   // pass turn
+  const oldIdx = state.currentPlayerIndex;
   state.doublesCount = 0;
   state.extraRoll = false;
   state.currentPlayerIndex = nextAliveIndex(state);
   state.turn += 1;
   state.phase = "awaiting-roll";
+
+  // Round boundary: index wrapped (new index <= old, meaning we cycled past the end)
+  if (state.currentPlayerIndex <= oldIdx) {
+    state.round += 1;
+    state.activeEvent = drawEvent(state);
+    events.push({
+      key: `specialEvent_${state.activeEvent.id}` as string,
+      params: {},
+    });
+  }
+
   const next = currentPlayer(state);
   events.push({ key: "nextTurn", params: { player: next.name }, playerId: next.id });
 }
@@ -824,28 +873,37 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
       const b = state.buildings[pos]!;
 
-      if (command.building === "house") {
-        if (!canConstructHouse(state, board, pos)) throw new Error("Cannot build house here (even-build rule or other restriction)");
-        if (p.money < st.houseCost) throw new Error("Cannot afford house");
-        p.money -= st.houseCost;
+      if (command.building === 'house') {
+        if (!canConstructHouse(state, board, pos)) throw new Error('Cannot build house here (even-build rule or other restriction)');
+        const cost = state.activeEvent?.id === 'buildingSale'
+          ? Math.floor(st.houseCost / 2)
+          : st.houseCost;
+        if (p.money < cost) throw new Error('Cannot afford house');
+        p.money -= cost;
         b.houses += 1;
-        events.push({ key: "built", params: { player: p.name, building: "house", tile: st.name, amount: st.houseCost }, playerId: p.id });
-      } else if (command.building === "hotel") {
-        if (!canConstructHotel(state, board, pos)) throw new Error("Cannot build hotel here");
-        if (p.money < st.hotelCost) throw new Error("Cannot afford hotel");
-        p.money -= st.hotelCost;
+        events.push({ key: 'built', params: { player: p.name, building: 'house', tile: st.name, amount: cost }, playerId: p.id });
+      } else if (command.building === 'hotel') {
+        if (!canConstructHotel(state, board, pos)) throw new Error('Cannot build hotel here');
+        const cost = state.activeEvent?.id === 'buildingSale'
+          ? Math.floor(st.hotelCost / 2)
+          : st.hotelCost;
+        if (p.money < cost) throw new Error('Cannot afford hotel');
+        p.money -= cost;
         b.houses = 0;
         b.hotel = true;
         b.factory = false;
-        events.push({ key: "built", params: { player: p.name, building: "hotel", tile: st.name, amount: st.hotelCost }, playerId: p.id });
-      } else if (command.building === "factory") {
-        if (!canConstructFactory(state, board, pos)) throw new Error("Cannot build factory here");
-        if (p.money < st.factoryCost) throw new Error("Cannot afford factory");
-        p.money -= st.factoryCost;
+        events.push({ key: 'built', params: { player: p.name, building: 'hotel', tile: st.name, amount: cost }, playerId: p.id });
+      } else if (command.building === 'factory') {
+        if (!canConstructFactory(state, board, pos)) throw new Error('Cannot build factory here');
+        const cost = state.activeEvent?.id === 'buildingSale'
+          ? Math.floor(st.factoryCost / 2)
+          : st.factoryCost;
+        if (p.money < cost) throw new Error('Cannot afford factory');
+        p.money -= cost;
         b.houses = 0;
         b.hotel = false;
         b.factory = true;
-        events.push({ key: "built", params: { player: p.name, building: "factory", tile: st.name, amount: st.factoryCost }, playerId: p.id });
+        events.push({ key: 'built', params: { player: p.name, building: 'factory', tile: st.name, amount: cost }, playerId: p.id });
       }
       // BUILD does not advance the turn
       break;
