@@ -50,6 +50,12 @@ const de: Catalogue = {
   swapAccepted: "{to} nimmt das Tauschangebot von {from} an: {giveProps} + {giveMoney} LPD gegen {receiveProps} + {receiveMoney} LPD.",
   swapDeclined: "{to} lehnt das Tauschangebot von {from} ab.",
   swapFailed: "Tausch zwischen {from} und {to} ist fehlgeschlagen ({reason}).",
+  specialEvent_circus: '🎪 Runde {round}: Der Zirkus ist in der Stadt! Attraktionsmieten sind diese Runde verdoppelt.',
+  specialEvent_boom: '📈 Runde {round}: Wirtschaftsboom! Los-Auszahlungen sind diese Runde verdoppelt.',
+  specialEvent_recession: '📉 Runde {round}: Rezession! Straßenmieten sind diese Runde halbiert.',
+  specialEvent_jackpot: '🎰 Runde {round}: Casino-Jackpot-Nacht! Casinogewinne sind diese Runde 50 % höher.',
+  specialEvent_buildingSale: '🏗️ Runde {round}: Bau-Rabatt! Gebäudekosten sind diese Runde halbiert.',
+  specialEvent_quietDay: '😴 Runde {round}: Ruhiger Tag. Keine besonderen Ereignisse.',
 };
 
 const en: Catalogue = {
@@ -98,6 +104,12 @@ const en: Catalogue = {
   swapAccepted: "{to} accepts {from}'s swap offer: {giveProps} + {giveMoney} LPD for {receiveProps} + {receiveMoney} LPD.",
   swapDeclined: "{to} declines {from}'s swap offer.",
   swapFailed: "Swap between {from} and {to} failed ({reason}).",
+  specialEvent_circus: '🎪 Round {round}: The circus is in town! Attraction rents are doubled this round.',
+  specialEvent_boom: '📈 Round {round}: Economic boom! GO payouts are doubled this round.',
+  specialEvent_recession: '📉 Round {round}: Recession! Street rents are halved this round.',
+  specialEvent_jackpot: '🎰 Round {round}: Casino Jackpot Night! Casino winnings are 50% higher this round.',
+  specialEvent_buildingSale: '🏗️ Round {round}: Building Sale! Construction costs are halved this round.',
+  specialEvent_quietDay: '😴 Round {round}: Quiet Day. No special effects.',
 };
 
 const catalogues: Record<Locale, Catalogue> = { de, en };
