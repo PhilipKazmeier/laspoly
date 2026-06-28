@@ -127,8 +127,31 @@ test.describe("Phase 2c Management UI", () => {
         }
 
         if (arrived === "buy") {
-          // BUY aggressively to own properties quickly
-          await page.locator("#buyBtn").click();
+          // Buy only if we can clearly afford the tile (tile price <= player money).
+          // We read money from the state relay. If state unavailable, decline.
+          const canAfford = await page.evaluate(() => {
+            try {
+              const el = document.getElementById("_lastState");
+              if (!el?.dataset["state"]) return false;
+              const st = JSON.parse(el.dataset["state"] as string) as {
+                currentPlayerIndex: number;
+                players: Array<{ money: number; alive: boolean }>;
+                pendingPurchase: number | null;
+                tiles?: Array<{ price?: number }>;
+              };
+              const cp = st.players[st.currentPlayerIndex];
+              if (!cp) return false;
+              // We don't have easy access to tile prices in the relay snapshot,
+              // so use a safe money threshold. All tiles are 400 or below on vegas,
+              // but cheapest are 60-100 LPD. If we have at least 400 LPD, buy.
+              return cp.money >= 400;
+            } catch { return false; }
+          });
+          if (canAfford) {
+            await page.locator("#buyBtn").click();
+          } else {
+            await page.locator("#declineBtn").click();
+          }
           await page.waitForTimeout(150);
           continue;
         }
@@ -166,9 +189,9 @@ test.describe("Phase 2c Management UI", () => {
             // Wait for state update
             await page.waitForTimeout(600);
 
-            // Check event log for "Hypothek"
+            // Check event log for "verpfändet" (the German i18n text for the mortgaged event)
             const logText = await page.locator("#eventLog").textContent();
-            if (logText && logText.includes("Hypothek")) {
+            if (logText && logText.includes("verpfändet")) {
               mortgageLogSeen = true;
             }
 
@@ -180,8 +203,9 @@ test.describe("Phase 2c Management UI", () => {
             // Now roll to advance the turn
             await page.locator("#rollBtn").click();
             await page.waitForTimeout(300);
+            // Decline purchase after roll (we already did the mortgage action)
             const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
-            if (buyNow) await page.locator("#buyBtn").click();
+            if (buyNow) await page.locator("#declineBtn").click();
             await page.waitForTimeout(150);
             continue;
           }
@@ -191,10 +215,26 @@ test.describe("Phase 2c Management UI", () => {
         await page.locator("#rollBtn").click();
         await page.waitForTimeout(300);
 
-        // After roll: buy to acquire properties
+        // After roll: buy if we can afford it (state relay check)
         const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
         if (buyNow) {
-          await page.locator("#buyBtn").click();
+          const canAffordNow = await page.evaluate(() => {
+            try {
+              const el = document.getElementById("_lastState");
+              if (!el?.dataset["state"]) return false;
+              const st = JSON.parse(el.dataset["state"] as string) as {
+                currentPlayerIndex: number;
+                players: Array<{ money: number }>;
+              };
+              const cp = st.players[st.currentPlayerIndex];
+              return cp ? cp.money >= 400 : false;
+            } catch { return false; }
+          });
+          if (canAffordNow) {
+            await page.locator("#buyBtn").click();
+          } else {
+            await page.locator("#declineBtn").click();
+          }
         }
         await page.waitForTimeout(150);
       }
@@ -210,8 +250,8 @@ test.describe("Phase 2c Management UI", () => {
       // Mortgage was exercised
       expect(mortgageClicked, "No Hypothek button found in #myPropsPanel — property may have had buildings or been already mortgaged").toBe(true);
 
-      // Mortgage appeared in log
-      expect(mortgageLogSeen, "Event log did not contain 'Hypothek' after mortgage action").toBe(true);
+      // Mortgage event appeared in log ("verpfändet" is the German i18n text)
+      expect(mortgageLogSeen, "Event log did not contain 'verpfändet' after mortgage action").toBe(true);
 
       // Money increased after mortgage (player received mortgage value)
       if (moneyBeforeMortgage > 0 && moneyAfterMortgage > 0) {
