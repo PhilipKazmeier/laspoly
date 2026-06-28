@@ -7,17 +7,8 @@ dist/
 packages/*/dist/
 packages/client/.vite/
 
-# Java/Gradle build artifacts (old game)
-src/
-build/
-.gradle/
-gradle/
-gradlew
-gradlew.bat
-*.jar
-*.class
-libs/
-web/
+# Old Java game (kept for reference, never needed in the web image)
+old-java/
 
 # Misc
 .git/
@@ -26,4 +17,3 @@ web/
 coverage/
 test-results/
 docs/
-scripts/
