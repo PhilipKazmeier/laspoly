@@ -146,6 +146,20 @@ const css = `
     background: rgba(180,0,0,0.85); padding: 8px 20px; border-radius: 6px;
     font-size: 13px; max-width: 400px; text-align: center;
   }
+  #specialEventBanner {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(20, 10, 40, 0.88);
+    border: 1px solid #a855f7;
+    border-radius: 8px;
+    padding: 6px 18px;
+    font-size: 13px;
+    color: #e9d5ff;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: 480px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   #myPropsPanel {
     position: absolute; top: 16px; right: 16px;
     width: 280px;
@@ -224,6 +238,7 @@ export class UI {
   private actionCardPopup!: HTMLDivElement;
   private actionCardTimer: ReturnType<typeof setTimeout> | null = null;
   private buyOfferPanel!: HTMLDivElement;
+  private specialEventBanner!: HTMLDivElement;
 
   constructor(root: HTMLDivElement, net: Net) {
     this.root = root;
@@ -411,6 +426,13 @@ export class UI {
     hide(spectatorBanner);
     this.root.appendChild(spectatorBanner);
     this.spectatorBanner = spectatorBanner;
+
+    // Special event banner
+    const eventBanner = document.createElement('div');
+    eventBanner.id = 'specialEventBanner';
+    hide(eventBanner);
+    hud.appendChild(eventBanner);
+    this.specialEventBanner = eventBanner;
   }
 
   private buildMyPropsPanel() {
@@ -750,6 +772,23 @@ export class UI {
       show(this.spectatorBanner, "block");
     } else {
       hide(this.spectatorBanner);
+    }
+
+    // Special event banner
+    if (state.activeEvent) {
+      const labels: Record<string, string> = {
+        circus: '🎪 Zirkus in der Stadt',
+        boom: '📈 Wirtschaftsboom',
+        recession: '📉 Rezession',
+        jackpot: '🎰 Casino-Jackpot-Nacht',
+        buildingSale: '🏗️ Bau-Rabatt',
+        quietDay: '😴 Ruhiger Tag',
+      };
+      const label = labels[state.activeEvent.id] ?? state.activeEvent.id;
+      this.specialEventBanner.textContent = `Runde ${state.round}: ${label}`;
+      show(this.specialEventBanner, 'block');
+    } else {
+      hide(this.specialEventBanner);
     }
 
     // Incoming swap panel (visible regardless of whose turn it is)
