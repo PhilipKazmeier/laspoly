@@ -53,6 +53,7 @@ export class Board3D {
   private engine: Engine;
   private scene: Scene;
   private tokenMeshes: Map<string, ReturnType<typeof MeshBuilder.CreateSphere>> = new Map();
+  private buildingMeshes: Map<number, ReturnType<typeof MeshBuilder.CreateBox>> = new Map();
   private currentBoardId: string | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -149,6 +150,53 @@ export class Board3D {
     jailMesh.material = jailMat;
   }
 
+  private updateBuildings(state: GameState) {
+    // Remove markers for positions no longer in state.buildings
+    for (const [pos, mesh] of this.buildingMeshes) {
+      const b = state.buildings[pos];
+      if (!b || (!b.houses && !b.hotel && !b.factory)) {
+        mesh.dispose();
+        this.buildingMeshes.delete(pos);
+      }
+    }
+
+    for (const [posStr, b] of Object.entries(state.buildings)) {
+      const pos = Number(posStr);
+      if (!b || (!b.houses && !b.hotel && !b.factory)) continue;
+      const [x, z] = tileXZ(pos);
+
+      // Dispose old marker for this position so we redraw fresh
+      const existing = this.buildingMeshes.get(pos);
+      if (existing) existing.dispose();
+
+      let mesh: ReturnType<typeof MeshBuilder.CreateBox>;
+      const mat = new StandardMaterial(`bldgMat_${pos}`, this.scene);
+
+      if (b.hotel) {
+        // Hotel: tall red box
+        mesh = MeshBuilder.CreateBox(`bldg_${pos}`, { width: 0.4, height: 0.6, depth: 0.4 }, this.scene);
+        mat.diffuseColor = new Color3(0.8, 0.1, 0.1);
+      } else if (b.factory) {
+        // Factory: wide yellowish box
+        mesh = MeshBuilder.CreateBox(`bldg_${pos}`, { width: 0.6, height: 0.35, depth: 0.6 }, this.scene);
+        mat.diffuseColor = new Color3(0.6, 0.6, 0.2);
+      } else {
+        // Houses: small green box, width scales with house count
+        mesh = MeshBuilder.CreateBox(`bldg_${pos}`, { width: Math.max(0.1, 0.2 * b.houses), height: 0.25, depth: 0.2 }, this.scene);
+        mat.diffuseColor = new Color3(0.1, 0.7, 0.1);
+      }
+
+      // Dim if mortgaged
+      if (state.mortgaged[pos]) {
+        mat.diffuseColor = mat.diffuseColor.scale(0.4);
+      }
+
+      mesh.material = mat;
+      mesh.position.set(x, 0.35, z - 0.5);
+      this.buildingMeshes.set(pos, mesh);
+    }
+  }
+
   update(state: GameState, _myId: string | null) {
     // Ensure board is drawn for current boardId
     this.drawBoard(state.boardId);
@@ -200,5 +248,7 @@ export class Board3D {
 
       mesh.position.set(x + offsetX, 0.5, z + offsetZ);
     }
+
+    this.updateBuildings(state);
   }
 }
