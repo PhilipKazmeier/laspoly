@@ -57,8 +57,9 @@ describe("GameRoom", () => {
       const { room, playerId } = makeRoom(3);
       room.start(seed);
 
-      // One command at a time (like sim.ts: maxCommands = maxTurns * numPlayers * 4)
-      const MAX_COMMANDS = 500 * 4 * 4;
+      // One command at a time. The bot now may issue mortgage/sell commands before
+      // rolling, so the multiplier is 8 (was 4) to accommodate extra pre-roll actions.
+      const MAX_COMMANDS = 500 * 4 * 8;
       let cmds = 0;
 
       while (room.state!.phase !== "finished" && cmds < MAX_COMMANDS) {

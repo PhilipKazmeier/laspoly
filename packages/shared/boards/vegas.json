@@ -11,49 +11,600 @@
     "mortgageUnmortgageMultiplier": 1.1,
     "casinoInitialPool": 1200,
     "jailTurns": 3,
-    "station": { "price": 200, "mortgage": 100, "rent": [50, 100, 200, 400], "travel": [75, 150, 225] },
-    "attraction": { "price": 150, "mortgage": 75, "factorOne": 4, "factorBoth": 10 }
+    "station": {
+      "price": 200,
+      "mortgage": 100,
+      "rent": [
+        50,
+        100,
+        200,
+        400
+      ],
+      "travel": [
+        75,
+        150,
+        225
+      ]
+    },
+    "attraction": {
+      "price": 150,
+      "mortgage": 75,
+      "factorOne": 4,
+      "factorBoth": 10
+    },
+    "casino": {
+      "sixShare": 0.35,
+      "doubleShare": 0.2
+    }
   },
   "tiles": [
-    { "pos": 0, "type": "go", "name": "GO" },
-    { "pos": 1, "type": "street", "name": "Arndt Avenue", "group": "brown", "price": 60, "mortgage": 30, "houseCost": 30, "hotelCost": 30, "factoryCost": 60, "factoryRevenue": 230, "rent": [2, 10, 30, 90, 170, 260] },
-    { "pos": 2, "type": "tax", "name": "Pay to Casino", "amount": 100 },
-    { "pos": 3, "type": "street", "name": "Frank Sinatra Route", "group": "deeppink", "price": 70, "mortgage": 35, "houseCost": 40, "hotelCost": 40, "factoryCost": 80, "factoryRevenue": 460, "rent": [4, 20, 60, 180, 340, 520] },
-    { "pos": 4, "type": "street", "name": "Winnick Way", "group": "deeppink", "price": 80, "mortgage": 40, "houseCost": 40, "hotelCost": 40, "factoryCost": 80, "factoryRevenue": 575, "rent": [5, 25, 75, 225, 425, 650] },
-    { "pos": 5, "type": "station", "name": "Caesar Station", "group": "station" },
-    { "pos": 6, "type": "street", "name": "Rochelle Street", "group": "turquoise", "price": 100, "mortgage": 50, "houseCost": 60, "hotelCost": 60, "factoryCost": 120, "factoryRevenue": 690, "rent": [6, 30, 90, 270, 510, 780] },
-    { "pos": 7, "type": "action", "name": "Action Field" },
-    { "pos": 8, "type": "street", "name": "Jacoby Street", "group": "turquoise", "price": 100, "mortgage": 50, "houseCost": 60, "hotelCost": 60, "factoryCost": 120, "factoryRevenue": 805, "rent": [7, 35, 105, 315, 595, 910] },
-    { "pos": 9, "type": "street", "name": "Singer Route", "group": "turquoise", "price": 120, "mortgage": 60, "houseCost": 60, "hotelCost": 60, "factoryCost": 120, "factoryRevenue": 920, "rent": [8, 40, 120, 360, 680, 1040] },
-    { "pos": 10, "type": "freeparking", "name": "Free Parking" },
-    { "pos": 11, "type": "street", "name": "Fulano", "group": "violet", "price": 130, "mortgage": 65, "houseCost": 65, "hotelCost": 65, "factoryCost": 130, "factoryRevenue": 750, "rent": [10, 50, 100, 300, 550, 850] },
-    { "pos": 12, "type": "attraction", "name": "Big Wheel", "group": "attraction" },
-    { "pos": 13, "type": "street", "name": "West Avenue", "group": "mistyrose", "price": 140, "mortgage": 70, "houseCost": 75, "hotelCost": 75, "factoryCost": 150, "factoryRevenue": 1265, "rent": [11, 55, 165, 495, 935, 1430] },
-    { "pos": 14, "type": "street", "name": "Monterro Freeway", "group": "mistyrose", "price": 150, "mortgage": 75, "houseCost": 75, "hotelCost": 75, "factoryCost": 150, "factoryRevenue": 1380, "rent": [12, 60, 180, 540, 1020, 1560] },
-    { "pos": 15, "type": "station", "name": "Westgate Station", "group": "station" },
-    { "pos": 16, "type": "street", "name": "Hardwick Street", "group": "orange", "price": 180, "mortgage": 90, "houseCost": 100, "hotelCost": 100, "factoryCost": 200, "factoryRevenue": 1610, "rent": [14, 70, 210, 630, 1190, 1820] },
-    { "pos": 17, "type": "action", "name": "Action Field" },
-    { "pos": 18, "type": "street", "name": "Park Road", "group": "orange", "price": 180, "mortgage": 90, "houseCost": 100, "hotelCost": 100, "factoryCost": 200, "factoryRevenue": 1725, "rent": [15, 75, 225, 675, 1275, 1950] },
-    { "pos": 19, "type": "street", "name": "Casino Street", "group": "orange", "price": 200, "mortgage": 100, "houseCost": 100, "hotelCost": 100, "factoryCost": 200, "factoryRevenue": 1840, "rent": [16, 80, 240, 720, 1360, 2080] },
-    { "pos": 20, "type": "casino", "name": "Casino" },
-    { "pos": 21, "type": "street", "name": "St Louis Square", "group": "lightgreen", "price": 220, "mortgage": 110, "houseCost": 110, "hotelCost": 110, "factoryCost": 220, "factoryRevenue": 1350, "rent": [18, 90, 180, 540, 990, 1530] },
-    { "pos": 22, "type": "action", "name": "Action Field" },
-    { "pos": 23, "type": "street", "name": "Bellagio Path", "group": "red", "price": 240, "mortgage": 120, "houseCost": 120, "hotelCost": 120, "factoryCost": 240, "factoryRevenue": 2185, "rent": [19, 95, 285, 855, 1615, 2470] },
-    { "pos": 24, "type": "street", "name": "Kennedy Avenue", "group": "red", "price": 240, "mortgage": 120, "houseCost": 120, "hotelCost": 120, "factoryCost": 240, "factoryRevenue": 2300, "rent": [20, 100, 300, 900, 1700, 2600] },
-    { "pos": 25, "type": "station", "name": "Linq Station", "group": "station" },
-    { "pos": 26, "type": "street", "name": "Theresia Freeway", "group": "yellow", "price": 260, "mortgage": 130, "houseCost": 140, "hotelCost": 140, "factoryCost": 280, "factoryRevenue": 2530, "rent": [22, 110, 330, 990, 1870, 2860] },
-    { "pos": 27, "type": "attraction", "name": "Circus", "group": "attraction" },
-    { "pos": 28, "type": "street", "name": "Douglas Promenade", "group": "yellow", "price": 260, "mortgage": 130, "houseCost": 140, "hotelCost": 140, "factoryCost": 280, "factoryRevenue": 2645, "rent": [23, 115, 345, 1035, 1955, 2990] },
-    { "pos": 29, "type": "street", "name": "Heaven Avenue", "group": "yellow", "price": 280, "mortgage": 140, "houseCost": 140, "hotelCost": 140, "factoryCost": 280, "factoryRevenue": 2760, "rent": [24, 120, 360, 1080, 2040, 3120] },
-    { "pos": 30, "type": "gotojail", "name": "Go to Jail" },
-    { "pos": 31, "type": "street", "name": "Edison Walker Street", "group": "darkviolet", "price": 300, "mortgage": 150, "houseCost": 150, "hotelCost": 150, "factoryCost": 300, "factoryRevenue": 1950, "rent": [26, 130, 260, 780, 1430, 2210] },
-    { "pos": 32, "type": "action", "name": "Action Field" },
-    { "pos": 33, "type": "street", "name": "Crosswood Avenue", "group": "darkgreen", "price": 320, "mortgage": 160, "houseCost": 170, "hotelCost": 170, "factoryCost": 340, "factoryRevenue": 3335, "rent": [29, 145, 435, 1305, 2465, 3770] },
-    { "pos": 34, "type": "street", "name": "Showcase Road", "group": "darkgreen", "price": 340, "mortgage": 170, "houseCost": 170, "hotelCost": 170, "factoryCost": 340, "factoryRevenue": 3450, "rent": [30, 150, 450, 1350, 2550, 3900] },
-    { "pos": 35, "type": "station", "name": "Grand Central Station", "group": "station" },
-    { "pos": 36, "type": "tax", "name": "Pay to Casino", "amount": 100 },
-    { "pos": 37, "type": "street", "name": "Winchester 95", "group": "royalblue", "price": 360, "mortgage": 180, "houseCost": 200, "hotelCost": 200, "factoryCost": 400, "factoryRevenue": 4140, "rent": [36, 180, 540, 1620, 3060, 4680] },
-    { "pos": 38, "type": "street", "name": "Paradise Road", "group": "royalblue", "price": 360, "mortgage": 180, "houseCost": 200, "hotelCost": 200, "factoryCost": 400, "factoryRevenue": 4370, "rent": [38, 190, 570, 1710, 3230, 4940] },
-    { "pos": 39, "type": "street", "name": "Las Vegas Strip", "group": "royalblue", "price": 400, "mortgage": 200, "houseCost": 200, "hotelCost": 200, "factoryCost": 400, "factoryRevenue": 4600, "rent": [40, 200, 600, 1800, 3400, 5200] }
+    {
+      "pos": 0,
+      "type": "go",
+      "name": "GO"
+    },
+    {
+      "pos": 1,
+      "type": "street",
+      "name": "Arndt Avenue",
+      "group": "brown",
+      "price": 60,
+      "mortgage": 30,
+      "houseCost": 30,
+      "hotelCost": 30,
+      "factoryCost": 60,
+      "factoryRevenue": 230,
+      "rent": [
+        2,
+        10,
+        30,
+        90,
+        170,
+        260
+      ]
+    },
+    {
+      "pos": 2,
+      "type": "tax",
+      "name": "Pay to Casino",
+      "amount": 100
+    },
+    {
+      "pos": 3,
+      "type": "street",
+      "name": "Frank Sinatra Route",
+      "group": "deeppink",
+      "price": 70,
+      "mortgage": 35,
+      "houseCost": 40,
+      "hotelCost": 40,
+      "factoryCost": 80,
+      "factoryRevenue": 460,
+      "rent": [
+        4,
+        20,
+        60,
+        180,
+        340,
+        520
+      ]
+    },
+    {
+      "pos": 4,
+      "type": "street",
+      "name": "Winnick Way",
+      "group": "deeppink",
+      "price": 80,
+      "mortgage": 40,
+      "houseCost": 40,
+      "hotelCost": 40,
+      "factoryCost": 80,
+      "factoryRevenue": 575,
+      "rent": [
+        5,
+        25,
+        75,
+        225,
+        425,
+        650
+      ]
+    },
+    {
+      "pos": 5,
+      "type": "station",
+      "name": "Caesar Station",
+      "group": "station"
+    },
+    {
+      "pos": 6,
+      "type": "street",
+      "name": "Rochelle Street",
+      "group": "turquoise",
+      "price": 100,
+      "mortgage": 50,
+      "houseCost": 60,
+      "hotelCost": 60,
+      "factoryCost": 120,
+      "factoryRevenue": 690,
+      "rent": [
+        6,
+        30,
+        90,
+        270,
+        510,
+        780
+      ]
+    },
+    {
+      "pos": 7,
+      "type": "action",
+      "name": "Action Field"
+    },
+    {
+      "pos": 8,
+      "type": "street",
+      "name": "Jacoby Street",
+      "group": "turquoise",
+      "price": 100,
+      "mortgage": 50,
+      "houseCost": 60,
+      "hotelCost": 60,
+      "factoryCost": 120,
+      "factoryRevenue": 805,
+      "rent": [
+        7,
+        35,
+        105,
+        315,
+        595,
+        910
+      ]
+    },
+    {
+      "pos": 9,
+      "type": "street",
+      "name": "Singer Route",
+      "group": "turquoise",
+      "price": 120,
+      "mortgage": 60,
+      "houseCost": 60,
+      "hotelCost": 60,
+      "factoryCost": 120,
+      "factoryRevenue": 920,
+      "rent": [
+        8,
+        40,
+        120,
+        360,
+        680,
+        1040
+      ]
+    },
+    {
+      "pos": 10,
+      "type": "freeparking",
+      "name": "Free Parking"
+    },
+    {
+      "pos": 11,
+      "type": "street",
+      "name": "Fulano",
+      "group": "violet",
+      "price": 130,
+      "mortgage": 65,
+      "houseCost": 65,
+      "hotelCost": 65,
+      "factoryCost": 130,
+      "factoryRevenue": 750,
+      "rent": [
+        10,
+        50,
+        100,
+        300,
+        550,
+        850
+      ]
+    },
+    {
+      "pos": 12,
+      "type": "attraction",
+      "name": "Big Wheel",
+      "group": "attraction"
+    },
+    {
+      "pos": 13,
+      "type": "street",
+      "name": "West Avenue",
+      "group": "mistyrose",
+      "price": 140,
+      "mortgage": 70,
+      "houseCost": 75,
+      "hotelCost": 75,
+      "factoryCost": 150,
+      "factoryRevenue": 1265,
+      "rent": [
+        11,
+        55,
+        165,
+        495,
+        935,
+        1430
+      ]
+    },
+    {
+      "pos": 14,
+      "type": "street",
+      "name": "Monterro Freeway",
+      "group": "mistyrose",
+      "price": 150,
+      "mortgage": 75,
+      "houseCost": 75,
+      "hotelCost": 75,
+      "factoryCost": 150,
+      "factoryRevenue": 1380,
+      "rent": [
+        12,
+        60,
+        180,
+        540,
+        1020,
+        1560
+      ]
+    },
+    {
+      "pos": 15,
+      "type": "station",
+      "name": "Westgate Station",
+      "group": "station"
+    },
+    {
+      "pos": 16,
+      "type": "street",
+      "name": "Hardwick Street",
+      "group": "orange",
+      "price": 180,
+      "mortgage": 90,
+      "houseCost": 100,
+      "hotelCost": 100,
+      "factoryCost": 200,
+      "factoryRevenue": 1610,
+      "rent": [
+        14,
+        70,
+        210,
+        630,
+        1190,
+        1820
+      ]
+    },
+    {
+      "pos": 17,
+      "type": "action",
+      "name": "Action Field"
+    },
+    {
+      "pos": 18,
+      "type": "street",
+      "name": "Park Road",
+      "group": "orange",
+      "price": 180,
+      "mortgage": 90,
+      "houseCost": 100,
+      "hotelCost": 100,
+      "factoryCost": 200,
+      "factoryRevenue": 1725,
+      "rent": [
+        15,
+        75,
+        225,
+        675,
+        1275,
+        1950
+      ]
+    },
+    {
+      "pos": 19,
+      "type": "street",
+      "name": "Casino Street",
+      "group": "orange",
+      "price": 200,
+      "mortgage": 100,
+      "houseCost": 100,
+      "hotelCost": 100,
+      "factoryCost": 200,
+      "factoryRevenue": 1840,
+      "rent": [
+        16,
+        80,
+        240,
+        720,
+        1360,
+        2080
+      ]
+    },
+    {
+      "pos": 20,
+      "type": "casino",
+      "name": "Casino"
+    },
+    {
+      "pos": 21,
+      "type": "street",
+      "name": "St Louis Square",
+      "group": "lightgreen",
+      "price": 220,
+      "mortgage": 110,
+      "houseCost": 110,
+      "hotelCost": 110,
+      "factoryCost": 220,
+      "factoryRevenue": 1350,
+      "rent": [
+        18,
+        90,
+        180,
+        540,
+        990,
+        1530
+      ]
+    },
+    {
+      "pos": 22,
+      "type": "action",
+      "name": "Action Field"
+    },
+    {
+      "pos": 23,
+      "type": "street",
+      "name": "Bellagio Path",
+      "group": "red",
+      "price": 240,
+      "mortgage": 120,
+      "houseCost": 120,
+      "hotelCost": 120,
+      "factoryCost": 240,
+      "factoryRevenue": 2185,
+      "rent": [
+        19,
+        95,
+        285,
+        855,
+        1615,
+        2470
+      ]
+    },
+    {
+      "pos": 24,
+      "type": "street",
+      "name": "Kennedy Avenue",
+      "group": "red",
+      "price": 240,
+      "mortgage": 120,
+      "houseCost": 120,
+      "hotelCost": 120,
+      "factoryCost": 240,
+      "factoryRevenue": 2300,
+      "rent": [
+        20,
+        100,
+        300,
+        900,
+        1700,
+        2600
+      ]
+    },
+    {
+      "pos": 25,
+      "type": "station",
+      "name": "Linq Station",
+      "group": "station"
+    },
+    {
+      "pos": 26,
+      "type": "street",
+      "name": "Theresia Freeway",
+      "group": "yellow",
+      "price": 260,
+      "mortgage": 130,
+      "houseCost": 140,
+      "hotelCost": 140,
+      "factoryCost": 280,
+      "factoryRevenue": 2530,
+      "rent": [
+        22,
+        110,
+        330,
+        990,
+        1870,
+        2860
+      ]
+    },
+    {
+      "pos": 27,
+      "type": "attraction",
+      "name": "Circus",
+      "group": "attraction"
+    },
+    {
+      "pos": 28,
+      "type": "street",
+      "name": "Douglas Promenade",
+      "group": "yellow",
+      "price": 260,
+      "mortgage": 130,
+      "houseCost": 140,
+      "hotelCost": 140,
+      "factoryCost": 280,
+      "factoryRevenue": 2645,
+      "rent": [
+        23,
+        115,
+        345,
+        1035,
+        1955,
+        2990
+      ]
+    },
+    {
+      "pos": 29,
+      "type": "street",
+      "name": "Heaven Avenue",
+      "group": "yellow",
+      "price": 280,
+      "mortgage": 140,
+      "houseCost": 140,
+      "hotelCost": 140,
+      "factoryCost": 280,
+      "factoryRevenue": 2760,
+      "rent": [
+        24,
+        120,
+        360,
+        1080,
+        2040,
+        3120
+      ]
+    },
+    {
+      "pos": 30,
+      "type": "gotojail",
+      "name": "Go to Jail"
+    },
+    {
+      "pos": 31,
+      "type": "street",
+      "name": "Edison Walker Street",
+      "group": "darkviolet",
+      "price": 300,
+      "mortgage": 150,
+      "houseCost": 150,
+      "hotelCost": 150,
+      "factoryCost": 300,
+      "factoryRevenue": 1950,
+      "rent": [
+        26,
+        130,
+        260,
+        780,
+        1430,
+        2210
+      ]
+    },
+    {
+      "pos": 32,
+      "type": "action",
+      "name": "Action Field"
+    },
+    {
+      "pos": 33,
+      "type": "street",
+      "name": "Crosswood Avenue",
+      "group": "darkgreen",
+      "price": 320,
+      "mortgage": 160,
+      "houseCost": 170,
+      "hotelCost": 170,
+      "factoryCost": 340,
+      "factoryRevenue": 3335,
+      "rent": [
+        29,
+        145,
+        435,
+        1305,
+        2465,
+        3770
+      ]
+    },
+    {
+      "pos": 34,
+      "type": "street",
+      "name": "Showcase Road",
+      "group": "darkgreen",
+      "price": 340,
+      "mortgage": 170,
+      "houseCost": 170,
+      "hotelCost": 170,
+      "factoryCost": 340,
+      "factoryRevenue": 3450,
+      "rent": [
+        30,
+        150,
+        450,
+        1350,
+        2550,
+        3900
+      ]
+    },
+    {
+      "pos": 35,
+      "type": "station",
+      "name": "Grand Central Station",
+      "group": "station"
+    },
+    {
+      "pos": 36,
+      "type": "tax",
+      "name": "Pay to Casino",
+      "amount": 100
+    },
+    {
+      "pos": 37,
+      "type": "street",
+      "name": "Winchester 95",
+      "group": "royalblue",
+      "price": 360,
+      "mortgage": 180,
+      "houseCost": 200,
+      "hotelCost": 200,
+      "factoryCost": 400,
+      "factoryRevenue": 4140,
+      "rent": [
+        36,
+        180,
+        540,
+        1620,
+        3060,
+        4680
+      ]
+    },
+    {
+      "pos": 38,
+      "type": "street",
+      "name": "Paradise Road",
+      "group": "royalblue",
+      "price": 360,
+      "mortgage": 180,
+      "houseCost": 200,
+      "hotelCost": 200,
+      "factoryCost": 400,
+      "factoryRevenue": 4370,
+      "rent": [
+        38,
+        190,
+        570,
+        1710,
+        3230,
+        4940
+      ]
+    },
+    {
+      "pos": 39,
+      "type": "street",
+      "name": "Las Vegas Strip",
+      "group": "royalblue",
+      "price": 400,
+      "mortgage": 200,
+      "houseCost": 200,
+      "hotelCost": 200,
+      "factoryCost": 400,
+      "factoryRevenue": 4600,
+      "rent": [
+        40,
+        200,
+        600,
+        1800,
+        3400,
+        5200
+      ]
+    }
   ]
 }

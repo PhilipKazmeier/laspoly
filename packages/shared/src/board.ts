@@ -49,6 +49,14 @@ export interface BoardRules {
   jailTurns: number;
   station: { price: number; mortgage: number; rent: number[]; travel: number[] };
   attraction: { price: number; mortgage: number; factorOne: number; factorBoth: number };
+  /**
+   * Casino payout fractions (share of pool paid out on a win).
+   * sixShare: fraction paid on double-6 (was 0.5 before tuning, now 0.35).
+   * doubleShare: fraction paid on other doubles (was 0.25 before tuning, now 0.2).
+   * Defaults: sixShare=0.5, doubleShare=0.25 for backwards compatibility.
+   * Reduced 2026-06 to cut casino swing: 52.9% of wins exceeded player cash at 0.5/0.25.
+   */
+  casino?: { sixShare: number; doubleShare: number };
 }
 
 export interface BoardDefinition {

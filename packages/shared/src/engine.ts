@@ -653,8 +653,13 @@ function resolveLanding(
 function resolveCasino(state: GameState, board: BoardDefinition, player: PlayerState, events: GameEvent[]): void {
   const [d1, d2] = player.lastRoll;
   if (d1 >= 1 && d1 === d2) {
-    const baseFraction = d1 === 6 ? 2 : 4; // pool / 2 or pool / 4
-    const rawShare = Math.floor(state.casinoPool / baseFraction);
+    // Read tunable payout fractions from board rules (with pre-tuning fallback).
+    // Before 2026-06 tuning: sixShare=0.5, doubleShare=0.25 caused 52.9% of wins
+    // to exceed the winner's cash — too swingy. Now sixShare=0.35, doubleShare=0.2.
+    const sixShare = board.rules.casino?.sixShare ?? 0.5;
+    const doubleShare = board.rules.casino?.doubleShare ?? 0.25;
+    const fraction = d1 === 6 ? sixShare : doubleShare;
+    const rawShare = Math.floor(state.casinoPool * fraction);
     const share = state.activeEvent?.id === 'jackpot'
       ? Math.floor(rawShare * 1.5)
       : rawShare;

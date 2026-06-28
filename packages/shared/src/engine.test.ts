@@ -759,7 +759,7 @@ describe("casino tile (pos 20)", () => {
     }
   });
 
-  it("doubles (not 6-6) pays a quarter of pool", () => {
+  it("doubles (not 6-6) pays doubleShare (0.2) of pool", () => {
     // Find a seed that gives non-6 doubles (e.g. 2+2=4) from pos 16 to land on 20
     let seedF: number | null = null;
     let d1F = 0, d2F = 0;
@@ -781,13 +781,13 @@ describe("casino tile (pos 20)", () => {
 
     const { state } = applyCommand(gs, { type: "ROLL_DICE" });
     if (state.players[0]!.position === 20) {
-      const quarter = Math.floor(1200 / 4); // 300
-      expect(state.players[0]!.money).toBe(1300 + quarter);
-      expect(state.casinoPool).toBe(1200 - quarter);
+      const share = Math.floor(1200 * 0.2); // 240 (doubleShare=0.2, was 0.25)
+      expect(state.players[0]!.money).toBe(1300 + share);
+      expect(state.casinoPool).toBe(1200 - share);
     }
   });
 
-  it("doubles 6-6 pays half of pool", () => {
+  it("doubles 6-6 pays sixShare (0.35) of pool", () => {
     // Find a seed that gives 6+6 from some position to land on 20
     // 6+6=12, so pos 8 would work (8+12=20)
     let seedF: number | null = null;
@@ -809,9 +809,9 @@ describe("casino tile (pos 20)", () => {
 
     const { state } = applyCommand(gs, { type: "ROLL_DICE" });
     if (state.players[0]!.position === 20) {
-      const half = Math.floor(1200 / 2); // 600
-      expect(state.players[0]!.money).toBe(1300 + half);
-      expect(state.casinoPool).toBe(1200 - half);
+      const share = Math.floor(1200 * 0.35); // 420 (sixShare=0.35, was 0.5)
+      expect(state.players[0]!.money).toBe(1300 + share);
+      expect(state.casinoPool).toBe(1200 - share);
     }
   });
 });
