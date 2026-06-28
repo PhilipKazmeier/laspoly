@@ -1,0 +1,23 @@
+{
+  "name": "laspoly-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sim": "tsx packages/shared/src/sim.ts",
+    "server": "tsx packages/server/src/index.ts",
+    "client": "npm -w @laspoly/client run dev",
+    "dev": "concurrently -n server,client -c green,cyan \"npm run server\" \"npm run client\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
