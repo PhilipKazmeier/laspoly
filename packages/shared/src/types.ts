@@ -45,6 +45,20 @@ export interface GameState {
   actionDeck: number[];
   /** discarded action cards */
   actionDiscard: number[];
+  /** pending player-to-player swap offer, null when none */
+  pendingSwap: PendingSwap | null;
+}
+
+export interface SwapLeg {
+  props: number[]; // board positions
+  money: number;
+}
+
+export interface PendingSwap {
+  fromId: string;
+  toId: string;
+  give: SwapLeg;   // what fromId offers
+  receive: SwapLeg; // what fromId asks for (toId gives)
 }
 
 export type Command =
@@ -57,7 +71,9 @@ export type Command =
   | { type: "MORTGAGE"; pos: number }
   | { type: "UNMORTGAGE"; pos: number }
   | { type: "SELL_PROPERTY"; pos: number }
-  | { type: "TRAVEL"; toPos: number };
+  | { type: "TRAVEL"; toPos: number }
+  | { type: "PROPOSE_SWAP"; toId: string; give: SwapLeg; receive: SwapLeg }
+  | { type: "RESPOND_SWAP"; accept: boolean };
 
 /**
  * A complete, localizable game event. `key` selects an i18n template; `params`

@@ -237,7 +237,12 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (!cs.roomId || !cs.playerId) throw new Error("Not in a room");
       const room = rooms.get(cs.roomId);
       if (!room) throw new Error("Room not found");
-      const rawEvents = room.applyHumanCommand(cs.playerId, msg.command);
+      let rawEvents = room.applyHumanCommand(cs.playerId, msg.command);
+
+      // If a PROPOSE_SWAP was directed at a bot, resolve the bot's response immediately
+      const botSwapEvents = room.stepBotSwapResponse();
+      rawEvents = rawEvents.concat(botSwapEvents);
+
       const events = room.formatEvents(rawEvents);
       broadcastToRoom(room, { t: "state", state: room.state!, events });
       if (room.state!.phase === "finished" && room.state!.winnerId) {

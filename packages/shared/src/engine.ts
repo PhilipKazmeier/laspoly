@@ -19,6 +19,7 @@ import type {
   NewGameOptions,
   PlayerState,
   ReduceResult,
+  SwapLeg,
 } from "./types.js";
 
 const GO_TO_JAIL_POS = 30;
@@ -112,6 +113,7 @@ export function createGame(opts: NewGameOptions): GameState {
     turn: 1,
     actionDeck,
     actionDiscard: [],
+    pendingSwap: null,
   };
 }
 
@@ -273,8 +275,30 @@ export function legalCommands(state: GameState): Command["type"][] {
     cmds.push("TRAVEL");
   }
 
+  // Swap proposal: available in awaiting-roll when no swap is already pending
+  if (!state.pendingSwap) {
+    cmds.push("PROPOSE_SWAP");
+  }
+
   // Deduplicate
   return [...new Set(cmds)];
+}
+
+/**
+ * Returns command types that are legal for the given player in the current state.
+ * For the current player this delegates to legalCommands(). For the swap target
+ * it additionally returns RESPOND_SWAP when there is a pending swap addressed to them.
+ */
+export function legalCommandsFor(state: GameState, playerId: string): Command["type"][] {
+  const cp = state.players[state.currentPlayerIndex];
+  if (cp && cp.id === playerId) {
+    return legalCommands(state);
+  }
+  // Non-current player: only legal action is responding to a swap addressed to them
+  if (state.pendingSwap && state.pendingSwap.toId === playerId) {
+    return ["RESPOND_SWAP"];
+  }
+  return [];
 }
 
 // ---- rent ---------------------------------------------------------------
@@ -945,6 +969,143 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
 
       // TRAVEL is a management command: does not advance the turn
       // Travel ticket covers the cost of using the station; no additional rent landing resolution
+      break;
+    }
+
+    case "PROPOSE_SWAP": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.pendingSwap) throw new Error("A swap offer is already pending");
+      const proposer = currentPlayer(state);
+      const { toId, give, receive } = command;
+
+      const target = playerById(state, toId);
+      if (!target) throw new Error("Target player not found");
+      if (!target.alive) throw new Error("Target player is not in the game");
+      if (toId === proposer.id) throw new Error("Cannot propose swap to yourself");
+
+      // Validate give leg: proposer owns all give.props, unbuilt, not mortgaged
+      for (const pos of give.props) {
+        if (state.ownership[pos] !== proposer.id) throw new Error(`Proposer does not own property at ${pos}`);
+        const b = getBuildingsAt(state, pos);
+        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
+      }
+      if (give.money < 0) throw new Error("Give money must be non-negative");
+      if (give.money > proposer.money) throw new Error("Proposer cannot afford the offered money");
+
+      // Validate receive leg: target owns all receive.props, unbuilt, not mortgaged
+      for (const pos of receive.props) {
+        if (state.ownership[pos] !== toId) throw new Error(`Target does not own property at ${pos}`);
+        const b = getBuildingsAt(state, pos);
+        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
+      }
+      if (receive.money < 0) throw new Error("Receive money must be non-negative");
+      if (receive.money > target.money) throw new Error("Target cannot afford the requested money");
+
+      state.pendingSwap = { fromId: proposer.id, toId, give, receive };
+
+      const propNames = give.props.map((pos) => board.tiles[pos]?.name ?? `pos${pos}`).join(", ");
+      const recNames = receive.props.map((pos) => board.tiles[pos]?.name ?? `pos${pos}`).join(", ");
+      events.push({
+        key: "swapProposed",
+        params: {
+          from: proposer.name,
+          to: target.name,
+          giveProps: propNames || "-",
+          giveMoney: give.money,
+          receiveProps: recNames || "-",
+          receiveMoney: receive.money,
+        },
+        playerId: proposer.id,
+      });
+      // Does NOT consume the roll or advance the turn
+      break;
+    }
+
+    case "RESPOND_SWAP": {
+      const swap = state.pendingSwap;
+      if (!swap) throw new Error("No pending swap offer");
+      const from = playerById(state, swap.fromId);
+      const to = playerById(state, swap.toId);
+      if (!from || !to) throw new Error("Swap player not found");
+
+      if (!command.accept) {
+        state.pendingSwap = null;
+        events.push({
+          key: "swapDeclined",
+          params: { from: from.name, to: to.name },
+          playerId: to.id,
+        });
+        break;
+      }
+
+      // Atomicity: verify both sides can still afford their money legs before touching anything
+      if (swap.give.money > from.money) {
+        state.pendingSwap = null;
+        events.push({
+          key: "swapFailed",
+          params: { from: from.name, to: to.name, reason: "proposer insufficient funds" },
+          playerId: from.id,
+        });
+        break;
+      }
+      if (swap.receive.money > to.money) {
+        state.pendingSwap = null;
+        events.push({
+          key: "swapFailed",
+          params: { from: from.name, to: to.name, reason: "target insufficient funds" },
+          playerId: to.id,
+        });
+        break;
+      }
+
+      // Re-verify ownership hasn't changed since proposal
+      for (const pos of swap.give.props) {
+        if (state.ownership[pos] !== swap.fromId) {
+          state.pendingSwap = null;
+          events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "ownership changed" }, playerId: from.id });
+          return { state, events };
+        }
+      }
+      for (const pos of swap.receive.props) {
+        if (state.ownership[pos] !== swap.toId) {
+          state.pendingSwap = null;
+          events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "ownership changed" }, playerId: to.id });
+          return { state, events };
+        }
+      }
+
+      // Execute atomically: cash first, then property transfer
+      from.money -= swap.give.money;
+      to.money += swap.give.money;
+      to.money -= swap.receive.money;
+      from.money += swap.receive.money;
+
+      for (const pos of swap.give.props) {
+        state.ownership[pos] = swap.toId;
+      }
+      for (const pos of swap.receive.props) {
+        state.ownership[pos] = swap.fromId;
+      }
+
+      state.pendingSwap = null;
+
+      const giveNames = swap.give.props.map((pos) => board.tiles[pos]?.name ?? `pos${pos}`).join(", ");
+      const receiveNames = swap.receive.props.map((pos) => board.tiles[pos]?.name ?? `pos${pos}`).join(", ");
+      events.push({
+        key: "swapAccepted",
+        params: {
+          from: from.name,
+          to: to.name,
+          giveProps: giveNames || "-",
+          giveMoney: swap.give.money,
+          receiveProps: receiveNames || "-",
+          receiveMoney: swap.receive.money,
+        },
+        playerId: to.id,
+      });
+      // Turn does NOT advance: proposer continues their turn
       break;
     }
   }

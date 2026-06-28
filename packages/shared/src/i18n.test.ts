@@ -47,6 +47,10 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   actionCardBroadcastPay: { player: "Alice", amount: 60, card: "youGotPromoted" },
   actionCardBroadcastCollect: { player: "Alice", amount: 50, card: "birthday" },
   actionCardRepair: { player: "Alice", amount: 40, card: "generalRepairs" },
+  swapProposed: { from: "Alice", to: "Bob", giveProps: "Park Lane", giveMoney: 100, receiveProps: "Boardwalk", receiveMoney: 0 },
+  swapAccepted: { from: "Alice", to: "Bob", giveProps: "Park Lane", giveMoney: 100, receiveProps: "Boardwalk", receiveMoney: 0 },
+  swapDeclined: { from: "Alice", to: "Bob" },
+  swapFailed: { from: "Alice", to: "Bob", reason: "insufficient funds" },
 };
 
 describe("i18n", () => {

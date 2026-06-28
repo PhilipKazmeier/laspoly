@@ -2,7 +2,7 @@ import {
   createGame,
   applyCommand,
   currentPlayer,
-  legalCommands,
+  legalCommandsFor,
   botDecide,
   formatEvent,
   type GameState,
@@ -95,12 +95,42 @@ export class GameRoom {
   applyHumanCommand(playerId: string, command: Command): GameEvent[] {
     if (!this.started || !this.state) throw new Error("Game not started");
     if (this.state.phase === "finished") throw new Error("Game is finished");
-    const cp = currentPlayer(this.state);
-    if (cp.id !== playerId) throw new Error("Not your turn");
-    const legal = legalCommands(this.state);
+
+    // RESPOND_SWAP may come from the swap target, not the current-turn player
+    if (command.type === "RESPOND_SWAP") {
+      const swap = this.state.pendingSwap;
+      if (!swap) throw new Error("No pending swap offer");
+      if (swap.toId !== playerId) throw new Error("Only the swap target can respond");
+    } else {
+      const cp = currentPlayer(this.state);
+      if (cp.id !== playerId) throw new Error("Not your turn");
+    }
+
+    const legal = legalCommandsFor(this.state, playerId);
     if (!legal.includes(command.type)) throw new Error(`Command ${command.type} not legal`);
 
     const result = applyCommand(this.state, command);
+    this.state = result.state;
+    return result.events;
+  }
+
+  /**
+   * If there is a pending swap addressed to a bot player, resolve it automatically.
+   * Accept only if the bot receives at least as much crude value (property count + money)
+   * as it gives. Returns events or empty array if not applicable.
+   */
+  stepBotSwapResponse(): GameEvent[] {
+    if (!this.started || !this.state || !this.state.pendingSwap) return [];
+    const swap = this.state.pendingSwap;
+    const targetLobby = this.players.find((p) => p.id === swap.toId);
+    if (!targetLobby?.isBot) return [];
+
+    // Crude value: each property counts as 1 unit, money is money
+    const receiveValue = swap.receive.props.length + swap.receive.money;
+    const giveValue = swap.give.props.length + swap.give.money;
+    const accept = receiveValue >= giveValue;
+
+    const result = applyCommand(this.state, { type: "RESPOND_SWAP", accept });
     this.state = result.state;
     return result.events;
   }
@@ -109,6 +139,10 @@ export class GameRoom {
   stepBots(): GameEvent[] {
     if (!this.started || !this.state) return [];
     const allEvents: GameEvent[] = [];
+
+    // Resolve any pending bot swap response first
+    const swapEvents = this.stepBotSwapResponse();
+    allEvents.push(...swapEvents);
 
     while (this.state.phase !== "finished") {
       const cp = currentPlayer(this.state);

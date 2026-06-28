@@ -46,6 +46,10 @@ const de: Catalogue = {
   actionCardBroadcastPay: "{player} zahlt {amount} LPD an jeden Mitspieler ({card}).",
   actionCardBroadcastCollect: "{player} erhält {amount} LPD von jedem Mitspieler ({card}).",
   actionCardRepair: "{player} zahlt {amount} LPD für Reparaturen ({card}).",
+  swapProposed: "{from} bietet {to} einen Tausch an: gibt {giveProps} + {giveMoney} LPD, erhält {receiveProps} + {receiveMoney} LPD.",
+  swapAccepted: "{to} nimmt das Tauschangebot von {from} an: {giveProps} + {giveMoney} LPD gegen {receiveProps} + {receiveMoney} LPD.",
+  swapDeclined: "{to} lehnt das Tauschangebot von {from} ab.",
+  swapFailed: "Tausch zwischen {from} und {to} ist fehlgeschlagen ({reason}).",
 };
 
 const en: Catalogue = {
@@ -90,6 +94,10 @@ const en: Catalogue = {
   actionCardBroadcastPay: "{player} pays {amount} LPD to each other player ({card}).",
   actionCardBroadcastCollect: "{player} collects {amount} LPD from each other player ({card}).",
   actionCardRepair: "{player} pays {amount} LPD for repairs ({card}).",
+  swapProposed: "{from} offers {to} a swap: gives {giveProps} + {giveMoney} LPD, receives {receiveProps} + {receiveMoney} LPD.",
+  swapAccepted: "{to} accepts {from}'s swap offer: {giveProps} + {giveMoney} LPD for {receiveProps} + {receiveMoney} LPD.",
+  swapDeclined: "{to} declines {from}'s swap offer.",
+  swapFailed: "Swap between {from} and {to} failed ({reason}).",
 };
 
 const catalogues: Record<Locale, Catalogue> = { de, en };
