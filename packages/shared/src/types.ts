@@ -24,6 +24,14 @@ export type GamePhase =
   | "awaiting-buy"
   | "finished";
 
+export type EventId =
+  | 'circus'
+  | 'boom'
+  | 'recession'
+  | 'jackpot'
+  | 'buildingSale'
+  | 'quietDay';
+
 export interface GameState {
   boardId: string;
   rng: RngState;
@@ -47,6 +55,10 @@ export interface GameState {
   actionDiscard: number[];
   /** pending player-to-player swap offer, null when none */
   pendingSwap: PendingSwap | null;
+  /** current round number, starts at 1 */
+  round: number;
+  /** the special event active this round, null only before game starts */
+  activeEvent: { id: EventId } | null;
 }
 
 export interface SwapLeg {
