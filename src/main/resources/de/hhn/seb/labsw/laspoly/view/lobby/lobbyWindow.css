@@ -1,0 +1,111 @@
+.root {
+    -fx-color: rgb(240, 240, 240);
+    -fx-background-color: -fx-color;
+    /* Selection colors overwritten*/
+    -fx-focus-color: -fx-color;
+    -fx-accent: rgb(115, 115, 115);
+}
+
+#gamesTable {
+    -fx-base: -fx-color;
+    -fx-control-inner-background: -fx-color;
+    -fx-border-color: -fx-color;
+    -fx-border-width: 2, 2, 2, 2;
+    -fx-border-radius: 5;
+    -fx-background-insets: 0, 0;
+    -fx-table-cell-border-color: -fx-color;
+    -fx-table-header-border-color: -fx-color;
+    -fx-text-fill: black;
+}
+
+#gamesTable .column-header-background {
+    -fx-background-color: transparent;
+    visibility: hidden;
+    -fx-padding: -1em;
+}
+
+#gamesTable .table-row-cell:filled, #gamesTable .table-row-cell:filled .table-cell,
+#gamesTable .table-row-cell:empty, #gamesTable .table-row-cell:empty .table-cell, #gamesTable .table-row-cell,
+#gamesTable .cell:filled, #gamesTable .cell:empty, #gamesTable .label:filled, #gamesTable .label:empty {
+    fx-base: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-border-color: transparent;
+    -fx-background-color: transparent;
+    -fx-text-fill: black;
+    -fx-font-size: 14px;
+}
+
+
+#gamesTable .table-row-cell:row-selection, #gamesTable .table-row-cell:selected, #gamesTable .table-row-cell:cell-selection,
+#gamesTable .label:selected {
+    fx-base: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-border-color: transparent;
+    -fx-background-color: rgb(185, 185, 185);
+    -fx-background-radius: 5px;
+    -fx-text-fill: black;
+    -fx-font-size: 14px;
+}
+
+#gamesTable .column-header, #gamesTable .filler {
+    -fx-base: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 0;
+    -fx-border-insets: 0 0 0 0;
+}
+
+
+#gamesTable .scroll-bar:horizontal {
+    -fx-opacity: 0;
+    -fx-padding: -7;
+
+}
+
+#gamesTable .column-header .label {
+    -fx-font-size: 14pt;
+    -fx-text-fill: black;
+    -fx-alignment: center;
+    -fx-opacity: 1;
+    -fx-background-color: -fx-color;
+}
+
+
+.table-row-cell:selected {
+    -fx-background-color: lightslategrey;
+}
+
+.table-row-cell:selected .text {
+    -fx-fill: white;
+    -fx-font-weight: bold;
+}
+
+#gamesTableColID, #gamesTableColName, #gamesTableColQuantity {
+    -fx-alignment: CENTER;
+}
+
+#enterGame {
+    -fx-background-color: transparent;
+    -fx-fill: rgb(235, 172, 79);
+    -fx-text-fill: rgb(235, 172, 79);
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+}
+
+#addGame {
+    -fx-background-color: transparent;
+    -fx-fill: rgb(61, 135, 91);
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+}
+
+#idLabel, #nameLabel, #freePlacesLabel {
+    -fx-text-fill: -fx-accent;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+
+#bottom {
+    -fx-background-color: rgba(255, 255, 255, 1);
+}

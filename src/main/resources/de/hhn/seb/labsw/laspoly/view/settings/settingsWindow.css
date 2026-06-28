@@ -1,0 +1,164 @@
+.root {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+.column-header-background {
+    visibility: hidden;
+    -fx-padding: -1em;
+}
+
+.scroll-bar:horizontal {
+    -fx-opacity: 0;
+    -fx-padding: -7;
+}
+
+#generalKeyBindingColumn {
+    -fx-alignment: CENTER;
+}
+
+#gameKeyBindingColumn {
+    -fx-alignment: CENTER;
+}
+
+#tabPane {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+#tabPane *.tab-header-background {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#tabPane .tab {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#tabPane .tab {
+    -fx-padding: 5 5 5 5;
+    -fx-border-color: white;
+    -fx-border-width: 1 1 0 1;
+    -fx-border-radius: 10 10 0 0;
+}
+
+#tabPane .tab:selected {
+    -fx-padding: 5 5 5 5;
+    -fx-border-color: white;
+    -fx-border-width: 1 1 0 1;
+    -fx-border-radius: 10 10 0 0;
+}
+
+#tabPane .tab:focused {
+    -fx-background-color: -fx-outer-border, -fx-inner-border, -fx-body-color;
+    -fx-background-insets: 0, 1, 2;
+    -fx-background-radius: 5, 4, 3;
+}
+
+#tabPane .tab .tab-label {
+    -fx-text-fill: white;
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-min-height: 100px;
+    -fx-focus-color: transparent;
+}
+
+#tabPane .tab:selected .tab-label {
+    -fx-text-fill: black;
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-min-height: 100px;
+    -fx-focus-color: transparent;
+}
+
+#tabPane .tab-header-background, #tabPane .tab-header-area {
+    -fx-min-height: 200px;
+}
+
+#tabPane .tab, #tabPane .tab-header-area, #tabPane .headers-region, #tabPane .tab-header-background,
+#tabPane .control-buttons-tab, #tabPane .tab-down-button, #tabPane .arrow, #tabPane .tab-label,
+#tabPane .tab-close-button {
+    -fx-focus-color: transparent;
+}
+
+.toggleMute:selected {
+    -fx-background-image: url("/de/hhn/seb/labsw/laspoly/view/settings/unmute.png");
+    -fx-background-color: transparent;
+    -fx-background-size: contain;
+    -fx-background-repeat: no-repeat;
+    -fx-pref-width: 20px;
+    -fx-pref-height: 20px;
+}
+
+.toggleMute {
+    -fx-background-image: url("/de/hhn/seb/labsw/laspoly/view/settings/mute.png");
+    -fx-background-color: transparent;
+    -fx-background-size: contain;
+    -fx-background-repeat: no-repeat;
+    -fx-pref-width: 20px;
+    -fx-pref-height: 20px;
+}
+
+#save {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(235, 172, 79);
+    -fx-font-weight: bold;
+}
+
+/* TAB KEYS */
+
+#general, #game {
+    -fx-background-color: rgb(240, 240, 240);
+    -fx-text-fill: rgb(115, 115, 115);
+    -fx-font-weight: bold;
+}
+
+#general .title, #game .title {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(115, 115, 115);
+    -fx-font-weight: bold;
+}
+
+#general .text, #game .text {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(115, 115, 115);
+}
+
+#generalKeyBindingsTable, #gameKeyBindingsTable {
+    -fx-base: rgb(240, 240, 240);
+    -fx-control-inner-background: rgb(240, 240, 240);
+    -fx-border-color: rgb(240, 240, 240);
+    -fx-border-width: 0 0 0 0;
+    -fx-border-radius: 0;
+    -fx-background-insets: 0, 0;
+    -fx-table-cell-border-color: rgb(240, 240, 240);
+    -fx-table-header-border-color: rgb(240, 240, 240);
+}
+
+#generalKeyBindingsTable .table-row-cell, #gameKeyBindingsTable .table-row-cell {
+    fx-base: rgb(240, 240, 240);
+    -fx-control-inner-background: rgb(240, 240, 240);
+    -fx-border-color: rgb(240, 240, 240);
+    -fx-background-color: rgb(240, 240, 240);
+    -fx-text-fill: rgb(240, 240, 240);
+    -fx-font-weight: bold;
+    -fx-font-size: 14px;
+}
+
+#generalKeyBindingsTable .list-cell, #gameKeyBindingsTable .list-cell {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+#generalKeyBindingsTable .list-cell:even, #gameKeyBindingsTable .list-cell:even {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+#generalKeyBindingsTable .list-cell:odd, #gameKeyBindingsTable .list-cell:odd {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+/* TAB SOUND */
+
+#backgroundMusicLabel, #soundEffectsLabel, #soundLabel {
+    -fx-text-fill: rgb(115, 115, 115);
+    -fx-font-weight: bold;
+}
+
+

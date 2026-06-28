@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+
+<?import javafx.scene.control.Label?>
+<Label alignment="CENTER" maxHeight="30.0" maxWidth="80.0" prefHeight="30.0" prefWidth="80.0"
+       style="-fx-background-radius: 7; -fx-background-color: red; -fx-text-fill: white;" text="Lorem ipsum"
+       textAlignment="CENTER" xmlns="http://javafx.com/javafx/8"/>

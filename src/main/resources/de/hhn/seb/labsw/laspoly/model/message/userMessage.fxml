@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import java.net.URL?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" maxHeight="1.7976931348623157E308"
+            maxWidth="1.7976931348623157E308" prefWidth="220.0" styleClass="root" xmlns="http://javafx.com/javafx/8">
+    <children>
+        <Label fx:id="time" layoutX="14.0" layoutY="6.0" text="Lorem ipsum" AnchorPane.leftAnchor="5.0"
+               AnchorPane.rightAnchor="170.0" AnchorPane.topAnchor="2.0"/>
+        <Label fx:id="name" layoutX="62.0" layoutY="6.0" text="Lorem ipsum" AnchorPane.leftAnchor="50.0"
+               AnchorPane.rightAnchor="110.0" AnchorPane.topAnchor="2.0"/>
+        <Label fx:id="message" layoutX="124.0" layoutY="6.0" text="Lorem ipsum" wrapText="true"
+               AnchorPane.leftAnchor="120.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="2.0"/>
+    </children>
+    <stylesheets>
+        <URL value="@userMessage.css"/>
+    </stylesheets>
+</AnchorPane>

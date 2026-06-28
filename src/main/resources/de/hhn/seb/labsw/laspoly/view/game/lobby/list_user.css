@@ -1,0 +1,25 @@
+#hostLabel {
+    -fx-font-weight: bold;
+    -fx-text-fill: #e60d43;
+}
+
+#kickPane {
+    -fx-background-color: rgba(100,100,100, 0.95);
+    -fx-background-radius: 5px;
+    -fx-background-insets: 2 2 2 2;
+}
+
+#kickPlayerLabel {
+    -fx-text-fill: rgb(255, 255, 255);
+    -fx-font-weight: bold;
+}
+
+#kickPlayerButton {
+    -fx-background-radius: 25px;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.2), 2, 0, 0, 0);
+}
+
+#userNameLabel {
+    -fx-text-fill: rgb(115, 115, 115);
+    -fx-font-weight: bold;
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.AnchorPane?>
+<?import java.net.URL?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" maxHeight="-Infinity" maxWidth="-Infinity"
+            minHeight="-Infinity"
+            minWidth="-Infinity" xmlns="http://javafx.com/javafx/8"
+            prefHeight="450.0" prefWidth="600.0"
+            fx:controller="de.hhn.seb.labsw.laspoly.view.settings.TabGeneralController">
+
+    <stylesheets>
+        <URL value="@settingsWindow.css"/>
+    </stylesheets>
+    <children>
+
+    </children>
+</AnchorPane>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ChoiceBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.AnchorPane?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" maxHeight="650.0" maxWidth="1.7976931348623157E308"
+            minHeight="421.0" minWidth="553.0" prefHeight="462.0" prefWidth="553.0" styleClass="root"
+            xmlns="http://javafx.com/javafx/8" fx:controller="de.hhn.seb.labsw.laspoly.debug.DebuggerController">
+    <children>
+        <TabPane layoutX="0.0" layoutY="0.0" prefHeight="600.0" prefWidth="600.0" tabClosingPolicy="UNAVAILABLE" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+            <tabs>
+                <Tab text="Main">
+                    <content>
+                        <AnchorPane id="Content" minHeight="0.0" minWidth="0.0" prefHeight="180.0" prefWidth="200.0">
+                            <children>
+                                <Button layoutX="66.0" layoutY="96.0" mnemonicParsing="false" onAction="#clearAll" text="Clear everything" />
+                                <Button layoutX="31.0" layoutY="45.0" mnemonicParsing="false" onAction="#startMainJava"
+                                        text="Start Main.java"/>
+                            </children>
+                        </AnchorPane>
+                    </content>
+                </Tab>
+                <Tab text="Users">
+                    <content>
+                        <AnchorPane id="Content" minHeight="0.0" minWidth="0.0" prefHeight="564.0" prefWidth="600.0">
+                            <children>
+                                <Button layoutX="30.0" layoutY="30.0" mnemonicParsing="false" onAction="#clearAllUsers" text="Delete all" />
+                            </children>
+                        </AnchorPane>
+                    </content>
+                </Tab>
+                <Tab text="Games">
+                    <content>
+                        <AnchorPane id="Content" minHeight="0.0" minWidth="0.0" prefHeight="180.0" prefWidth="200.0">
+                            <children>
+                                <Button layoutX="30.0" layoutY="30.0" mnemonicParsing="false" onAction="#clearAllGames" text="Delete all" />
+                                <Label layoutX="30.0" layoutY="104.0" text="Game name" />
+                                <TextField fx:id="gameName" layoutX="30.0" layoutY="129.0" />
+                                <Button layoutX="30.0" layoutY="167.0" mnemonicParsing="false" onAction="#addGame" text="Add game" />
+                                <ListView fx:id="gamesList" layoutX="300.0" layoutY="20.0" prefHeight="435.0" prefWidth="279.0" />
+                                <Button layoutX="486.0" layoutY="470.0" mnemonicParsing="false" onAction="#deleteGame" text="Delete game" />
+                            </children>
+                        </AnchorPane>
+                    </content>
+                </Tab>
+                <Tab text="GameScene">
+                    <content>
+                        <AnchorPane minHeight="0.0" minWidth="0.0" prefHeight="180.0" prefWidth="200.0">
+                            <children>
+                                <Button layoutX="192.0" layoutY="14.0" mnemonicParsing="false" onAction="#startGameScene" text="Start GameScene" />
+                                <TextField fx:id="localeField" layoutX="85.0" layoutY="14.0" prefHeight="25.0" prefWidth="85.0" promptText="Locale" text="en" />
+                                <Label layoutX="24.0" layoutY="18.0" text="Locale:" />
+                                <ChoiceBox fx:id="perspectivechoicebox" layoutX="80.0" layoutY="88.0" prefWidth="150.0" />
+                                <Label layoutX="26.0" layoutY="63.0" text="Change Perspective:" />
+                                <Button fx:id="perspectiveapplybutton" layoutX="80.0" layoutY="157.0" mnemonicParsing="false" text="Start" />
+                                <Label layoutX="26.0" layoutY="210.0" text="Camera Policy:" />
+                                <ChoiceBox fx:id="camprefcheckbox" layoutX="80.0" layoutY="235.0" prefWidth="150.0" />
+                                <Button fx:id="camprefButton" layoutX="80.0" layoutY="272.0" mnemonicParsing="false" text="Apply" />
+                                <TextField fx:id="camanimtextfield" layoutX="152.0" layoutY="123.0" prefHeight="25.0" prefWidth="78.0" text="2000" />
+                                <Label layoutX="80.0" layoutY="127.0" text="Duration:" />
+                                <Button fx:id="showactioncardButton" layoutX="26.0" layoutY="332.0" mnemonicParsing="false" text="Show an ActionCard" />
+                            </children>
+                        </AnchorPane>
+                    </content>
+                </Tab>
+            </tabs>
+        </TabPane>
+    </children>
+</AnchorPane>

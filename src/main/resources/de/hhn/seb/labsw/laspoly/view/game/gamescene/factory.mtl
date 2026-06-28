@@ -1,0 +1,105 @@
+#
+## Alias OBJ Material File
+# Exported from SketchUp, (c) 2000-2012 Trimble Navigation Limited
+
+newmtl Metal3
+Ka 0.000000 0.000000 0.000000
+Kd 0.474510 0.462745 0.443137
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/Metal3.png
+
+newmtl ceiling1
+Ka 0.000000 0.000000 0.000000
+Kd 0.388235 0.313725 0.274510
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/ceiling1.png
+
+newmtl Cladding_Plaster_White_Dirty
+Ka 0.000000 0.000000 0.000000
+Kd 0.709804 0.717647 0.666667
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/Cladding_Plaster_White_Dirty.jpg
+
+newmtl wood3a
+Ka 0.000000 0.000000 0.000000
+Kd 0.368627 0.282353 0.215686
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/wood3a.png
+
+newmtl FrontColor
+Ka 0.000000 0.000000 0.000000
+Kd 1.000000 1.000000 1.000000
+Ks 0.330000 0.330000 0.330000
+
+newmtl _4
+Ka 0.000000 0.000000 0.000000
+Kd 0.662745 0.647059 0.603922
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_4.jpg
+
+newmtl Metal_Rusted
+Ka 0.000000 0.000000 0.000000
+Kd 0.721569 0.458824 0.356863
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/Metal_Rusted.jpg
+
+newmtl _3
+Ka 0.000000 0.000000 0.000000
+Kd 0.486275 0.431373 0.388235
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_3.jpg
+
+newmtl concrete10
+Ka 0.000000 0.000000 0.000000
+Kd 0.713725 0.698039 0.666667
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/concrete10.jpg
+
+newmtl _14
+Ka 0.000000 0.000000 0.000000
+Kd 0.576471 0.603922 0.576471
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_14.jpg
+
+newmtl Metal_Rough
+Ka 0.000000 0.000000 0.000000
+Kd 0.600000 0.615686 0.627451
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/Metal_Rough.jpg
+
+newmtl _Metal_Rough_1
+Ka 0.000000 0.000000 0.000000
+Kd 0.600000 0.615686 0.627451
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_Metal_Rough_1.jpg
+
+newmtl _21
+Ka 0.000000 0.000000 0.000000
+Kd 0.525490 0.545098 0.494118
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_21.jpg
+
+newmtl concrete1
+Ka 0.000000 0.000000 0.000000
+Kd 0.580392 0.576471 0.517647
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/concrete1.jpg
+
+newmtl Wood_Plank_Light
+Ka 0.000000 0.000000 0.000000
+Kd 0.717647 0.490196 0.341176
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/Wood_Plank_Light.jpg
+
+newmtl _2
+Ka 0.000000 0.000000 0.000000
+Kd 0.717647 0.705882 0.674510
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_2.jpg
+
+newmtl _1
+Ka 0.000000 0.000000 0.000000
+Kd 0.721569 0.705882 0.674510
+Ks 0.330000 0.330000 0.330000
+map_Kd factory/_1.jpg
+

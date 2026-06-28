@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Slider?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import java.net.URL?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" prefHeight="420.0" prefWidth="600.0"
+            xmlns="http://javafx.com/javafx/8"
+            fx:controller="de.hhn.seb.labsw.laspoly.view.settings.TabSoundController">
+
+    <stylesheets>
+        <URL value="@settingsWindow.css"/>
+    </stylesheets>
+    <children>
+        <Label fx:id="backgroundMusicLabel" layoutX="32.0" layoutY="43.0" text="Lorem ipsum"
+               AnchorPane.leftAnchor="25.0" AnchorPane.topAnchor="75.0"/>
+        <Label fx:id="soundEffectsLabel" layoutX="49.0" layoutY="103.0" text="Lorem ipsum"
+               AnchorPane.leftAnchor="25.0" AnchorPane.topAnchor="125.0"/>
+        <Slider fx:id="backgroundMusicSlider" blockIncrement="0.1" layoutX="332.0" layoutY="43.0"
+                max="1.0" value="1.0" AnchorPane.leftAnchor="250.0" AnchorPane.rightAnchor="100.0"
+                AnchorPane.topAnchor="75.0"/>
+        <Slider fx:id="soundEffectSlider" blockIncrement="0.1" layoutX="192.0" layoutY="111.0" max="1.0" value="1.0"
+                AnchorPane.leftAnchor="250.0" AnchorPane.rightAnchor="100.0" AnchorPane.topAnchor="125.0"/>
+        <ToggleButton fx:id="backgroundMusicCheckBox" layoutX="228.0" layoutY="42.0" mnemonicParsing="false"
+                      onAction="#backgroundMusicChecked" selected="true" AnchorPane.leftAnchor="180.0"
+                      AnchorPane.topAnchor="75.0" styleClass="toggleMute"/>
+        <ToggleButton fx:id="soundEffectsCheckBox" layoutX="101.0" layoutY="102.0" mnemonicParsing="false"
+                      onAction="#soundEffectsChecked" selected="true" AnchorPane.leftAnchor="180.0"
+                      AnchorPane.topAnchor="125.0" styleClass="toggleMute"/>
+        <Label fx:id="soundLabel" layoutX="32.0" layoutY="27.0" text="Lorem ipsum" AnchorPane.leftAnchor="25.0"
+               AnchorPane.topAnchor="25.0"/>
+        <ToggleButton fx:id="soundCheckBox" layoutX="161.0" layoutY="16.0" mnemonicParsing="false"
+                      onAction="#soundChecked"
+                      selected="true" AnchorPane.leftAnchor="180.0" AnchorPane.topAnchor="25.0"
+                      styleClass="toggleMute"/>
+        <Slider fx:id="soundSlider" blockIncrement="0.1" layoutX="259.0" layoutY="17.0" max="1.0" value="1.0"
+                AnchorPane.leftAnchor="250.0" AnchorPane.rightAnchor="100.0" AnchorPane.topAnchor="25.0"/>
+    </children>
+</AnchorPane>

@@ -1,0 +1,19 @@
+#titleLabel {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+#buybutton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+
+}
+
+#cancelbutton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(230, 13, 67);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}

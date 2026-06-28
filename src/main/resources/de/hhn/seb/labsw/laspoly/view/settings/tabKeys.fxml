@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Accordion?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import java.net.URL?>
+<Accordion xmlns:fx="http://javafx.com/fxml/1" fx:id="root" prefHeight="300.0" prefWidth="600.0"
+           xmlns="http://javafx.com/javafx/8"
+           fx:controller="de.hhn.seb.labsw.laspoly.view.settings.TabKeysController">
+
+    <stylesheets>
+        <URL value="@settingsWindow.css"/>
+    </stylesheets>
+    <panes>
+        <TitledPane fx:id="general" animated="true" text="Lorem ipsum" expanded="true">
+            <content>
+                <AnchorPane minHeight="0.0" minWidth="0.0">
+                    <children>
+                        <TableView fx:id="generalKeyBindingsTable" layoutX="68.0" layoutY="39.0"
+                                   AnchorPane.bottomAnchor="0.0"
+                                   AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+                            <columns>
+                                <TableColumn fx:id="generalDescriptionColumn" maxWidth="400.0" minWidth="400.0"
+                                             prefWidth="400.0" resizable="false"
+                                             text="Lorem ipsum"/>
+                                <TableColumn fx:id="generalKeyBindingColumn" maxWidth="200.0" minWidth="200.0"
+                                             prefWidth="200.0" resizable="false"
+                                             text="Lorem ipsum"/>
+                            </columns>
+                        </TableView>
+                    </children>
+                    <padding>
+                        <Insets bottom="0" left="0" right="0" top="0"/>
+                    </padding>
+                </AnchorPane>
+            </content>
+        </TitledPane>
+        <TitledPane fx:id="game" animated="true" text="Lorem ipsum">
+            <content>
+                <AnchorPane minHeight="0.0" minWidth="0.0">
+                    <children>
+                        <TableView fx:id="gameKeyBindingsTable" layoutX="68.0" layoutY="39.0"
+                                   AnchorPane.bottomAnchor="0.0"
+                                   AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+                            <columns>
+                                <TableColumn fx:id="gameDescriptionColumn" maxWidth="400.0" minWidth="400.0"
+                                             prefWidth="400.0" resizable="false"
+                                             text="Lorem ipsum"/>
+                                <TableColumn fx:id="gameKeyBindingColumn" maxWidth="200.0" minWidth="200.0"
+                                             prefWidth="200.0" resizable="false"
+                                             text="Lorem ipsum"/>
+                            </columns>
+                        </TableView>
+                    </children>
+                    <padding>
+                        <Insets bottom="0" left="0" right="0" top="0"/>
+                    </padding>
+                </AnchorPane>
+            </content>
+        </TitledPane>
+    </panes>
+</Accordion>

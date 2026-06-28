@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.ProgressIndicator?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.effect.DropShadow?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Pane?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.text.Font?>
+<?import java.net.URL?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" fx:id="root" minHeight="605" minWidth="850"
+            xmlns="http://javafx.com/javafx/8" fx:controller="de.hhn.seb.labsw.laspoly.view.game.GameController">
+    <children>
+        <AnchorPane fx:id="topRoot" layoutY="0.0" maxHeight="75.0" minHeight="75.0" minWidth="600.0" prefHeight="75.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+            <children>
+                <Label fx:id="gameLabel" layoutX="60.0" layoutY="27.0" minHeight="-1.0" prefHeight="23.0" prefWidth="250.0" text="Lorem Ipsum" AnchorPane.leftAnchor="25.0" />
+                <Button fx:id="about" layoutX="765.0" layoutY="29.0" mnemonicParsing="false" onAction="#onAboutClicked" styleClass="topButton" AnchorPane.bottomAnchor="20.0" AnchorPane.rightAnchor="40.0" AnchorPane.topAnchor="25.0" />
+                <Button fx:id="settings" layoutX="727.0" layoutY="29.0" mnemonicParsing="false" onAction="#onSettingsClicked" styleClass="topButton" AnchorPane.bottomAnchor="20.0" AnchorPane.rightAnchor="90.0" AnchorPane.topAnchor="25.0">
+                    <padding>
+                        <Insets bottom="0" left="0" right="0" top="0" />
+                    </padding>
+                </Button>
+                <Button fx:id="close" layoutX="804.0" layoutY="29.0" mnemonicParsing="false" onAction="#onCloseClicked" styleClass="topButton" AnchorPane.bottomAnchor="20.0" AnchorPane.rightAnchor="10.0" AnchorPane.topAnchor="25.0">
+                    <padding>
+                        <Insets bottom="0" left="0" right="0" top="0" />
+                    </padding>
+                </Button>
+                <Label fx:id="turnLabel" alignment="CENTER" layoutX="200.0" layoutY="20.0" prefWidth="450.0" text="Lorem Ipsum" AnchorPane.bottomAnchor="20.0" AnchorPane.leftAnchor="200.0" AnchorPane.rightAnchor="200.0" AnchorPane.topAnchor="20.0" />
+                <Button fx:id="standardView" layoutX="539.0" layoutY="21.0" maxHeight="31.0" mnemonicParsing="false" onAction="#showStandardView" prefWidth="200.0" text="Lorem ipsum" AnchorPane.rightAnchor="130.0" AnchorPane.topAnchor="20.0" />
+            </children>
+            <padding>
+                <Insets />
+            </padding>
+            <stylesheets>
+                <URL value="@gameWindow.css" />
+            </stylesheets>
+        </AnchorPane>
+        <StackPane id="gamescenestack" layoutY="75.0" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="75.0">
+            <children>
+                <Pane fx:id="gameSceneArea" layoutY="75.0" prefHeight="500.0" prefWidth="850.0" AnchorPane.bottomAnchor="30.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="75.0" />
+                <ProgressIndicator id="progressindicator" maxWidth="200.0" opacity="0.51" prefWidth="0.0">
+                    <StackPane.margin>
+                        <Insets />
+                    </StackPane.margin>
+                </ProgressIndicator>
+            </children>
+        </StackPane>
+        <AnchorPane fx:id="chatPane" prefWidth="300.0" AnchorPane.bottomAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="75.0" visible="false">
+            <children>
+                <ListView fx:id="chatList" AnchorPane.bottomAnchor="70.0" AnchorPane.leftAnchor="5.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="35.0" />
+                  <TextField fx:id="messageBox" layoutX="5.0" layoutY="502.0" onAction="#onSendMessage" prefHeight="25.0" prefWidth="300.0" AnchorPane.bottomAnchor="40.0" AnchorPane.leftAnchor="5.0" AnchorPane.rightAnchor="5.0">
+               <font>
+                  <Font size="12.0" />
+               </font></TextField>
+                  <Button fx:id="sendChatButton" layoutX="245.0" layoutY="502.0" minWidth="-Infinity" mnemonicParsing="false" onAction="#onSendMessage" prefHeight="25.0" text="Lorem" AnchorPane.bottomAnchor="5.0" AnchorPane.leftAnchor="5.0" />
+                <HBox alignment="CENTER" layoutX="23.0" layoutY="143.0" AnchorPane.leftAnchor="40.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+                    <children>
+                        <ToggleButton fx:id="togglesystem" mnemonicParsing="false" onAction="#toggleMessageFilter"
+                                      style="-fx-background-radius: 10 0 0 10;" text="Lorem">
+                     <font>
+                        <Font size="12.0" />
+                     </font></ToggleButton>
+                        <ToggleButton fx:id="toggleall" mnemonicParsing="false" onAction="#toggleMessageFilter"
+                                      selected="true" style="-fx-background-radius: 0 0 0 0;" text="Lorem">
+                     <font>
+                        <Font size="12.0" />
+                     </font></ToggleButton>
+                        <ToggleButton fx:id="toggleuser" mnemonicParsing="false" onAction="#toggleMessageFilter"
+                                      style="-fx-background-radius: 0 10 10 0;" text="Lorem">
+                     <font>
+                        <Font size="12.0" />
+                     </font></ToggleButton>
+                    </children>
+                    <padding>
+                        <Insets bottom="5.0" left="5.0" right="30.0" top="5.0" />
+                    </padding>
+                </HBox>
+                <HBox fx:id="closeHbox" prefHeight="26.0" prefWidth="0.0" AnchorPane.leftAnchor="5.0" AnchorPane.topAnchor="5.0">
+                    <children>
+                        <ImageView fitHeight="22.0" fitWidth="22.0" pickOnBounds="true" preserveRatio="true">
+                            <image>
+                                <Image url="@lobby/cross.png" />
+                            </image>
+                        </ImageView>
+                    </children>
+                </HBox>
+            </children>
+         <effect>
+            <DropShadow color="WHITE" />
+         </effect>
+        </AnchorPane>
+      <HBox fx:id="showChatHbox" alignment="CENTER" onMouseReleased="#onToggleChatPane" spacing="5.0" style="-fx-padding: 2 12 2 8;" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="80.0">
+         <children>
+            <ImageView fitHeight="32.0" fitWidth="32.0" pickOnBounds="true" preserveRatio="true">
+               <image>
+                  <Image url="@gamescene/envelope.png" />
+               </image>
+            </ImageView>
+            <Label fx:id="notificationCounter" alignment="CENTER" minWidth="20.0" style="-fx-background-color: rgb(240,20,20); -fx-text-fill: white; -fx-background-radius: 30; -fx-padding: 2 2 2 2;" text="1">
+               <font>
+                  <Font size="12.0" />
+               </font></Label>
+         </children>
+      </HBox>
+    </children>
+    <stylesheets>
+        <URL value="@gameWindow.css" />
+    </stylesheets>
+</AnchorPane>

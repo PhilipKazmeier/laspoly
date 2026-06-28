@@ -1,0 +1,35 @@
+#nameLabel {
+    -fx-font-size: 18px;
+    -fx-fill: white;
+}
+
+#topRoot {
+    -fx-background-color: rgb(235, 172, 79);
+    -fx-border-width: 0 0 0 0;
+}
+
+
+.topButton {
+    -fx-background-radius: 25;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.2), 2, 0, 0, 0);
+}
+
+.root {
+    -fx-background-color: rgb(200, 200, 200);
+    /* Selection colors overwritten*/
+    -fx-focus-color: rgb(200, 200, 200);
+    -fx-accent: rgb(200, 200, 200);
+}
+
+#about, #settings {
+    -fx-background-color: transparent;
+    -fx-fill: transparent;
+}
+
+#content {
+    -fx-background-color: rgb(200, 200, 200);
+}
+
+#contentContainer {
+    -fx-background-color: rgb(200, 200, 200);
+}

@@ -1,0 +1,43 @@
+.root {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+#rootPane {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+#actionCardLabel {
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
+
+#topRoot {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#actionCardText {
+    -fx-font-size: 15px;
+    -fx-text-fill: rgb(115, 115, 115);;
+}
+
+#actionCardLabel {
+    -fx-text-fill: white;
+}
+
+#confirm {
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-weight: bold;
+    -fx-background-color: transparent;
+}
+
+#optionOne {
+    -fx-text-fill: rgb(85, 151, 209);
+    -fx-font-weight: bold;
+    -fx-background-color: transparent;
+}
+
+#optionTwo {
+    -fx-text-fill: rgb(235, 172, 79);
+    -fx-font-weight: bold;
+    -fx-background-color: transparent;
+}

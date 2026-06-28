@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import java.net.*?>
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+<?import java.net.URL?>
+
+<VBox maxWidth="280.0" prefWidth="280.0" style="-fx-border-color: darkgrey; -fx-border-width: 0 0 1 0;" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1">
+    <children>
+        <AnchorPane prefHeight="20.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+            <children>
+                <Label fx:id="name" text="Label" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="5.0" AnchorPane.rightAnchor="70.0" AnchorPane.topAnchor="0.0" />
+                <Label fx:id="time" alignment="CENTER_RIGHT" layoutX="151.0" layoutY="10.0" prefHeight="27.0" prefWidth="124.0" style="-fx-text-fill: #232323;" text="dfgdfgdfgdfg" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="151.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="0.0">
+               <padding>
+                  <Insets right="15.0" />
+               </padding></Label>
+            </children>
+        </AnchorPane>
+        <AnchorPane>
+            <children>
+                <HBox>
+                    <children>
+                        <Label fx:id="message" maxWidth="260.0" text="Lorem" wrapText="true" AnchorPane.bottomAnchor="5.0" AnchorPane.leftAnchor="42.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="0.0">
+                            <font>
+                                <Font size="14.0" />
+                            </font>
+                            <padding>
+                                <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
+                            </padding>
+                        </Label>
+                    </children>
+                </HBox>
+            </children>
+        </AnchorPane>
+    </children>
+    <stylesheets>
+        <URL value="@message.css" />
+    </stylesheets>
+</VBox>

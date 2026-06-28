@@ -1,0 +1,9 @@
+.toggle-button:selected {
+    -fx-border-color: #0027a3;
+    -fx-border-radius: 5px;
+}
+
+.toggle-button {
+    -fx-border-color: -fx-color;
+    -fx-border-radius: 5px;
+}

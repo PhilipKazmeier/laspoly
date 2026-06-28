@@ -1,0 +1,44 @@
+#rootPane {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+.list-cell:filled:selected .list-cell:visited {
+    -fx-background-color: rgb(240,240,240);
+}
+
+.list-cell:even {
+    -fx-background-color: rgb(240,240,240);
+}
+
+.list-cell:odd {
+    -fx-background-color: rgb(240,240,240);
+}
+
+
+.list-cell:filled:hover {
+    -fx-background-color: rgb(240,240,240);
+
+
+}
+
+.list-view {
+    -fx-background-color: rgb(240,240,240);
+}
+
+#titlelabel {
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+    -fx-font-size: 15;
+}
+
+#moneyLabel {
+    -fx-text-fill: white;
+    -fx-font-size: 15;
+}
+
+.button {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}

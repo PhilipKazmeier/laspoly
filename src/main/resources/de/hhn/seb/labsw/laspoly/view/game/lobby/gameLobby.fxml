@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
+<?import java.net.URL?>
+<AnchorPane fx:id="root" minHeight="525.0" minWidth="600.0" styleClass="root" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1" fx:controller="de.hhn.seb.labsw.laspoly.view.game.lobby.GameLobbyController">
+    <stylesheets>
+        <URL value="@gameLobby.css" />
+    </stylesheets>
+    <children>
+        <ListView fx:id="playerList" layoutX="25.0" layoutY="26.0" prefHeight="180.0" prefWidth="330.0" AnchorPane.leftAnchor="25.0" AnchorPane.topAnchor="26.0" />
+        <AnchorPane fx:id="figurePane" layoutX="392.0" layoutY="20.0" prefHeight="234.0" prefWidth="150.0" AnchorPane.bottomAnchor="85.0" AnchorPane.rightAnchor="25.0">
+            <children>
+                <Label fx:id="labelChooseFigure" alignment="CENTER" prefHeight="21.0" prefWidth="114.0" text="Choose figure" textAlignment="CENTER" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0" >
+                    <font>
+                        <Font size="12.0" />
+                    </font>
+                </Label>
+                <Pane fx:id="figureViewPane" layoutX="13.0" layoutY="39.0" prefHeight="100.0" prefWidth="150.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="39.0" />
+                <Button fx:id="toLeft" mnemonicParsing="false" onAction="#moveLeftFigureList" AnchorPane.leftAnchor="40.0" AnchorPane.topAnchor="150.0" />
+                <Button fx:id="toRight" mnemonicParsing="false" onAction="#moveRightFigureList" AnchorPane.rightAnchor="40.0" AnchorPane.topAnchor="150.0" />
+                <Button fx:id="selectFigure" alignment="CENTER" ellipsisString="." layoutX="14.0" layoutY="187.0" mnemonicParsing="false" onAction="#selectFigure" prefHeight="25.0" text="Select" AnchorPane.bottomAnchor="5.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" />
+            </children>
+        </AnchorPane>
+        <Label fx:id="notEnoughPlayerLabel" alignment="CENTER" layoutX="465.0" layoutY="360.0" prefWidth="150.0" text="You need two players to start a game." textAlignment="CENTER" visible="false" wrapText="true" AnchorPane.rightAnchor="25.0" AnchorPane.topAnchor="25.0" >
+            <font>
+                <Font size="12.0" />
+            </font>
+        </Label>
+        <Label fx:id="readyLabel" layoutX="350.0" layoutY="6.0" text="Ready" AnchorPane.leftAnchor="295.0" AnchorPane.topAnchor="10.0" >
+            <font>
+                <Font size="12.0" />
+            </font>
+        </Label>
+        <AnchorPane layoutX="177.0" layoutY="350.0" prefHeight="80.0" style="-fx-background-color: white;" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0">
+            <children>
+                <Pane prefHeight="5.0" style="-fx-background-color: #EBAC4F;" AnchorPane.leftAnchor="25.0" AnchorPane.rightAnchor="25.0" AnchorPane.topAnchor="0.0" />
+                <ImageView fitHeight="60.0" fitWidth="60.0" layoutX="422.0" layoutY="-35.0" pickOnBounds="true" preserveRatio="true" AnchorPane.bottomAnchor="10.0" AnchorPane.rightAnchor="25.0" AnchorPane.topAnchor="10.0">
+                    <image>
+                        <Image url="@../../LasPolyLogoFree.png" />
+                    </image>
+                </ImageView>
+            <HBox layoutX="25.0" layoutY="20.0" spacing="10.0">
+               <children>
+                      <Button fx:id="leaveGameButton" ellipsisString="." mnemonicParsing="false" onAction="#closeGame" prefHeight="39.0" text="Lorem Ipsum" AnchorPane.bottomAnchor="20.0" AnchorPane.leftAnchor="25.0" AnchorPane.topAnchor="20.0" />
+                      <Button fx:id="startGameButton"  mnemonicParsing="false" onAction="#startGame" prefHeight="39.0" text="Lorem Ipsum" visible="false" AnchorPane.bottomAnchor="20.0" AnchorPane.leftAnchor="200.0" AnchorPane.topAnchor="20.0" />
+               </children>
+            </HBox>
+            </children>
+        </AnchorPane>
+        <Pane layoutX="190.0" layoutY="-100.0" prefHeight="5.0" style="-fx-background-color: rgb(115, 115, 115);" AnchorPane.leftAnchor="25.0" AnchorPane.rightAnchor="25.0" AnchorPane.topAnchor="0.0" />
+        <AnchorPane fx:id="chatRoot" layoutX="14.0" layoutY="195.0" AnchorPane.bottomAnchor="85.0" AnchorPane.leftAnchor="25.0" AnchorPane.rightAnchor="195.0" AnchorPane.topAnchor="205.0">
+            <children>
+                <ListView fx:id="chat" prefHeight="180.0" prefWidth="370.0" AnchorPane.bottomAnchor="50.0" AnchorPane.leftAnchor="5.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="5.0" />
+                <Button fx:id="sendMessage" disable="true" ellipsisString="." mnemonicParsing="false" onAction="#sendChatMessage" prefHeight="30.0" prefWidth="125.0" text="Send" AnchorPane.bottomAnchor="5.0" AnchorPane.rightAnchor="5.0" />
+                <TextField fx:id="chatMessage" onAction="#sendChatMessage" prefHeight="30.0" AnchorPane.bottomAnchor="5.0" AnchorPane.leftAnchor="5.0" AnchorPane.rightAnchor="135.0" />
+            </children>
+        </AnchorPane>
+
+    </children>
+</AnchorPane>

@@ -1,0 +1,16 @@
+.label {
+    -fx-text-fill: black;
+}
+
+.label :selected {
+    -fx-text-fill: black;
+}
+
+.label :cell-selection {
+    -fx-text-fill: black;
+}
+
+#name {
+    -fx-font-weight: bold;
+    -fx-text-fill:  rgb(235, 172, 79);
+}

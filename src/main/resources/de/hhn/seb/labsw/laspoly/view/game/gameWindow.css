@@ -1,0 +1,81 @@
+
+#chatPane {
+    -fx-background-color: rgba(200, 200, 200, 1.0);
+    -fx-border-color: rgb(225, 225, 225);
+    -fx-border-width: 1 0 0 0;
+}
+
+#newestMessageLayer {
+    -fx-background-color: rgba(240, 240, 240, 1.0);
+}
+
+#chatList {
+    -fx-base: rgba(240, 240, 240, 1.0);
+    -fx-control-inner-background: rgba(240, 240, 240, 1.0);
+    -fx-background-color: rgba(240, 240, 240, 1.0);
+    -fx-background-insets: 0, 0;
+}
+
+#chatList:cell-selection {
+    -fx-base: rgba(240, 240, 240, 1.0);
+    -fx-control-inner-background: rgba(240, 240, 240, 1.0);;
+    -fx-background-color: rgba(240, 240, 240, 1.0);
+}
+
+#chatList .list-cell {
+    -fx-base: white;
+    -fx-control-inner-background: white;
+    -fx-background-color: white;
+}
+
+#topRoot {
+    -fx-background-color: rgb(235, 172, 79);
+    -fx-border-width: 0 0 0 0;
+}
+
+.topButton {
+    -fx-background-radius: 25;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.2), 2, 0, 0, 0);
+}
+
+.button {
+    -fx-base: rgba(240, 240, 240, 1);
+    -fx-focus-color: rgba(240, 240, 240, 1);
+    -fx-control-inner-background: rgba(240, 240, 240, 1);
+    -fx-background-insets: 0, 0;
+    -fx-background-radius: 5;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.2), 2, 0, 0, 0);
+}
+
+#gameLabel, #turnLabel, #standardView {
+    -fx-font-size: 18px;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+#about, #settings, #close {
+    -fx-background-color: transparent;
+}
+
+#standardView {
+    -fx-background-color: transparent;
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-border-color: white;
+}
+
+#sendChatButton {
+    -fx-text-fill: rgb(85, 151, 209);
+    -fx-background-color: transparent;
+    -fx-font-weight: bold;
+}
+
+#toggleall :focused {
+    -fx-border-width: 0;
+}
+
+#showChatHbox {
+    -fx-background-color: rgb(200, 200, 200);
+    -fx-background-radius: 10 0 0 10;
+}
+

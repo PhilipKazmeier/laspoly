@@ -1,0 +1,71 @@
+.alertStyle {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+.alertStyle > *.button-bar > *.container {
+    -fx-background-color: rgb(240, 240, 240);
+}
+
+.alertStyle > *.label.content {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+.alertStyle:header *.header-panel {
+    -fx-background-color: rgb(235, 172, 79);
+    -fx-text-fill: white
+}
+
+.alertStyle:header *.header-panel *.label {
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-text-fill: white
+}
+
+.actionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(115, 115, 115);;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.greenActionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.redActionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(230, 13, 67);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.orangeActionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(235, 172, 79);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.grayActionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(152, 153, 152);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.blueActionButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(85, 151, 209);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+
+.label {
+    -fx-text-fill: rgb(115, 115, 115);;
+    -fx-font-weight: bold;
+    -fx-font-size: 14px;
+}

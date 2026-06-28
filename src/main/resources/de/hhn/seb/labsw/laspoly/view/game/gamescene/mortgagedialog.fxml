@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.text.*?>
+<?import javafx.scene.control.*?>
+<?import java.lang.*?>
+<?import javafx.scene.layout.*?>
+
+<AnchorPane maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="275.0" prefWidth="484.0" style="-fx-background-color: rgb(240,240,240);" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1">
+   <children>
+      <Label id="title" alignment="CENTER" layoutX="44.0" layoutY="32.0" prefHeight="50.0" style="-fx-background-color: rgb(235, 172, 79); -fx-text-fill: white;" text="Lorem" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+         <font>
+            <Font name="System Bold" size="20.0" />
+         </font>
+      </Label>
+      <AnchorPane layoutX="39.0" layoutY="50.0" prefHeight="5.0" prefWidth="200.0" style="-fx-background-color: rgb(115, 115, 115);" AnchorPane.leftAnchor="20.0" AnchorPane.rightAnchor="20.0" AnchorPane.topAnchor="50.0" />
+      <AnchorPane layoutY="99.0" prefHeight="60.0" prefWidth="200.0" style="-fx-background-color: white;" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0">
+         <children>
+            <Button id="okButton" alignment="CENTER" layoutX="407.0" mnemonicParsing="false" style="-fx-font-size: 13; -fx-font-weight: bold; -fx-background-color: transparent; -fx-text-fill: rgb(61, 135, 91);" text="Lorem ispum" AnchorPane.bottomAnchor="5.0" AnchorPane.rightAnchor="5.0" AnchorPane.topAnchor="5.0" />
+            <Button id="cancelButton" alignment="CENTER" layoutX="417.0" layoutY="10.0" mnemonicParsing="false" style="-fx-font-size: 13; -fx-font-weight: bold; -fx-background-color: transparent; -fx-text-fill: rgb(230, 13, 67);" text="Lorem" AnchorPane.bottomAnchor="5.0" AnchorPane.leftAnchor="5.0" AnchorPane.topAnchor="5.0" />
+         </children>
+      </AnchorPane>
+      <Label id="description" layoutX="20.0" layoutY="70.0" text="Lorem" textAlignment="CENTER" wrapText="true" AnchorPane.leftAnchor="20.0" AnchorPane.rightAnchor="20.0" AnchorPane.topAnchor="70.0">
+         <font>
+            <Font size="14.0" />
+         </font>
+      </Label>
+   </children>
+</AnchorPane>

@@ -1,0 +1,15 @@
+.root {
+    -fx-base: white;
+    -fx-control-inner-background: white;
+    -fx-background-color: white;
+}
+
+#name {
+    -fx-text-fill: rgb(235, 172, 79);
+    -fx-font-weight: bold;
+}
+
+#time {
+    -fx-text-fill: rgb(200, 200, 200);
+    -fx-font-weight: bold;
+}

@@ -1,0 +1,34 @@
+services:
+  laspoly:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LASPOLY_BASE_URI: http://127.0.0.1:8080/laspoly/
+    networks:
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      # Game API + SSE: no basic auth (Java client must work without browser credentials)
+      - traefik.http.routers.laspoly-api.rule=Host(`laspoly.brianwirth.de`) && PathPrefix(`/laspoly/`)
+      - traefik.http.routers.laspoly-api.entrypoints=https
+      - traefik.http.routers.laspoly-api.tls=true
+      - traefik.http.routers.laspoly-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.laspoly-api.priority=100
+      - traefik.http.routers.laspoly-api.service=laspoly
+      # Website + downloads: basic auth for friends only
+      - traefik.http.routers.laspoly.rule=Host(`laspoly.brianwirth.de`)
+      - traefik.http.routers.laspoly.entrypoints=https
+      - traefik.http.routers.laspoly.tls=true
+      - traefik.http.routers.laspoly.tls.certresolver=letsencrypt
+      - traefik.http.routers.laspoly.middlewares=laspoly-auth
+      - traefik.http.routers.laspoly.priority=1
+      - traefik.http.routers.laspoly.service=laspoly
+      - traefik.http.middlewares.laspoly-auth.basicauth.users=laspoly:$apr1$zVG5iozA$LFV5cqW.wj5kKls9QlHQ91
+      - traefik.http.services.laspoly.loadbalancer.server.port=80
+
+networks:
+  coolify:
+    external: true

@@ -1,0 +1,9 @@
+FROM eclipse-temurin:21-jre-jammy
+
+WORKDIR /app
+COPY dist/LasPoly-server.jar /app/server.jar
+
+ENV LASPOLY_BASE_URI=http://0.0.0.0:8080/laspoly/
+EXPOSE 8080
+
+CMD ["java", "-Djava.awt.headless=true", "-jar", "/app/server.jar"]

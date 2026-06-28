@@ -1,0 +1,25 @@
+.label {
+    -fx-text-fill: black;
+}
+
+.label :selected {
+    -fx-text-fill: black;
+}
+
+.label :cell-selection {
+    -fx-text-fill: black;
+}
+
+#name {
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+}
+
+#titlePane {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#contentPane {
+    -fx-background-color: white;
+}
+

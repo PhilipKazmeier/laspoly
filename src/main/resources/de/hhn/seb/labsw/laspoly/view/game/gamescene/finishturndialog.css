@@ -1,0 +1,6 @@
+.button {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}

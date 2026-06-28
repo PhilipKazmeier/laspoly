@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.AnchorPane?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" maxHeight="-Infinity" maxWidth="-Infinity"
+            minHeight="-Infinity" minWidth="-Infinity" prefHeight="100.0" prefWidth="300.0"
+            xmlns="http://javafx.com/javafx/8"
+            fx:controller="de.hhn.seb.labsw.laspoly.view.settings.TabGeneralController">
+    <children>
+        <Label fx:id="pressKey" layoutX="34.0" layoutY="14.0" text="Lorem ipsum" wrapText="true"
+               AnchorPane.leftAnchor="30.0" AnchorPane.rightAnchor="30.0" AnchorPane.topAnchor="10.0"/>
+        <Label layoutX="34.0" layoutY="42.0" text="ALT" AnchorPane.leftAnchor="30.0" AnchorPane.topAnchor="50.0"/>
+        <Label fx:id="keyValue" layoutX="103.0" layoutY="42.0" text="KEY" AnchorPane.topAnchor="50.0"/>
+        <Label layoutX="76.0" layoutY="42.0" text="+" AnchorPane.topAnchor="50.0"/>
+        <Label fx:id="error" alignment="CENTER" layoutX="38.0" layoutY="78.0" style="-fx-text-fill: red;"
+               textAlignment="CENTER" AnchorPane.leftAnchor="30.0" AnchorPane.rightAnchor="30.0"
+               AnchorPane.topAnchor="75.0"/>
+    </children>
+</AnchorPane>

@@ -1,0 +1,101 @@
+.root {
+    -fx-color: rgb(240, 240, 240);
+    -fx-background-color: -fx-color;
+    /* Selection colors overwritten*/
+    -fx-focus-color: -fx-color;
+    -fx-accent: rgb(115, 115, 115);
+}
+
+#gameNameLabel {
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
+
+#labelChooseFigure {
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-accent;
+}
+
+#notEnoughPlayerLabel {
+    -fx-text-fill: rgb(230, 13, 67);
+    -fx-font-weight: bold;
+}
+
+#playerList {
+    -fx-base: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 0;
+    -fx-border-radius: 5;
+    -fx-background-insets: 0, 0;
+}
+
+#playerList .scroll-bar:horizontal .increment-arrow,
+#playerList .scroll-bar:horizontal .decrement-arrow,
+#playerList .scroll-bar:horizontal .increment-button,
+#playerList .scroll-bar:horizontal .decrement-button {
+    -fx-padding: 0;
+}
+
+#playerList .list-cell {
+    -fx-background-color: transparent;
+}
+
+#chat {
+    -fx-focus-color: transparent;
+}
+
+#chat .scroll-bar, #chat .scroll-bar .track {
+    -fx-background-color: -fx-accent;
+}
+
+#chat .scroll-bar .thumb {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#chat .scroll-bar .decrement-button, #chat .scroll-bar .increment-button {
+    -fx-background-color: white;
+}
+
+
+#chat .list-cell {
+    -fx-background-color: transparent;
+}
+
+#chat .list-cell:even, #chat .list-cell:odd {
+    -fx-control-inner-background: transparent;
+}
+
+
+#startGameButton, #leaveGameButton, #sendMessage, #selectFigure, #toLeft, #toRight {
+    -fx-background-color: transparent;
+    -fx-font-weight: bold;
+}
+
+#leaveGameButton {
+    -fx-text-fill: rgb(230, 13, 67);
+    -fx-font-size: 13px;
+}
+
+#startGameButton {
+    -fx-text-fill: rgb(61, 135, 91);
+    -fx-font-size: 13px;
+}
+
+#readyLabel {
+    -fx-text-fill: -fx-accent;
+    -fx-font-weight: bold;
+}
+
+#selectFigure {
+    -fx-text-fill: -fx-accent;
+}
+
+#sendMessage {
+    -fx-text-fill: rgb(85, 151, 209);
+}
+
+#chatRoot {
+    -fx-background-color: rgb(225, 225, 225);;
+}

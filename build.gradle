@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'war'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'de.hhn.seb.labsw'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.openjfx:javafx-controls:21.0.2'
+    implementation 'org.openjfx:javafx-fxml:21.0.2'
+    implementation 'org.openjfx:javafx-media:21.0.2'
+    implementation 'org.openjfx:javafx-swing:21.0.2'
+    implementation 'org.openjfx:javafx-web:21.0.2'
+    implementation 'org.controlsfx:controlsfx:11.2.1'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.glassfish.jersey.core:jersey-client:2.41'
+    implementation 'org.glassfish.jersey.core:jersey-server:2.41'
+    implementation 'org.glassfish.jersey.containers:jersey-container-grizzly2-http:2.41'
+    implementation 'org.glassfish.jersey.containers:jersey-container-servlet:2.41'
+    implementation 'org.glassfish.jersey.media:jersey-media-sse:2.41'
+    implementation 'org.glassfish.jersey.inject:jersey-hk2:2.41'
+    implementation 'joda-time:joda-time:2.12.7'
+    implementation 'org.json:json:20240303'
+    implementation 'commons-io:commons-io:2.16.1'
+    implementation files('libs/interactivemesh-jfx.jar')
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    jvmArgs '-Djava.awt.headless=true'
+}
+
+application {
+    mainClass = 'de.hhn.seb.labsw.laspoly.main.Main'
+    applicationDefaultJvmArgs = [
+        '--add-opens=javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED',
+    ]
+}
+
+tasks.named('jar') {
+    archiveFileName = 'LasPoly.jar'
+    destinationDirectory = file('dist')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    from sourceSets.main.output
+    manifest {
+        attributes(
+            'Main-Class': 'de.hhn.seb.labsw.laspoly.main.Main',
+            'JavaFX-Preloader-Class': 'de.hhn.seb.labsw.laspoly.main.MainPreloader'
+        )
+    }
+}
+
+tasks.register('serverJar', Jar) {
+    group = 'build'
+    description = 'Fat jar for the LasPoly Jersey/Grizzly server'
+    archiveFileName = 'LasPoly-server.jar'
+    destinationDirectory = file('dist')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn classes
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    manifest {
+        attributes 'Main-Class': 'de.hhn.seb.labsw.laspoly.network.server.ServerMain'
+    }
+}
+
+tasks.named('war') {
+    archiveFileName = 'laspoly.war'
+    destinationDirectory = file('dist')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    classpath configurations.runtimeClasspath
+}

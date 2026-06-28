@@ -1,0 +1,88 @@
+#root {
+    -fx-color: rgb(240, 240, 240);
+    -fx-background-color: -fx-color;
+}
+
+.tabContent {
+    -fx-base: -fx-color;
+    -fx-background-color: -fx-color;
+    -fx-focus-color: -fx-color;
+    -fx-control-inner-background: -fx-color;
+    -fx-border-color: -fx-color;
+}
+
+#title {
+    -fx-font-size: 20px;
+    -fx-text-fill: #0077fd;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.3), 4, 0, 0, 0);
+}
+
+#rules {
+    -fx-base: -fx-color;
+    -fx-focus-color: -fx-color;
+    -fx-control-inner-background: -fx-color;
+    -fx-border-color: -fx-color;
+}
+
+#tabPane {
+    -fx-background-color: -fx-color;
+}
+
+#tabPane *.tab-header-background {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#tabPane .tab {
+    -fx-background-color: rgb(235, 172, 79);
+}
+
+#tabPane .tab {
+    -fx-padding: 5 5 5 5;
+    -fx-border-color: white;
+    -fx-border-width: 1 1 0 1;
+    -fx-border-radius: 10 10 0 0;
+}
+
+#tabPane .tab:selected {
+    -fx-padding: 5 5 5 5;
+    -fx-border-color: white;
+    -fx-border-width: 1 1 0 1;
+    -fx-border-radius: 10 10 0 0;
+}
+
+#tabPane .tab:focused {
+    -fx-background-color: -fx-outer-border, -fx-inner-border, -fx-body-color;
+    -fx-background-insets: 0, 1, 2;
+    -fx-background-radius: 5, 4, 3;
+}
+
+#tabPane .tab .tab-label {
+    -fx-text-fill: white;
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-min-height: 100px;
+    -fx-focus-color: transparent;
+}
+
+#tabPane .tab:selected .tab-label {
+    -fx-text-fill: black;
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-min-height: 100px;
+    -fx-focus-color: transparent;
+}
+
+#tabPane .tab-header-background, #tabPane .tab-header-area {
+    -fx-min-height: 200px;
+}
+
+#tabPane .tab, #tabPane .tab-header-area, #tabPane .headers-region, #tabPane .tab-header-background,
+#tabPane .control-buttons-tab, #tabPane .tab-down-button, #tabPane .arrow, #tabPane .tab-label,
+#tabPane .tab-close-button {
+    -fx-focus-color: transparent;
+}
+
+#closeButton {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgb(230, 13, 67);
+}

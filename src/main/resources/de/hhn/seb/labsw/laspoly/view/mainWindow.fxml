@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.Pane?>
+<?import java.net.URL?>
+<AnchorPane xmlns:fx="http://javafx.com/fxml/1" id="root" maxHeight="650.0" maxWidth="1.7976931348623157E308"
+            minHeight="600.0" minWidth="600.0" prefHeight="600.0" prefWidth="600.0" styleClass="root"
+            xmlns="http://javafx.com/javafx/8" fx:controller="de.hhn.seb.labsw.laspoly.view.MainWindowController">
+    <children>
+        <AnchorPane fx:id="topRoot" layoutY="0.0" maxHeight="75.0" minHeight="75.0" minWidth="600.0" prefHeight="75.0"
+                    AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0">
+            <children>
+                <Label fx:id="nameLabel" layoutX="60.0" layoutY="27.0" minHeight="-1.0" prefHeight="23.0"
+                       prefWidth="300.0"/>
+                <Button fx:id="about" layoutX="542.0" layoutY="26.0" mnemonicParsing="false" onAction="#onAboutClicked"
+                        prefHeight="25.0" prefWidth="25.0" styleClass="topButton" AnchorPane.bottomAnchor="24.0"
+                        AnchorPane.rightAnchor="25.0" AnchorPane.topAnchor="24.0"/>
+                <Button fx:id="settings" layoutX="515.0" layoutY="24.0" mnemonicParsing="false"
+                        onAction="#onSettingsClicked" prefHeight="25.0" prefWidth="25.0" styleClass="topButton"
+                        AnchorPane.bottomAnchor="24.0" AnchorPane.rightAnchor="75.0" AnchorPane.topAnchor="24.0">
+                    <padding>
+                        <Insets bottom="0" left="0" right="0" top="0"/>
+                    </padding>
+                </Button>
+            </children>
+            <padding>
+                <Insets/>
+            </padding>
+            <stylesheets>
+                <URL value="@mainWindow.css"/>
+            </stylesheets>
+        </AnchorPane>
+        <BorderPane fx:id="contentContainer" layoutY="75.0" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0"
+                    AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="75.0">
+            <center>
+                <Pane fx:id="content"/>
+            </center>
+        </BorderPane>
+    </children>
+</AnchorPane>
