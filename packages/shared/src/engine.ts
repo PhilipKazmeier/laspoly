@@ -1113,4 +1113,73 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
   return { state, events };
 }
 
+// ---- exported UI predicates -----------------------------------------------
+
+const STATION_POSITIONS_SET = new Set(STATION_POSITIONS);
+
+export function ownedPropsOf(state: GameState, playerId: string): number[] {
+  return Object.entries(state.ownership)
+    .filter(([, id]) => id === playerId)
+    .map(([pos]) => Number(pos));
+}
+
+export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory"): boolean {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile || tile.type !== "street") return false;
+  if (state.ownership[pos] !== currentPlayer(state).id) return false;
+  if (!ownsWholeGroup(state, board, currentPlayer(state).id, (tile as StreetTile).group)) return false;
+  if (state.mortgaged[pos]) return false;
+  if (kind === "house") return canConstructHouse(state, board, pos);
+  if (kind === "hotel") return canConstructHotel(state, board, pos);
+  if (kind === "factory") return canConstructFactory(state, board, pos);
+  return false;
+}
+
+export function canSellBuilding(state: GameState, pos: number): boolean {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile || tile.type !== "street") return false;
+  const b = getBuildingsAt(state, pos);
+  if (b.hotel) return true;
+  if (b.factory) return true;
+  if (b.houses > 0) return canSellHouse(state, board, pos);
+  return false;
+}
+
+export function canMortgage(state: GameState, pos: number): boolean {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile) return false;
+  if (state.mortgaged[pos]) return false;
+  const b = getBuildingsAt(state, pos);
+  return !(b.houses > 0 || b.hotel || b.factory);
+}
+
+export function canUnmortgage(state: GameState, pos: number): boolean {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile) return false;
+  if (!state.mortgaged[pos]) return false;
+  const player = currentPlayer(state);
+  const mv = mortgageValue(board, tile);
+  const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
+  return player.money >= cost;
+}
+
+export function canSellProperty(state: GameState, pos: number): boolean {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile) return false;
+  if (state.mortgaged[pos]) return false;
+  const b = getBuildingsAt(state, pos);
+  return !(b.houses > 0 || b.hotel || b.factory);
+}
+
+export function canTravelFrom(state: GameState, playerId: string): number[] {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || !STATION_POSITIONS_SET.has(player.position)) return [];
+  return STATION_POSITIONS.filter((s) => s !== player.position);
+}
+
 export { mortgageValue, tilePrice };

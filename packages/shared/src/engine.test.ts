@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createGame, applyCommand, currentPlayer, aliveCount, legalCommands } from "./engine.js";
+import { createGame, applyCommand, currentPlayer, aliveCount, legalCommands, canBuild, canSellBuilding, canMortgage, canUnmortgage, canSellProperty, canTravelFrom, ownedPropsOf } from "./engine.js";
 import { makeRng, rollDie } from "./rng.js";
 import { getBoard, JAIL_POS } from "./board.js";
 import type { GameState, Command } from "./types.js";
@@ -894,5 +894,171 @@ describe("simulation", () => {
     import("./sim.js").then(({ simulateGame }) => {
       expect(() => simulateGame("vegas", 42, 2, 100)).not.toThrow();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Predicate exports (Phase 2c)
+// ---------------------------------------------------------------------------
+
+describe("ownedPropsOf", () => {
+  it("returns positions owned by the given player", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[1] = "A";
+    s.ownership[3] = "B";
+    s.ownership[4] = "A";
+    expect(ownedPropsOf(s, "A").sort((a, b) => a - b)).toEqual([1, 4]);
+    expect(ownedPropsOf(s, "B")).toEqual([3]);
+  });
+
+  it("returns empty array when player owns nothing", () => {
+    expect(ownedPropsOf(twoPlayers(), "A")).toEqual([]);
+  });
+});
+
+describe("canBuild", () => {
+  it("returns true for house when player owns full group", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.ownership[14] = "A";
+    s.players[0]!.money = 5000;
+    expect(canBuild(s, 13, "house")).toBe(true);
+  });
+
+  it("returns false when player does not own full group", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A"; // missing 14
+    expect(canBuild(s, 13, "house")).toBe(false);
+  });
+
+  it("returns false for hotel when not enough houses", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.ownership[14] = "A";
+    s.players[0]!.money = 5000;
+    expect(canBuild(s, 13, "hotel")).toBe(false);
+  });
+
+  it("returns false on non-street tile", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[5] = "A"; // station
+    expect(canBuild(s, 5, "house")).toBe(false);
+  });
+});
+
+describe("canSellBuilding", () => {
+  it("returns true when there is a house (even-sell rule satisfied: 13 has more than 14)", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.ownership[14] = "A";
+    // 13 has 2 houses, 14 has 1 — even-sell allows selling from 13
+    s.buildings[13] = { houses: 2, hotel: false, factory: false };
+    s.buildings[14] = { houses: 1, hotel: false, factory: false };
+    expect(canSellBuilding(s, 13)).toBe(true);
+  });
+
+  it("returns false when no buildings", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(canSellBuilding(s, 13)).toBe(false);
+  });
+
+  it("returns true when hotel", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.buildings[13] = { houses: 0, hotel: true, factory: false };
+    expect(canSellBuilding(s, 13)).toBe(true);
+  });
+});
+
+describe("canMortgage", () => {
+  it("returns true for an unbuilt, unmortgaged property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(canMortgage(s, 13)).toBe(true);
+  });
+
+  it("returns false when already mortgaged", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.mortgaged[13] = true;
+    expect(canMortgage(s, 13)).toBe(false);
+  });
+
+  it("returns false when property has buildings", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.buildings[13] = { houses: 2, hotel: false, factory: false };
+    expect(canMortgage(s, 13)).toBe(false);
+  });
+});
+
+describe("canUnmortgage", () => {
+  it("returns true when mortgaged and player can afford it", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.mortgaged[13] = true;
+    s.players[0]!.money = 5000;
+    expect(canUnmortgage(s, 13)).toBe(true);
+  });
+
+  it("returns false when player cannot afford unmortgage cost", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+    const cost = Math.floor(tile.mortgage * board.rules.mortgageUnmortgageMultiplier);
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.mortgaged[13] = true;
+    s.players[0]!.money = cost - 1;
+    expect(canUnmortgage(s, 13)).toBe(false);
+  });
+
+  it("returns false when not mortgaged", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(canUnmortgage(s, 13)).toBe(false);
+  });
+});
+
+describe("canSellProperty", () => {
+  it("returns true for unbuilt, unmortgaged property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(canSellProperty(s, 13)).toBe(true);
+  });
+
+  it("returns false when mortgaged", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.mortgaged[13] = true;
+    expect(canSellProperty(s, 13)).toBe(false);
+  });
+
+  it("returns false when has buildings", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    s.buildings[13] = { houses: 1, hotel: false, factory: false };
+    expect(canSellProperty(s, 13)).toBe(false);
+  });
+});
+
+describe("canTravelFrom", () => {
+  it("returns the other 3 stations when player is at a station", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5; // Caesar Station
+    const dests = canTravelFrom(s, "A");
+    expect(dests.sort((a, b) => a - b)).toEqual([15, 25, 35]);
+  });
+
+  it("returns empty when player is not at a station", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 1; // street
+    expect(canTravelFrom(s, "A")).toEqual([]);
+  });
+
+  it("returns empty for unknown playerId", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    expect(canTravelFrom(s, "UNKNOWN")).toEqual([]);
   });
 });
