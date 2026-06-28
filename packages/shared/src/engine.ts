@@ -10,8 +10,9 @@ import {
   type StreetTile,
   type Tile,
 } from "./board.js";
-import { makeRng, rollDie } from "./rng.js";
+import { makeRng, nextInt, rollDie, shuffle } from "./rng.js";
 import type {
+  Buildings,
   Command,
   GameEvent,
   GameState,
@@ -21,6 +22,60 @@ import type {
 } from "./types.js";
 
 const GO_TO_JAIL_POS = 30;
+
+// ---- Action card definitions -----------------------------------------------
+
+type CardSpec =
+  | { kind: "move-random" }
+  | { kind: "move-to"; pos: number }
+  | { kind: "move-jail" }
+  | { kind: "move-forward"; steps: number }
+  | { kind: "move-next-station" }
+  | { kind: "single"; id: string; positive: boolean; multiplier: number }
+  | { kind: "broadcast"; id: string; positive: boolean; multiplier: number }
+  | { kind: "repair-factory"; id: string; multiplier: number }
+  | { kind: "repair-general"; id: string; multiplier: number; withFactory: boolean };
+
+const ACTION_CARD_SPECS: CardSpec[] = [
+  { kind: "move-random" },                                                      // 0
+  { kind: "move-to", pos: 0 },                                                  // 1  GO
+  { kind: "move-jail" },                                                         // 2
+  { kind: "move-to", pos: 20 },                                                 // 3  Casino
+  { kind: "move-forward", steps: 5 },                                           // 4
+  { kind: "move-next-station" },                                                 // 5
+  { kind: "single", id: "gamblingTax", positive: false, multiplier: 30 },       // 6
+  { kind: "single", id: "parkingFine", positive: false, multiplier: 20 },       // 7
+  { kind: "single", id: "helicopterFlight", positive: false, multiplier: 50 },  // 8
+  { kind: "single", id: "magicianShow", positive: false, multiplier: 15 },      // 9
+  { kind: "single", id: "independenceDay", positive: false, multiplier: 25 },   // 10
+  { kind: "single", id: "lookalikeCompetition", positive: true, multiplier: 25 }, // 11
+  { kind: "single", id: "yardSale", positive: true, multiplier: 30 },           // 12
+  { kind: "single", id: "inherit", positive: true, multiplier: 50 },            // 13
+  { kind: "single", id: "horseRacing", positive: true, multiplier: 40 },        // 14
+  { kind: "single", id: "slotMachine", positive: true, multiplier: 45 },        // 15
+  { kind: "single", id: "roulette", positive: true, multiplier: 30 },           // 16
+  { kind: "single", id: "boxingBet", positive: true, multiplier: 25 },          // 17
+  { kind: "single", id: "blackJack", positive: true, multiplier: 15 },          // 18
+  { kind: "single", id: "baccaratGame", positive: true, multiplier: 15 },       // 19
+  { kind: "broadcast", id: "youGotPromoted", positive: false, multiplier: 20 }, // 20
+  { kind: "broadcast", id: "birthday", positive: true, multiplier: 20 },        // 21
+  { kind: "broadcast", id: "pokerTable", positive: true, multiplier: 25 },      // 22
+  { kind: "repair-factory", id: "factoryRedevelop", multiplier: 10 },           // 23
+  { kind: "repair-general", id: "generalRepairs", multiplier: 5, withFactory: false }, // 24
+  { kind: "repair-general", id: "streetRepairs", multiplier: 5, withFactory: true },   // 25
+];
+
+const ACTION_CARD_COUNT = ACTION_CARD_SPECS.length; // 26
+
+// Non-special positions for "move-random": streets, stations, attractions
+// Computed once at module load from the board. We use vegas for now.
+function getNonSpecialPositions(board: BoardDefinition): number[] {
+  return board.tiles
+    .filter((t) => t.type === "street" || t.type === "station" || t.type === "attraction")
+    .map((t) => t.pos);
+}
+
+const STATION_POSITIONS = [5, 15, 25, 35];
 
 export function createGame(opts: NewGameOptions): GameState {
   const board = getBoard(opts.boardId);
@@ -37,9 +92,12 @@ export function createGame(opts: NewGameOptions): GameState {
     lastRoll: [0, 0],
     color: p.color,
   }));
+  const rng = makeRng(opts.seed);
+  // Action deck starts in sorted order; it will be shuffled on first draw (in drawActionCard)
+  const actionDeck: number[] = [];
   return {
     boardId: opts.boardId,
-    rng: makeRng(opts.seed),
+    rng,
     players,
     currentPlayerIndex: 0,
     phase: "awaiting-roll",
@@ -52,6 +110,8 @@ export function createGame(opts: NewGameOptions): GameState {
     casinoPool: board.rules.casinoInitialPool,
     winnerId: null,
     turn: 1,
+    actionDeck,
+    actionDiscard: [],
   };
 }
 
@@ -81,18 +141,140 @@ function groupOwnedCount(state: GameState, board: BoardDefinition, playerId: str
   return groupMembers(board, group).filter((pos) => state.ownership[pos] === playerId).length;
 }
 
+function getBuildingsAt(state: GameState, pos: number): Buildings {
+  return state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+}
+
+// ---- building validation --------------------------------------------------
+
+function canConstructHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (b.hotel || b.factory || b.houses >= 4) return false;
+  const members = groupMembers(board, tile.group);
+  // Even build: this street can't have more houses than any other (build in order)
+  for (const m of members) {
+    const bm = getBuildingsAt(state, m);
+    if (bm.factory) return false; // factory in group blocks houses
+    if (state.mortgaged[m]) return false; // mortgaged in group blocks build
+    if (m !== pos) {
+      const otherCount = bm.hotel ? 5 : bm.houses;
+      // Can't build on this if another member has fewer houses
+      if (otherCount < b.houses) return false;
+    }
+  }
+  return true;
+}
+
+function canConstructHotel(state: GameState, board: BoardDefinition, pos: number): boolean {
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (b.hotel || b.factory || b.houses !== 4) return false;
+  const members = groupMembers(board, tile.group);
+  for (const m of members) {
+    if (m === pos) continue;
+    const bm = getBuildingsAt(state, m);
+    // Others must have 4 houses or already a hotel
+    if (!bm.hotel && bm.houses !== 4) return false;
+  }
+  return true;
+}
+
+function canConstructFactory(state: GameState, board: BoardDefinition, pos: number): boolean {
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (b.hotel || b.factory || b.houses !== 0) return false;
+  const members = groupMembers(board, tile.group);
+  for (const m of members) {
+    if (state.mortgaged[m]) return false; // mortgaged blocks factory
+    if (m === pos) continue;
+    const bm = getBuildingsAt(state, m);
+    // Others must be empty or have a factory (no houses/hotels)
+    if (!bm.factory && (bm.houses > 0 || bm.hotel)) return false;
+  }
+  return true;
+}
+
+function canSellHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (b.houses <= 0) return false;
+  const members = groupMembers(board, tile.group);
+  // After selling, this street would have b.houses - 1.
+  // Even-sell: no other street can have more than (b.houses - 1), otherwise we'd fall behind.
+  // Equivalently: no other street can have >= b.houses houses (after sell this would be behind).
+  for (const m of members) {
+    if (m === pos) continue;
+    const bm = getBuildingsAt(state, m);
+    const otherCount = bm.hotel ? 5 : bm.houses;
+    if (otherCount >= b.houses) return false; // would fall behind after sell
+  }
+  return true;
+}
+
 /** Commands that are legal in the current state (for bots, clients, validation). */
 export function legalCommands(state: GameState): Command["type"][] {
   if (state.phase === "finished") return [];
   if (state.phase === "awaiting-buy") return ["BUY_PROPERTY", "DECLINE_PROPERTY"];
+
   // awaiting-roll
   const p = currentPlayer(state);
+  const cmds: Command["type"][] = [];
+
   if (p.inJail) {
-    return p.money >= getBoard(state.boardId).rules.ransomCost
-      ? ["ROLL_DICE", "PAY_RANSOM"]
-      : ["ROLL_DICE"];
+    cmds.push("ROLL_DICE");
+    const board = getBoard(state.boardId);
+    if (p.money >= board.rules.ransomCost) cmds.push("PAY_RANSOM");
+    return cmds;
   }
-  return ["ROLL_DICE"];
+
+  cmds.push("ROLL_DICE");
+
+  const board = getBoard(state.boardId);
+
+  // Management commands (only when not in jail)
+  for (const [posStr, ownerId] of Object.entries(state.ownership)) {
+    if (ownerId !== p.id) continue;
+    const pos = Number(posStr);
+    const tile = board.tiles[pos];
+    if (!tile) continue;
+    const b = getBuildingsAt(state, pos);
+    const hasBuildings = b.houses > 0 || b.hotel || b.factory;
+
+    if (tile.type === "street") {
+      if (ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
+        if (canConstructHouse(state, board, pos)) cmds.push("BUILD");
+        if (canConstructHotel(state, board, pos)) cmds.push("BUILD");
+        if (canConstructFactory(state, board, pos)) cmds.push("BUILD");
+      }
+      if (hasBuildings) {
+        if (b.hotel || b.factory) cmds.push("SELL_BUILDING");
+        else if (b.houses > 0 && canSellHouse(state, board, pos)) cmds.push("SELL_BUILDING");
+      }
+    } else {
+      // station or attraction: no buildings possible
+    }
+
+    if (!state.mortgaged[pos] && !hasBuildings) {
+      cmds.push("MORTGAGE");
+    }
+    if (state.mortgaged[pos]) {
+      const mv = mortgageValue(board, tile);
+      const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
+      if (p.money >= cost) cmds.push("UNMORTGAGE");
+    }
+    if (!hasBuildings && !state.mortgaged[pos]) {
+      cmds.push("SELL_PROPERTY");
+    }
+  }
+
+  // TRAVEL: player is on a station
+  if (STATION_POSITIONS.includes(p.position)) {
+    cmds.push("TRAVEL");
+  }
+
+  // Deduplicate
+  return [...new Set(cmds)];
 }
 
 // ---- rent ---------------------------------------------------------------
@@ -126,9 +308,7 @@ function attractionRent(state: GameState, board: BoardDefinition, pos: number, d
 
 /**
  * Transfer `amount` from debtor to creditor (creditor null = bank/casino tax).
- * If the debtor can't cover it, they go bankrupt: remaining cash goes to the
- * creditor, their holdings return to the bank, and they are eliminated.
- * (MVP has no asset-selling-to-survive yet — that's Phase 2.)
+ * If the debtor can't cover it, they go bankrupt.
  */
 function charge(
   state: GameState,
@@ -170,6 +350,171 @@ function bankrupt(state: GameState, board: BoardDefinition, player: PlayerState,
     }
   }
   events.push({ key: "bankrupt", params: { player: player.name }, playerId: player.id });
+}
+
+// ---- action cards ---------------------------------------------------------
+
+function applyActionCard(
+  state: GameState,
+  board: BoardDefinition,
+  player: PlayerState,
+  cardIdx: number,
+  events: GameEvent[],
+): void {
+  const spec = ACTION_CARD_SPECS[cardIdx]!;
+  events.push({ key: "actionCard", params: { player: player.name, card: spec.kind === "single" || spec.kind === "broadcast" || spec.kind === "repair-factory" || spec.kind === "repair-general" ? (spec as { id: string }).id : spec.kind }, playerId: player.id });
+
+  switch (spec.kind) {
+    case "move-random": {
+      const positions = getNonSpecialPositions(board);
+      const idx = nextInt(state.rng, 0, positions.length - 1);
+      const targetPos = positions[idx]!;
+      teleportPlayer(state, board, player, targetPos, events);
+      resolveLanding(state, board, player, events);
+      break;
+    }
+    case "move-to": {
+      if (spec.pos === 0) {
+        // GO: grant goLandMoney
+        player.position = 0;
+        player.money += board.rules.goLandMoney;
+        events.push({ key: "goLanded", params: { player: player.name, amount: board.rules.goLandMoney }, playerId: player.id });
+        events.push({ key: "actionCardMove", params: { player: player.name, tile: board.tiles[0]!.name }, playerId: player.id });
+        // landing on GO tile does nothing extra
+      } else {
+        teleportPlayer(state, board, player, spec.pos, events);
+        resolveLanding(state, board, player, events);
+      }
+      break;
+    }
+    case "move-jail": {
+      events.push({ key: "actionCardMoveJail", params: { player: player.name }, playerId: player.id });
+      sendToJail(state, board, player, events);
+      break;
+    }
+    case "move-forward": {
+      events.push({ key: "actionCardMoveForward", params: { player: player.name, steps: spec.steps }, playerId: player.id });
+      moveBy(state, board, player, spec.steps, events);
+      resolveLanding(state, board, player, events);
+      break;
+    }
+    case "move-next-station": {
+      const curPos = player.position;
+      let nextStation: number;
+      if (curPos < 5 || curPos >= 35) nextStation = 5;
+      else if (curPos < 15) nextStation = 15;
+      else if (curPos < 25) nextStation = 25;
+      else nextStation = 35;
+      events.push({ key: "actionCardNextStation", params: { player: player.name }, playerId: player.id });
+      teleportPlayer(state, board, player, nextStation, events);
+      resolveLanding(state, board, player, events);
+      break;
+    }
+    case "single": {
+      const amount = nextInt(state.rng, 1, 5) * spec.multiplier;
+      if (spec.positive) {
+        player.money += amount;
+        events.push({ key: "actionCardCollect", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+      } else {
+        events.push({ key: "actionCardPay", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+        charge(state, board, player, amount, null, events);
+      }
+      break;
+    }
+    case "broadcast": {
+      const amount = nextInt(state.rng, 1, 5) * spec.multiplier;
+      if (spec.positive) {
+        // collect from each other alive player
+        for (const other of state.players) {
+          if (!other.alive || other.id === player.id) continue;
+          charge(state, board, other, amount, player.id, events);
+        }
+        events.push({ key: "actionCardBroadcastCollect", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+      } else {
+        // pay each other alive player
+        for (const other of state.players) {
+          if (!other.alive || other.id === player.id) continue;
+          charge(state, board, player, amount, other.id, events);
+        }
+        events.push({ key: "actionCardBroadcastPay", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+      }
+      break;
+    }
+    case "repair-factory": {
+      const perFactory = nextInt(state.rng, 1, 5) * spec.multiplier;
+      let factoryCount = 0;
+      for (const [posStr, ownerId] of Object.entries(state.ownership)) {
+        if (ownerId !== player.id) continue;
+        const b = state.buildings[Number(posStr)];
+        if (b?.factory) factoryCount++;
+      }
+      const total = factoryCount * perFactory;
+      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: spec.id }, playerId: player.id });
+      if (total > 0) charge(state, board, player, total, null, events);
+      break;
+    }
+    case "repair-general": {
+      const houseMult = nextInt(state.rng, 1, 2) * spec.multiplier;
+      const hotelMult = nextInt(state.rng, 1, 4) * spec.multiplier;
+      const factoryMult = spec.withFactory ? nextInt(state.rng, 1, 3) * spec.multiplier : 0;
+      let houseCount = 0, hotelCount = 0, factoryCount = 0;
+      for (const [posStr, ownerId] of Object.entries(state.ownership)) {
+        if (ownerId !== player.id) continue;
+        const b = state.buildings[Number(posStr)];
+        if (!b) continue;
+        houseCount += b.houses;
+        if (b.hotel) hotelCount++;
+        if (b.factory) factoryCount++;
+      }
+      const total = houseCount * houseMult + hotelCount * hotelMult + factoryCount * factoryMult;
+      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: spec.id }, playerId: player.id });
+      if (total > 0) charge(state, board, player, total, null, events);
+      break;
+    }
+  }
+}
+
+function drawActionCard(
+  state: GameState,
+  board: BoardDefinition,
+  player: PlayerState,
+  events: GameEvent[],
+): void {
+  if (state.actionDeck.length === 0) {
+    // Either initial draw (deck empty from createGame) or reshuffle discard
+    const source = state.actionDiscard.length > 0
+      ? state.actionDiscard
+      : Array.from({ length: ACTION_CARD_COUNT }, (_, i) => i);
+    state.actionDeck = shuffle(state.rng, [...source]);
+    state.actionDiscard = [];
+  }
+  const cardIdx = state.actionDeck.shift()!;
+  state.actionDiscard.push(cardIdx);
+  applyActionCard(state, board, player, cardIdx, events);
+}
+
+// ---- movement helpers -----------------------------------------------------
+
+/**
+ * Teleport player to an absolute position, crossing GO if targetPos < fromPos.
+ * Does NOT call resolveLanding.
+ */
+function teleportPlayer(
+  state: GameState,
+  board: BoardDefinition,
+  player: PlayerState,
+  targetPos: number,
+  events: GameEvent[],
+): void {
+  const from = player.position;
+  player.position = targetPos;
+  if (targetPos < from) {
+    // wrapped around, passed GO
+    player.money += board.rules.goPassMoney;
+    events.push({ key: "goPassed", params: { player: player.name, amount: board.rules.goPassMoney }, playerId: player.id });
+  }
+  const tile = tileAt(board, targetPos);
+  events.push({ key: "moved", params: { player: player.name, tile: tile.name, pos: targetPos }, playerId: player.id });
 }
 
 // ---- landing resolution --------------------------------------------------
@@ -247,8 +592,7 @@ function resolveLanding(
       events.push({ key: "freeParking", params: { player: player.name }, playerId: player.id });
       break;
     case "action":
-      // Phase 2: action card deck. For now an explicit no-op message.
-      events.push({ key: "actionFieldNoop", params: { player: player.name }, playerId: player.id });
+      drawActionCard(state, board, player, events);
       break;
   }
 }
@@ -439,6 +783,168 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       state.pendingPurchase = null;
       state.phase = "awaiting-roll";
       continueOrAdvance(state, events);
+      break;
+    }
+
+    case "BUILD": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      const pos = command.pos;
+      const tile = tileAt(board, pos);
+      if (tile.type !== "street") throw new Error("Can only build on streets");
+      if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (state.mortgaged[pos]) throw new Error("Property is mortgaged");
+      if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) throw new Error("Must own entire group to build");
+
+      const st = tile as StreetTile;
+      if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+      const b = state.buildings[pos]!;
+
+      if (command.building === "house") {
+        if (!canConstructHouse(state, board, pos)) throw new Error("Cannot build house here (even-build rule or other restriction)");
+        if (p.money < st.houseCost) throw new Error("Cannot afford house");
+        p.money -= st.houseCost;
+        b.houses += 1;
+        events.push({ key: "built", params: { player: p.name, building: "house", tile: st.name, amount: st.houseCost }, playerId: p.id });
+      } else if (command.building === "hotel") {
+        if (!canConstructHotel(state, board, pos)) throw new Error("Cannot build hotel here");
+        if (p.money < st.hotelCost) throw new Error("Cannot afford hotel");
+        p.money -= st.hotelCost;
+        b.houses = 0;
+        b.hotel = true;
+        b.factory = false;
+        events.push({ key: "built", params: { player: p.name, building: "hotel", tile: st.name, amount: st.hotelCost }, playerId: p.id });
+      } else if (command.building === "factory") {
+        if (!canConstructFactory(state, board, pos)) throw new Error("Cannot build factory here");
+        if (p.money < st.factoryCost) throw new Error("Cannot afford factory");
+        p.money -= st.factoryCost;
+        b.houses = 0;
+        b.hotel = false;
+        b.factory = true;
+        events.push({ key: "built", params: { player: p.name, building: "factory", tile: st.name, amount: st.factoryCost }, playerId: p.id });
+      }
+      // BUILD does not advance the turn
+      break;
+    }
+
+    case "SELL_BUILDING": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      const pos = command.pos;
+      if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      const tile = tileAt(board, pos) as StreetTile;
+      const b = getBuildingsAt(state, pos);
+
+      if (b.hotel) {
+        // hotel knockdown -> 4 houses appear, refund = mortgage value
+        const refund = tile.mortgage;
+        if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+        state.buildings[pos]!.hotel = false;
+        state.buildings[pos]!.houses = 4;
+        state.buildings[pos]!.factory = false;
+        p.money += refund;
+        events.push({ key: "soldBuilding", params: { player: p.name, building: "hotel", tile: tile.name, amount: refund }, playerId: p.id });
+      } else if (b.houses > 0) {
+        if (!canSellHouse(state, board, pos)) throw new Error("Cannot sell house (even-sell rule)");
+        const refund = tile.mortgage;
+        if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+        state.buildings[pos]!.houses -= 1;
+        p.money += refund;
+        events.push({ key: "soldBuilding", params: { player: p.name, building: "house", tile: tile.name, amount: refund }, playerId: p.id });
+      } else if (b.factory) {
+        const refund = tile.houseCost;
+        if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+        state.buildings[pos]!.factory = false;
+        p.money += refund;
+        events.push({ key: "soldBuilding", params: { player: p.name, building: "factory", tile: tile.name, amount: refund }, playerId: p.id });
+      } else {
+        throw new Error("No building to sell");
+      }
+      break;
+    }
+
+    case "MORTGAGE": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      const pos = command.pos;
+      if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (state.mortgaged[pos]) throw new Error("Property is already mortgaged");
+      const tile = tileAt(board, pos);
+      const b = getBuildingsAt(state, pos);
+      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before mortgaging");
+      const mv = mortgageValue(board, tile);
+      state.mortgaged[pos] = true;
+      p.money += mv;
+      events.push({ key: "mortgaged", params: { player: p.name, tile: tile.name, amount: mv }, playerId: p.id });
+      break;
+    }
+
+    case "UNMORTGAGE": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      const pos = command.pos;
+      if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (!state.mortgaged[pos]) throw new Error("Property is not mortgaged");
+      const tile = tileAt(board, pos);
+      const mv = mortgageValue(board, tile);
+      const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
+      if (p.money < cost) throw new Error("Cannot afford to unmortgage");
+      p.money -= cost;
+      delete state.mortgaged[pos];
+      events.push({ key: "unmortgaged", params: { player: p.name, tile: tile.name, amount: cost }, playerId: p.id });
+      break;
+    }
+
+    case "SELL_PROPERTY": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      const pos = command.pos;
+      if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (state.mortgaged[pos]) throw new Error("Cannot sell mortgaged property directly");
+      const tile = tileAt(board, pos);
+      const b = getBuildingsAt(state, pos);
+      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before selling property");
+      const refund = Math.floor(tilePrice(board, tile) / 2);
+      p.money += refund;
+      delete state.ownership[pos];
+      delete state.buildings[pos];
+      events.push({ key: "soldProperty", params: { player: p.name, tile: tile.name, amount: refund }, playerId: p.id });
+      break;
+    }
+
+    case "TRAVEL": {
+      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      const p = currentPlayer(state);
+      if (!STATION_POSITIONS.includes(p.position)) throw new Error("Player is not at a station");
+      const toPos = command.toPos;
+      if (!STATION_POSITIONS.includes(toPos)) throw new Error("Destination is not a station");
+      if (toPos === p.position) throw new Error("Cannot travel to current station");
+
+      const destOwnerId = state.ownership[toPos];
+      let ticketCost = 0;
+      if (destOwnerId && destOwnerId !== p.id) {
+        const stationsOwned = groupOwnedCount(state, board, destOwnerId, "station");
+        const idx = Math.min(stationsOwned - 1, 2);
+        ticketCost = board.rules.station.travel[idx] ?? 0;
+      }
+
+      const from = p.position;
+      p.position = toPos;
+      // Check GO crossing: teleport wraps if toPos < from
+      if (toPos < from) {
+        p.money += board.rules.goPassMoney;
+        events.push({ key: "goPassed", params: { player: p.name, amount: board.rules.goPassMoney }, playerId: p.id });
+      }
+
+      const destTile = tileAt(board, toPos);
+      events.push({ key: "traveled", params: { player: p.name, tile: destTile.name, from, cost: ticketCost }, playerId: p.id });
+
+      if (ticketCost > 0 && destOwnerId) {
+        charge(state, board, p, ticketCost, destOwnerId, events);
+      }
+
+      // TRAVEL is a management command: does not advance the turn
+      // Travel ticket covers the cost of using the station; no additional rent landing resolution
       break;
     }
   }

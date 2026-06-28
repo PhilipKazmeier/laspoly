@@ -41,13 +41,23 @@ export interface GameState {
   casinoPool: number;
   winnerId: string | null;
   turn: number;
+  /** action card draw pile (indices into ACTION_CARD_SPECS) */
+  actionDeck: number[];
+  /** discarded action cards */
+  actionDiscard: number[];
 }
 
 export type Command =
   | { type: "ROLL_DICE" }
   | { type: "BUY_PROPERTY" }
   | { type: "DECLINE_PROPERTY" }
-  | { type: "PAY_RANSOM" };
+  | { type: "PAY_RANSOM" }
+  | { type: "BUILD"; pos: number; building: "house" | "hotel" | "factory" }
+  | { type: "SELL_BUILDING"; pos: number }
+  | { type: "MORTGAGE"; pos: number }
+  | { type: "UNMORTGAGE"; pos: number }
+  | { type: "SELL_PROPERTY"; pos: number }
+  | { type: "TRAVEL"; toPos: number };
 
 /**
  * A complete, localizable game event. `key` selects an i18n template; `params`

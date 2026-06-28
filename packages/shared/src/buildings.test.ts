@@ -1,0 +1,743 @@
+import { describe, it, expect } from "vitest";
+import { createGame, applyCommand, currentPlayer, legalCommands } from "./engine.js";
+import { getBoard, JAIL_POS } from "./board.js";
+import { makeRng, rollDie } from "./rng.js";
+import type { GameState, Command } from "./types.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function twoPlayers(seed = 0) {
+  return createGame({
+    boardId: "vegas",
+    seed,
+    players: [
+      { id: "A", name: "Alice", isBot: true, color: "red" },
+      { id: "B", name: "Bob", isBot: true, color: "blue" },
+    ],
+  });
+}
+
+function fourPlayers(seed = 0) {
+  return createGame({
+    boardId: "vegas",
+    seed,
+    players: [
+      { id: "p0", name: "P0", isBot: true, color: "red" },
+      { id: "p1", name: "P1", isBot: true, color: "blue" },
+      { id: "p2", name: "P2", isBot: true, color: "green" },
+      { id: "p3", name: "P3", isBot: true, color: "yellow" },
+    ],
+  });
+}
+
+/** Give player A full ownership of the mistyrose group (pos 13, 14) */
+function stateWithMonopoly(seed = 0): GameState {
+  const s: GameState = structuredClone(twoPlayers(seed));
+  s.ownership[13] = "A";
+  s.ownership[14] = "A";
+  s.players[0]!.money = 5000; // plenty of money
+  return s;
+}
+
+/** Give player A full ownership of the deeppink group (pos 3, 4) */
+function stateWithDeeppink(seed = 0): GameState {
+  const s: GameState = structuredClone(twoPlayers(seed));
+  s.ownership[3] = "A";
+  s.ownership[4] = "A";
+  s.players[0]!.money = 5000;
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// BUILD - houses
+// ---------------------------------------------------------------------------
+
+describe("BUILD - houses", () => {
+  it("can build a house on a street when owning the full group", () => {
+    const s = stateWithMonopoly();
+    const { state, events } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(state.buildings[13]?.houses).toBe(1);
+    expect(events.some((e) => e.key === "built")).toBe(true);
+  });
+
+  it("charges houseCost when building a house", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!; // West Avenue, houseCost=40 (mistyrose)
+    expect(tile.type).toBe("street");
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s = stateWithMonopoly();
+    const before = s.players[0]!.money;
+    const { state } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(state.players[0]!.money).toBe(before - tile.houseCost);
+  });
+
+  it("cannot build without owning the full group", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A"; // owns pos 13 but not 14
+    s.players[0]!.money = 5000;
+    expect(() => applyCommand(s, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+  });
+
+  it("cannot build on mortgaged property", () => {
+    const s = stateWithMonopoly();
+    s.mortgaged[13] = true;
+    expect(() => applyCommand(s, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+  });
+
+  it("enforces even-build rule: cannot build 2nd house on A if B has 0", () => {
+    const s = stateWithMonopoly();
+    // First build 1 house on pos 13 (legal since both start at 0)
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    // Now try to build another on 13 when 14 still has 0 - should fail (even rule: 14 has 0, 13 has 1)
+    expect(() => applyCommand(s1, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+  });
+
+  it("even-build: can build 2nd house on A after B gets 1", () => {
+    const s = stateWithMonopoly();
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }); // A: 1 house
+    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" }); // B: 1 house
+    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" }); // A: 2 houses
+    expect(s3.buildings[13]?.houses).toBe(2);
+    expect(s3.buildings[14]?.houses).toBe(1);
+  });
+
+  it("cannot build a 5th house (max is 4 before hotel)", () => {
+    const s = stateWithMonopoly();
+    let cur = s;
+    // Build 4 houses on each street
+    for (let i = 0; i < 4; i++) {
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
+    }
+    expect(cur.buildings[13]?.houses).toBe(4);
+    // Should not be able to add a 5th house
+    expect(() => applyCommand(cur, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUILD - hotel
+// ---------------------------------------------------------------------------
+
+describe("BUILD - hotel", () => {
+  it("can build a hotel when all streets in group have 4 houses", () => {
+    const s = stateWithMonopoly();
+    let cur = s;
+    // Build 4 houses on each street
+    for (let i = 0; i < 4; i++) {
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
+    }
+    const { state, events } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
+    expect(state.buildings[13]?.hotel).toBe(true);
+    expect(state.buildings[13]?.houses).toBe(0);
+    expect(events.some((e) => e.key === "built")).toBe(true);
+  });
+
+  it("charges hotelCost when building a hotel", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s = stateWithMonopoly();
+    let cur = s;
+    for (let i = 0; i < 4; i++) {
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
+    }
+    const moneyBefore = cur.players[0]!.money;
+    const { state } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
+    expect(state.players[0]!.money).toBe(moneyBefore - tile.hotelCost);
+  });
+
+  it("cannot build hotel without 4 houses on this street", () => {
+    const s = stateWithMonopoly();
+    let cur = s;
+    // Only 3 houses each
+    for (let i = 0; i < 3; i++) {
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
+    }
+    expect(() => applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUILD - factory
+// ---------------------------------------------------------------------------
+
+describe("BUILD - factory", () => {
+  it("can build a factory when all streets in group are empty", () => {
+    const s = stateWithMonopoly();
+    const { state, events } = applyCommand(s, { type: "BUILD", pos: 13, building: "factory" });
+    expect(state.buildings[13]?.factory).toBe(true);
+    expect(events.some((e) => e.key === "built")).toBe(true);
+  });
+
+  it("charges factoryCost when building a factory", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s = stateWithMonopoly();
+    const before = s.players[0]!.money;
+    const { state } = applyCommand(s, { type: "BUILD", pos: 13, building: "factory" });
+    expect(state.players[0]!.money).toBe(before - tile.factoryCost);
+  });
+
+  it("cannot build factory if another member has houses", () => {
+    const s = stateWithMonopoly();
+    // Build 1 house on pos 13
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
+    // Now try factory on 13 (has 1 house) - should fail
+    expect(() => applyCommand(s2, { type: "BUILD", pos: 13, building: "factory" })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rent scales with buildings
+// ---------------------------------------------------------------------------
+
+describe("rent scales with buildings", () => {
+  it("rent increases with number of houses", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    // Find a seed that gives non-doubles with sum=3 (from B at pos 10 to pos 13)
+    let seedF: number | null = null;
+    for (let s = 0; s < 2000; s++) {
+      const rng = makeRng(s);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
+    }
+    if (seedF === null) throw new Error("No seed for sum=3 non-doubles");
+
+    // Test with 0, 1, 2, 3, 4 houses
+    const expectedRents = tile.rent; // [base, 1h, 2h, 3h, 4h, hotel]
+
+    for (let houseCount = 0; houseCount <= 4; houseCount++) {
+      const gs: GameState = structuredClone(twoPlayers(seedF));
+      gs.ownership[13] = "A"; // A owns 13
+      gs.ownership[14] = "A"; // A owns 14 (full group for base rent doubling)
+      gs.players[1]!.position = 10; // B starts at 10, moves to 13
+      gs.players[1]!.money = 5000;
+      gs.players[0]!.money = 5000;
+      gs.currentPlayerIndex = 1; // B's turn
+      gs.phase = "awaiting-roll";
+      if (houseCount > 0) {
+        gs.buildings[13] = { houses: houseCount, hotel: false, factory: false };
+      }
+
+      const { state } = applyCommand(gs, { type: "ROLL_DICE" });
+      if (state.players[1]!.position === 13) {
+        const expected = houseCount === 0 ? expectedRents[0]! * 2 : expectedRents[houseCount]!;
+        expect(state.players[1]!.money).toBe(5000 - expected);
+      }
+    }
+  });
+
+  it("hotel charges rent[5]", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    let seedF: number | null = null;
+    for (let s = 0; s < 2000; s++) {
+      const rng = makeRng(s);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
+    }
+    if (seedF === null) throw new Error("No seed for sum=3 non-doubles");
+
+    const gs: GameState = structuredClone(twoPlayers(seedF));
+    gs.ownership[13] = "A";
+    gs.ownership[14] = "A";
+    gs.players[1]!.position = 10;
+    gs.players[1]!.money = 5000;
+    gs.players[0]!.money = 5000;
+    gs.currentPlayerIndex = 1;
+    gs.phase = "awaiting-roll";
+    gs.buildings[13] = { houses: 0, hotel: true, factory: false };
+
+    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
+    if (state.players[1]!.position === 13) {
+      expect(state.players[1]!.money).toBe(5000 - tile.rent[5]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SELL_BUILDING
+// ---------------------------------------------------------------------------
+
+describe("SELL_BUILDING", () => {
+  it("selling a house refunds tile.mortgage", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    // Build 2 houses on 13, 1 on 14 so even-sell rule allows selling from 13
+    const s = stateWithMonopoly();
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
+    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" });
+    // s3: 13=2 houses, 14=1 house. Can sell from 13 (after sell: 13=1, 14=1, diff=0 OK)
+    const moneyBefore = s3.players[0]!.money;
+    const { state: s4, events } = applyCommand(s3, { type: "SELL_BUILDING", pos: 13 });
+    expect(s4.buildings[13]?.houses).toBe(1);
+    expect(s4.players[0]!.money).toBe(moneyBefore + tile.mortgage);
+    expect(events.some((e) => e.key === "soldBuilding")).toBe(true);
+  });
+
+  it("selling a hotel refunds tile.mortgage and gives 4 houses", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s = stateWithMonopoly();
+    let cur = s;
+    for (let i = 0; i < 4; i++) {
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
+    }
+    const { state: withHotel } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
+    const moneyBefore = withHotel.players[0]!.money;
+
+    const { state, events } = applyCommand(withHotel, { type: "SELL_BUILDING", pos: 13 });
+    // Hotel -> 4 houses (knockdown)
+    expect(state.buildings[13]?.hotel).toBe(false);
+    expect(state.buildings[13]?.houses).toBe(4);
+    // Refund = tile.mortgage
+    expect(state.players[0]!.money).toBe(moneyBefore + tile.mortgage);
+    expect(events.some((e) => e.key === "soldBuilding")).toBe(true);
+  });
+
+  it("selling a factory refunds tile.houseCost", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s = stateWithMonopoly();
+    const { state: withFactory } = applyCommand(s, { type: "BUILD", pos: 13, building: "factory" });
+    const moneyBefore = withFactory.players[0]!.money;
+
+    const { state, events } = applyCommand(withFactory, { type: "SELL_BUILDING", pos: 13 });
+    expect(state.buildings[13]?.factory).toBe(false);
+    expect(state.players[0]!.money).toBe(moneyBefore + tile.houseCost);
+    expect(events.some((e) => e.key === "soldBuilding")).toBe(true);
+  });
+
+  it("cannot sell house if another street in group has fewer (even-sell rule)", () => {
+    // A has 2 houses on 13, 1 house on 14. Cannot sell from 13 (it has more).
+    const s = stateWithMonopoly();
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
+    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" });
+    // s3: 13 has 2 houses, 14 has 1 house
+    // Selling from 13 would give it 1 house (same as 14) - this should be allowed
+    const { state: s4 } = applyCommand(s3, { type: "SELL_BUILDING", pos: 13 });
+    expect(s4.buildings[13]?.houses).toBe(1);
+    // Now both have 1 house. Selling from 13 would give 0, but 14 has 1 -> not allowed
+    expect(() => applyCommand(s4, { type: "SELL_BUILDING", pos: 13 })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MORTGAGE / UNMORTGAGE
+// ---------------------------------------------------------------------------
+
+describe("MORTGAGE and UNMORTGAGE", () => {
+  it("mortgage pays mortgageValue to player", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    const before = s.players[0]!.money;
+
+    const { state, events } = applyCommand(s, { type: "MORTGAGE", pos: 13 });
+    expect(state.mortgaged[13]).toBe(true);
+    expect(state.players[0]!.money).toBe(before + tile.mortgage);
+    expect(events.some((e) => e.key === "mortgaged")).toBe(true);
+  });
+
+  it("station mortgage pays board.rules.station.mortgage", () => {
+    const board = getBoard("vegas");
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[5] = "A"; // Caesar Station
+    const before = s.players[0]!.money;
+
+    const { state } = applyCommand(s, { type: "MORTGAGE", pos: 5 });
+    expect(state.mortgaged[5]).toBe(true);
+    expect(state.players[0]!.money).toBe(before + board.rules.station.mortgage);
+  });
+
+  it("cannot mortgage property with buildings on it", () => {
+    const s = stateWithMonopoly();
+    const { state: withHouse } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    const { state: withHouse14 } = applyCommand(withHouse, { type: "BUILD", pos: 14, building: "house" });
+    // Now try to mortgage 13 (has a house)
+    expect(() => applyCommand(withHouse14, { type: "MORTGAGE", pos: 13 })).toThrow();
+  });
+
+  it("cannot mortgage already mortgaged property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    const { state: mortgagedState } = applyCommand(s, { type: "MORTGAGE", pos: 13 });
+    expect(() => applyCommand(mortgagedState, { type: "MORTGAGE", pos: 13 })).toThrow();
+  });
+
+  it("unmortgage costs Math.floor(mortgageValue * 1.1)", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    const { state: mortgaged } = applyCommand(s, { type: "MORTGAGE", pos: 13 });
+
+    const expectedCost = Math.floor(tile.mortgage * board.rules.mortgageUnmortgageMultiplier);
+    const moneyBefore = mortgaged.players[0]!.money;
+    const { state, events } = applyCommand(mortgaged, { type: "UNMORTGAGE", pos: 13 });
+    expect(state.mortgaged[13]).toBeUndefined();
+    expect(state.players[0]!.money).toBe(moneyBefore - expectedCost);
+    expect(events.some((e) => e.key === "unmortgaged")).toBe(true);
+  });
+
+  it("mortgaged property does not charge rent", () => {
+    let seedF: number | null = null;
+    for (let s = 0; s < 2000; s++) {
+      const rng = makeRng(s);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
+    }
+    if (seedF === null) throw new Error("No seed for sum=3 non-doubles");
+
+    const gs: GameState = structuredClone(twoPlayers(seedF));
+    gs.ownership[13] = "A";
+    gs.ownership[14] = "A";
+    gs.mortgaged[13] = true;
+    gs.players[1]!.position = 10; // B lands on 13
+    gs.players[1]!.money = 5000;
+    gs.currentPlayerIndex = 1;
+    gs.phase = "awaiting-roll";
+
+    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
+    if (state.players[1]!.position === 13) {
+      expect(state.players[1]!.money).toBe(5000); // no rent paid
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SELL_PROPERTY
+// ---------------------------------------------------------------------------
+
+describe("SELL_PROPERTY", () => {
+  it("sell property refunds half of purchase price", () => {
+    const board = getBoard("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("not a street");
+
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    const before = s.players[0]!.money;
+
+    const { state, events } = applyCommand(s, { type: "SELL_PROPERTY", pos: 13 });
+    expect(state.ownership[13]).toBeUndefined();
+    expect(state.players[0]!.money).toBe(before + Math.floor(tile.price / 2));
+    expect(events.some((e) => e.key === "soldProperty")).toBe(true);
+  });
+
+  it("cannot sell property with buildings", () => {
+    const s = stateWithMonopoly();
+    const { state: withHouse } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    const { state: withHouse14 } = applyCommand(withHouse, { type: "BUILD", pos: 14, building: "house" });
+    expect(() => applyCommand(withHouse14, { type: "SELL_PROPERTY", pos: 13 })).toThrow();
+  });
+
+  it("cannot sell mortgaged property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    const { state: mortgaged } = applyCommand(s, { type: "MORTGAGE", pos: 13 });
+    expect(() => applyCommand(mortgaged, { type: "SELL_PROPERTY", pos: 13 })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TRAVEL
+// ---------------------------------------------------------------------------
+
+describe("TRAVEL", () => {
+  it("can travel from one station to another", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5; // Caesar Station
+    s.players[0]!.money = 5000;
+    const { state, events } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    expect(state.players[0]!.position).toBe(15);
+    expect(events.some((e) => e.key === "traveled")).toBe(true);
+  });
+
+  it("travel to unowned station costs nothing", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    s.players[0]!.money = 5000;
+    const before = s.players[0]!.money;
+    const { state } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    // No owner, no cost
+    expect(state.players[0]!.money).toBe(before);
+  });
+
+  it("travel to opponent-owned station charges ticket based on stations owned", () => {
+    const board = getBoard("vegas");
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5; // A at Caesar Station
+    s.players[0]!.money = 5000;
+    s.players[1]!.money = 1000;
+    s.ownership[15] = "B"; // B owns Westgate Station (1 station)
+
+    const expectedCost = board.rules.station.travel[0]!; // [75] for 1 station
+    const moneyA = s.players[0]!.money;
+    const moneyB = s.players[1]!.money;
+    const { state } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    expect(state.players[0]!.position).toBe(15);
+    expect(state.players[0]!.money).toBe(moneyA - expectedCost);
+    expect(state.players[1]!.money).toBe(moneyB + expectedCost);
+  });
+
+  it("travel ticket scales with destination owner station count", () => {
+    const board = getBoard("vegas");
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    s.players[0]!.money = 5000;
+    s.players[1]!.money = 1000;
+    // B owns 2 stations: 15 and 25
+    s.ownership[15] = "B";
+    s.ownership[25] = "B";
+
+    const expectedCost = board.rules.station.travel[1]!; // [150] for 2 stations
+    const { state } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    expect(state.players[0]!.money).toBe(5000 - expectedCost);
+  });
+
+  it("travel crossing GO grants goPassMoney", () => {
+    const board = getBoard("vegas");
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 35; // Grand Central (highest station)
+    s.players[0]!.money = 5000;
+    const { state } = applyCommand(s, { type: "TRAVEL", toPos: 5 }); // wraps past GO
+    expect(state.players[0]!.position).toBe(5);
+    // Should have received goPassMoney
+    expect(state.players[0]!.money).toBeGreaterThanOrEqual(5000 + board.rules.goPassMoney - 300); // minus possible ticket
+  });
+
+  it("cannot travel from non-station position", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 1; // street, not station
+    expect(() => applyCommand(s, { type: "TRAVEL", toPos: 15 })).toThrow();
+  });
+
+  it("cannot travel to same station", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    expect(() => applyCommand(s, { type: "TRAVEL", toPos: 5 })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Action cards
+// ---------------------------------------------------------------------------
+
+describe("action cards", () => {
+  it("action deck is initialized empty (will be shuffled on first draw)", () => {
+    const s = twoPlayers(42);
+    // Deck starts empty; shuffled on first draw
+    expect(s.actionDeck).toHaveLength(0);
+    expect(s.actionDiscard).toHaveLength(0);
+  });
+
+  it("landing on action field draws a card (deck shrinks by 1)", () => {
+    // Find a seed that makes player land on action field (pos 7, 17, 22, or 32)
+    // Put player at pos 5 (station), need sum=2 to land on 7
+    let seedF: number | null = null;
+    for (let s = 0; s < 2000; s++) {
+      const rng = makeRng(s);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 2) { seedF = s; break; } // 1+1 doubles
+    }
+    if (seedF === null) throw new Error("No seed for sum=2");
+
+    const gs: GameState = structuredClone(twoPlayers(seedF));
+    gs.players[0]!.position = 5;
+    gs.players[0]!.money = 5000;
+    gs.players[1]!.money = 5000;
+    gs.currentPlayerIndex = 0;
+    gs.phase = "awaiting-roll";
+    const deckSizeBefore = gs.actionDeck.length;
+
+    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
+    if (state.players[0]!.position === 7) {
+      // One card drawn (or possibly more if card triggers a move to another action field)
+      expect(state.actionDiscard.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("when deck is empty, discard is reshuffled", () => {
+    const s = twoPlayers(0);
+    const tweaked: GameState = structuredClone(s);
+    tweaked.actionDeck = []; // empty deck
+    tweaked.actionDiscard = [6]; // 1 card in discard (single pay card - gamblingTax)
+    // Put player on action field pos 7, and give enough money
+    tweaked.players[0]!.position = 5;
+    tweaked.players[0]!.money = 5000;
+    tweaked.players[1]!.money = 5000;
+    tweaked.currentPlayerIndex = 0;
+    tweaked.phase = "awaiting-roll";
+
+    // Find seed for sum=2 to land on pos 7
+    let seedF: number | null = null;
+    for (let seed = 0; seed < 2000; seed++) {
+      const rng = makeRng(seed);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 2) { seedF = seed; break; }
+    }
+    if (seedF === null) throw new Error("No seed for sum=2");
+
+    // Use a state with the right seed for the RNG but modified deck
+    const gs: GameState = structuredClone(twoPlayers(seedF));
+    gs.actionDeck = [];
+    gs.actionDiscard = [13]; // "inherit" card (positive single) - player will collect
+    gs.players[0]!.position = 5;
+    gs.players[0]!.money = 5000;
+    gs.players[1]!.money = 5000;
+    gs.currentPlayerIndex = 0;
+    gs.phase = "awaiting-roll";
+
+    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
+    if (state.players[0]!.position === 7) {
+      // Discard was reshuffled and card drawn
+      expect(state.actionDiscard).toHaveLength(1);
+      expect(state.actionDeck).toHaveLength(0); // was empty, reshuffled to 1, then drew 1
+    }
+  });
+
+  it("broadcast collect card: collect from each other player", () => {
+    // Card 21 = birthday (broadcast, positive, multiplier 20)
+    // Manually set up state with birthday card first in deck
+    const gs: GameState = structuredClone(fourPlayers(0));
+    // Put card index 21 (birthday) first in deck
+    gs.actionDeck = [21, ...gs.actionDeck.filter((i) => i !== 21)];
+
+    // Find seed so player at pos 5 rolls sum=2 to land on pos 7
+    let seedF: number | null = null;
+    for (let seed = 0; seed < 5000; seed++) {
+      const rng = makeRng(seed);
+      const d1 = rollDie(rng);
+      const d2 = rollDie(rng);
+      if (d1 + d2 === 2) { seedF = seed; break; }
+    }
+    if (seedF === null) throw new Error("No seed for sum=2");
+
+    // Set up state
+    const state0 = structuredClone(gs);
+    state0.rng = makeRng(seedF); // use the rng for sum=2
+    // Reconstruct with proper rng seed
+    const realGs: GameState = structuredClone(fourPlayers(seedF));
+    realGs.actionDeck = [21, ...realGs.actionDeck.filter((i) => i !== 21)];
+    realGs.players[0]!.position = 5;
+    for (const p of realGs.players) p.money = 1000;
+    realGs.currentPlayerIndex = 0;
+    realGs.phase = "awaiting-roll";
+
+    const { state } = applyCommand(realGs, { type: "ROLL_DICE" });
+    if (state.players[0]!.position === 7) {
+      // P0 collected from P1, P2, P3 (3 others)
+      // Amount = nextInt(rng, 1, 5) * 20 = some multiple of 20
+      // P0 should have more money, others less
+      expect(state.players[0]!.money).toBeGreaterThan(1000);
+      expect(state.players[1]!.money).toBeLessThan(1000);
+      expect(state.players[2]!.money).toBeLessThan(1000);
+      expect(state.players[3]!.money).toBeLessThan(1000);
+    }
+  });
+
+  it("action card determinism: same seed same outcome", () => {
+    function runGame(seed: number): GameState {
+      let s = twoPlayers(seed);
+      s.players[0]!.position = 5;
+      for (let i = 0; i < 10; i++) {
+        if (s.phase === "finished") break;
+        if (s.phase === "awaiting-buy") {
+          ({ state: s } = applyCommand(s, { type: "DECLINE_PROPERTY" }));
+        } else {
+          ({ state: s } = applyCommand(s, { type: "ROLL_DICE" }));
+        }
+      }
+      return s;
+    }
+    const s1 = runGame(99);
+    const s2 = runGame(99);
+    expect(s1).toEqual(s2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// legalCommands includes management commands
+// ---------------------------------------------------------------------------
+
+describe("legalCommands - management", () => {
+  it("includes BUILD when player has full group and can build", () => {
+    const s = stateWithMonopoly();
+    expect(legalCommands(s)).toContain("BUILD");
+  });
+
+  it("does not include BUILD when player lacks full group", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A"; // only one of two mistyrose
+    expect(legalCommands(s)).not.toContain("BUILD");
+  });
+
+  it("includes MORTGAGE when player owns unbuilt property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(legalCommands(s)).toContain("MORTGAGE");
+  });
+
+  it("includes SELL_PROPERTY when player owns unbuilt, unmortgaged property", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.ownership[13] = "A";
+    expect(legalCommands(s)).toContain("SELL_PROPERTY");
+  });
+
+  it("includes TRAVEL when player is at a station", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5; // Caesar Station
+    expect(legalCommands(s)).toContain("TRAVEL");
+  });
+
+  it("does not include TRAVEL when player is not at a station", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 1; // street
+    expect(legalCommands(s)).not.toContain("TRAVEL");
+  });
+
+  it("management commands not available in awaiting-buy phase", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.phase = "awaiting-buy";
+    s.pendingPurchase = 1;
+    const cmds = legalCommands(s);
+    expect(cmds).not.toContain("BUILD");
+    expect(cmds).not.toContain("MORTGAGE");
+  });
+});

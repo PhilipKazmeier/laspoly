@@ -31,6 +31,22 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   gameOver: { player: "Alice" },
   nextTurn: { player: "Bob" },
   extraRoll: { player: "Alice" },
+  built: { player: "Alice", building: "house", tile: "Park Lane", amount: 50 },
+  soldBuilding: { player: "Alice", building: "house", tile: "Park Lane", amount: 30 },
+  mortgaged: { player: "Alice", tile: "Park Lane", amount: 100 },
+  unmortgaged: { player: "Alice", tile: "Park Lane", amount: 110 },
+  soldProperty: { player: "Alice", tile: "Park Lane", amount: 175 },
+  traveled: { player: "Alice", tile: "Caesar Station", from: 5, cost: 75 },
+  actionCard: { player: "Alice", card: "birthday" },
+  actionCardMove: { player: "Alice", tile: "GO" },
+  actionCardMoveJail: { player: "Alice" },
+  actionCardMoveForward: { player: "Alice", steps: 5 },
+  actionCardNextStation: { player: "Alice" },
+  actionCardPay: { player: "Alice", amount: 90, card: "gamblingTax" },
+  actionCardCollect: { player: "Alice", amount: 75, card: "yardSale" },
+  actionCardBroadcastPay: { player: "Alice", amount: 60, card: "youGotPromoted" },
+  actionCardBroadcastCollect: { player: "Alice", amount: 50, card: "birthday" },
+  actionCardRepair: { player: "Alice", amount: 40, card: "generalRepairs" },
 };
 
 describe("i18n", () => {
