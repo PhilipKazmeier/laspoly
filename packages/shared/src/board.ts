@@ -1,4 +1,6 @@
 import vegas from "../boards/vegas.json" with { type: "json" };
+import oehringen from "../boards/oehringen.json" with { type: "json" };
+import heilbronn from "../boards/heilbronn.json" with { type: "json" };
 
 export type TileType =
   | "go"
@@ -62,6 +64,8 @@ export const JAIL_POS = 40;
 
 const REGISTRY: Record<string, BoardDefinition> = {
   vegas: vegas as unknown as BoardDefinition,
+  oehringen: oehringen as unknown as BoardDefinition,
+  heilbronn: heilbronn as unknown as BoardDefinition,
 };
 
 export function registerBoard(board: BoardDefinition): void {
