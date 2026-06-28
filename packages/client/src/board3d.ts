@@ -45,6 +45,38 @@ function hexToColor3(hex: string): Color3 {
   return new Color3(r, g, b);
 }
 
+// Player colours arrive as CSS colour NAMES (e.g. "red", "blue") from the
+// server (room.ts COLORS), not hex. Map the known names to vivid hex so the
+// 3D tokens/rings render in the right colour instead of black.
+const PLAYER_COLOR_HEX: Record<string, string> = {
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#eab308",
+  purple: "#a855f7",
+  orange: "#f97316",
+};
+
+/** Resolve a player colour (CSS name or hex) to a Color3. */
+function playerColor3(c: string): Color3 {
+  if (c.startsWith("#")) return hexToColor3(c);
+  const hex = PLAYER_COLOR_HEX[c.toLowerCase()];
+  if (hex) return hexToColor3(hex);
+  return new Color3(0.6, 0.6, 0.6);
+}
+
+/**
+ * Brighten a colour so dark player colours (e.g. darkgreen #006400) still read
+ * clearly as tokens. Scales the colour up so its brightest channel reaches
+ * `target`, preserving hue.
+ */
+function brighten(c: Color3, target = 0.95): Color3 {
+  const max = Math.max(c.r, c.g, c.b);
+  if (max <= 0) return new Color3(0.6, 0.6, 0.6);
+  const f = target / max;
+  return new Color3(Math.min(1, c.r * f), Math.min(1, c.g * f), Math.min(1, c.b * f));
+}
+
 // ---------------------------------------------------------------------------
 // Coordinate helpers (mirrored from Board.java, scaled 20/1200 ≈ 0.01667)
 // ---------------------------------------------------------------------------
@@ -593,10 +625,12 @@ export class Board3D {
     clone.isPickable = false;
     // Tint by overriding material with a bright, self-lit colour so the car
     // reads clearly as that player's colour (the raw OBJ material is dark).
+    // Brighten dark player colours so they don't render near-black.
+    const bright = brighten(color);
     const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
-    mat.diffuseColor = color;
-    mat.specularColor = new Color3(0.6, 0.6, 0.6);
-    mat.emissiveColor = color.scale(0.85);
+    mat.diffuseColor = bright;
+    mat.specularColor = new Color3(0.4, 0.4, 0.4);
+    mat.emissiveColor = bright.scale(0.7);
     clone.material = mat;
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
     clone.getChildMeshes().forEach((c) => { c.material = mat; });
@@ -623,7 +657,8 @@ export class Board3D {
     const ctx = tex.getContext() as CanvasRenderingContext2D;
     ctx.fillStyle = "rgba(0,0,0,0.65)";
     ctx.fillRect(0, 0, 128, 32);
-    ctx.fillStyle = color.startsWith("#") ? color : `#${color}`;
+    // `color` may be a CSS name (e.g. "red") or hex — both are valid fillStyle.
+    ctx.fillStyle = color;
     ctx.font = "bold 14px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -690,8 +725,7 @@ export class Board3D {
 
       let mesh = this.tokenMeshes.get(player.id);
       if (!mesh) {
-        const colorHex = player.color.startsWith("#") ? player.color : `#${player.color}`;
-        const color = hexToColor3(colorHex);
+        const color = playerColor3(player.color);
         const carIdx = (state.players.indexOf(player) % 5) + 1;
         mesh = this.carsLoaded
           ? (this.cloneCarToken(carIdx, color, player.id) ?? this.makeFallbackToken(player.id, color))
@@ -713,24 +747,28 @@ export class Board3D {
         mesh.position.set(targetX, 0.35, targetZ);
         const lbl = this.tokenLabels.get(player.id);
         if (lbl) lbl.position.set(targetX, 1.1, targetZ);
-        // Coloured ring under token (strong colour halo for distinguishability)
+        // Coloured ring/disc under token: a bright torus halo that pokes out
+        // beyond the car silhouette so each player's colour is unmistakable,
+        // even from a top-down view where the car body would hide a flat disc.
         let ring = this.tokenRings.get(player.id);
         if (!ring) {
-          const colorHex2 = player.color.startsWith('#') ? player.color : `#${player.color}`;
-          const ringColor = hexToColor3(colorHex2);
-          ring = MeshBuilder.CreateCylinder(
+          const ringColor = brighten(playerColor3(player.color));
+          ring = MeshBuilder.CreateTorus(
             `ring_${player.id}`,
-            { diameter: 0.9, height: 0.03, tessellation: 16 },
+            { diameter: 1.05, thickness: 0.22, tessellation: 20 },
             this.scene
           );
           const ringMat = new StandardMaterial(`ringMat_${player.id}`, this.scene);
-          ringMat.diffuseColor = ringColor;
-          ringMat.emissiveColor = ringColor.scale(0.9);
+          // Emissive carries the hue (so it pops regardless of lighting angle),
+          // with a touch of diffuse for shading. specular off to avoid white blowout.
+          ringMat.diffuseColor = ringColor.scale(0.3);
+          ringMat.emissiveColor = ringColor;
+          ringMat.specularColor = new Color3(0, 0, 0);
           ring.material = ringMat;
           ring.isPickable = false;
           this.tokenRings.set(player.id, ring);
         }
-        ring.position.set(targetX, 0.03, targetZ);
+        ring.position.set(targetX, 0.12, targetZ);
       }
     }
 
@@ -917,14 +955,14 @@ export class Board3D {
       const lbl = this.tokenLabels.get(playerId);
       if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
       const ring = this.tokenRings.get(playerId);
-      if (ring) ring.position.set(mesh.position.x, 0.03, mesh.position.z);
+      if (ring) ring.position.set(mesh.position.x, 0.12, mesh.position.z);
 
       if (t >= 1) {
         this.scene.onBeforeRenderObservable.remove(obs);
         mesh.position.set(targetX, 0.35, targetZ);
         if (lbl) lbl.position.set(targetX, 1.1, targetZ);
         const ring2 = this.tokenRings.get(playerId);
-        if (ring2) ring2.position.set(targetX, 0.03, targetZ);
+        if (ring2) ring2.position.set(targetX, 0.12, targetZ);
         this.driveAnimation(playerId);
       }
     });
