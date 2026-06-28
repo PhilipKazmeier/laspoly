@@ -11,6 +11,7 @@ import {
   Texture,
   DynamicTexture,
   AbstractMesh,
+  Mesh,
   SceneLoader,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
@@ -145,8 +146,8 @@ export class Board3D {
   private tokenMeshes: Map<string, AbstractMesh> = new Map();
   private buildingMeshes: Map<number, AbstractMesh> = new Map();
   private currentBoardId: string | null = null;
-  // Car OBJ models (player tokens), keyed by car index 1-5
-  private carModels: Map<number, AbstractMesh[]> = new Map();
+  // Car OBJ models (player tokens): one merged template mesh per car index 1-5
+  private carModels: Map<number, Mesh> = new Map();
   private carsLoaded = false;
   private lastState: GameState | null = null;
   private lastMyId: string | null = null;
@@ -223,16 +224,28 @@ export class Board3D {
     for (let i = 1; i <= 5; i++) {
       try {
         const result = await SceneLoader.ImportMeshAsync("", "/assets/", `car${i}.obj`, this.scene);
-        const meshes = result.meshes;
-        // Scale down (SketchUp / Blender units → Babylon; cars are ~1 m but feel huge)
-        meshes.forEach((m) => {
-          m.scaling.setAll(0.008);
-          m.setEnabled(false);
-          m.isPickable = false;
-        });
-        this.carModels.set(i, meshes);
+        // OBJ loads as one or more real meshes; merge geometry into a single template.
+        const realMeshes = result.meshes.filter(
+          (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
+        );
+        if (realMeshes.length === 0) continue;
+        const merged =
+          realMeshes.length === 1
+            ? realMeshes[0]!
+            : Mesh.MergeMeshes(realMeshes, true, true, undefined, false, false);
+        if (!merged) continue;
+
+        // Raw car spans ~0.3 units; normalise to a ~1.3-unit token.
+        const bounds = merged.getBoundingInfo().boundingBox.extendSize;
+        const maxDim = Math.max(bounds.x, bounds.y, bounds.z) * 2 || 1;
+        const target = 1.3;
+        merged.scaling.setAll(target / maxDim);
+        merged.name = `carTemplate_${i}`;
+        merged.setEnabled(false);
+        merged.isPickable = false;
+        this.carModels.set(i, merged);
       } catch {
-        // Silently skip; sphere fallback used in update()
+        // Silently skip; cylinder fallback used in rebuildTokens()
       }
     }
     this.carsLoaded = true;
@@ -569,20 +582,22 @@ export class Board3D {
 
   /** Return a clone of car model `idx` (1–5) tinted by `color`, or undefined if not ready. */
   private cloneCarToken(idx: number, color: Color3, playerId: string): AbstractMesh | undefined {
-    const meshes = this.carModels.get(idx);
-    if (!meshes || meshes.length === 0) return undefined;
+    const template = this.carModels.get(idx);
+    if (!template) return undefined;
 
-    const root = meshes[0];
-    if (!root) return undefined;
-    const clone = root.clone(`token_${playerId}`, null);
+    const clone = template.clone(`token_${playerId}`);
     if (!clone) return undefined;
     clone.setEnabled(true);
-    clone.scaling.setAll(0.008);
-    // Tint by overriding material
+    clone.isPickable = false;
+    // Tint by overriding material with a bright, self-lit colour so the car
+    // reads clearly as that player's colour (the raw OBJ material is dark).
     const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
     mat.diffuseColor = color;
-    mat.specularColor = new Color3(0.5, 0.5, 0.5);
+    mat.specularColor = new Color3(0.6, 0.6, 0.6);
+    mat.emissiveColor = color.scale(0.55);
     clone.material = mat;
+    // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
+    clone.getChildMeshes().forEach((c) => { c.material = mat; });
     return clone;
   }
 
@@ -853,26 +868,41 @@ export class Board3D {
   // Dice cup
   // -------------------------------------------------------------------------
   private async initDice(): Promise<void> {
-    const CX = 12, CZ = -5;
+    // Felt centre is empty except the jail cage (origin) and deck (+4,+4).
+    // Place the dice area in the opposite felt corner so it stays on-screen.
+    const CX = -3.5, CZ = 3.5;
 
     try {
       const cupResult = await SceneLoader.ImportMeshAsync("", "/assets/", "DiceCup.obj", this.scene);
-      const cupMeshes = cupResult.meshes;
-      const cupMat = new StandardMaterial("cupMat", this.scene);
-      cupMat.diffuseColor = new Color3(0.15, 0.12, 0.08);
-      cupMat.specularColor = new Color3(0.4, 0.3, 0.2);
-      cupMeshes.forEach((m) => { m.scaling.setAll(0.01); m.isPickable = false; m.material = cupMat; });
-      if (cupMeshes[0]) {
-        this.diceCupMesh = cupMeshes[0];
-        this.diceCupMesh.position.set(CX, 0.4, CZ);
+      const cupReal = cupResult.meshes.filter(
+        (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
+      );
+      const cup = cupReal.length === 1
+        ? cupReal[0]!
+        : Mesh.MergeMeshes(cupReal, true, true, undefined, false, false);
+      if (cup) {
+        const cupMat = new StandardMaterial("cupMat", this.scene);
+        cupMat.diffuseColor = new Color3(0.18, 0.12, 0.06);
+        cupMat.specularColor = new Color3(0.4, 0.3, 0.2);
+        cupMat.emissiveColor = new Color3(0.08, 0.05, 0.02);
+        cup.material = cupMat;
+        // Normalise raw cup (~0.9 units) to a ~1.3-unit cup.
+        const ext = cup.getBoundingInfo().boundingBox.extendSize;
+        const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
+        cup.scaling.setAll(1.3 / maxDim);
+        cup.isPickable = false;
+        cup.position.set(CX, 0.6, CZ);
+        this.diceCupMesh = cup;
+      } else {
+        throw new Error("no cup mesh");
       }
     } catch {
       const fallbackCup = MeshBuilder.CreateCylinder(
         "cupFallback",
-        { diameterTop: 0.8, diameterBottom: 0.6, height: 1.0, tessellation: 12 },
+        { diameterTop: 1.0, diameterBottom: 0.7, height: 1.2, tessellation: 14 },
         this.scene
       );
-      fallbackCup.position.set(CX, 0.5, CZ);
+      fallbackCup.position.set(CX, 0.6, CZ);
       const cupMat = new StandardMaterial("cupMatFb", this.scene);
       cupMat.diffuseColor = new Color3(0.2, 0.12, 0.05);
       fallbackCup.material = cupMat;
@@ -880,18 +910,34 @@ export class Board3D {
     }
 
     for (let d = 0; d < 2; d++) {
+      const dx = CX + (d === 0 ? -0.3 : 0.3);
+      const dz = CZ + (d === 0 ? -0.12 : 0.12);
       try {
         const diceResult = await SceneLoader.ImportMeshAsync("", "/assets/", "rounded-dice.obj", this.scene);
-        const diceMeshes = diceResult.meshes;
-        diceMeshes.forEach((m) => { m.scaling.setAll(0.015); m.isPickable = false; });
-        const dieMesh = diceMeshes[0];
-        if (dieMesh) {
-          dieMesh.position.set(CX + (d === 0 ? -0.25 : 0.25), 0.2, CZ + (d === 0 ? -0.1 : 0.1));
-          if (d === 0) this.dieMesh1 = dieMesh; else this.dieMesh2 = dieMesh;
+        const diceReal = diceResult.meshes.filter(
+          (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
+        );
+        const die = diceReal.length === 1
+          ? diceReal[0]!
+          : Mesh.MergeMeshes(diceReal, true, true, undefined, false, false);
+        if (die) {
+          const dieMat = new StandardMaterial(`dieMat_${d}`, this.scene);
+          dieMat.diffuseColor = new Color3(0.95, 0.95, 0.92);
+          dieMat.specularColor = new Color3(0.2, 0.2, 0.2);
+          die.material = dieMat;
+          // Normalise raw die (~2.5 units) to a ~0.5-unit die.
+          const ext = die.getBoundingInfo().boundingBox.extendSize;
+          const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
+          die.scaling.setAll(0.5 / maxDim);
+          die.isPickable = false;
+          die.position.set(dx, 0.25, dz);
+          if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
+        } else {
+          throw new Error("no die mesh");
         }
       } catch {
-        const fb = MeshBuilder.CreateBox(`dieFb_${d}`, { width: 0.35, height: 0.35, depth: 0.35 }, this.scene);
-        fb.position.set(CX + (d === 0 ? -0.25 : 0.25), 0.2, CZ + (d === 0 ? -0.1 : 0.1));
+        const fb = MeshBuilder.CreateBox(`dieFb_${d}`, { width: 0.45, height: 0.45, depth: 0.45 }, this.scene);
+        fb.position.set(dx, 0.25, dz);
         const dieMat = new StandardMaterial(`dieMatFb_${d}`, this.scene);
         dieMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
         fb.material = dieMat;
@@ -960,13 +1006,13 @@ export class Board3D {
       } else {
         const cx = cup.position.x;
         const cz = cup.position.z;
-        if (die1) { die1.position.set(cx - 0.25, 0.2, cz - 0.1); this.orientDie(die1, d1); }
-        if (die2) { die2.position.set(cx + 0.25, 0.2, cz + 0.1); this.orientDie(die2, d2); }
+        if (die1) { die1.position.set(cx - 0.3, 0.25, cz - 0.12); this.orientDie(die1, d1); }
+        if (die2) { die2.position.set(cx + 0.3, 0.25, cz + 0.12); this.orientDie(die2, d2); }
         elapsed += dt;
         const decay = 1 - Math.min(elapsed / 300, 1);
         const bounce = Math.abs(Math.sin((elapsed / 80) * Math.PI)) * 0.15 * decay;
-        if (die1) die1.position.y = 0.2 + bounce;
-        if (die2) die2.position.y = 0.2 + bounce;
+        if (die1) die1.position.y = 0.25 + bounce;
+        if (die2) die2.position.y = 0.25 + bounce;
         if (elapsed >= 400) {
           this.showDiceResultLabel(d1, d2, cup.position.x, cup.position.z);
           this.scene.onBeforeRenderObservable.remove(obs);
