@@ -1,0 +1,16 @@
+{
+  "name": "@laspoly/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.0.0",
+    "@laspoly/shared": "*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  }
+}
