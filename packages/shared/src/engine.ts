@@ -754,7 +754,7 @@ function continueOrAdvance(state: GameState, events: GameEvent[]): void {
     state.activeEvent = drawEvent(state);
     events.push({
       key: `specialEvent_${state.activeEvent.id}` as string,
-      params: {},
+      params: { round: state.round },
     });
   }
 
