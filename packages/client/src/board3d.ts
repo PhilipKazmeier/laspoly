@@ -162,13 +162,15 @@ export class Board3D {
   private dieMesh2: AbstractMesh | null = null;
   private diceAnimating = false;
   private diceResultLabel: AbstractMesh | null = null;
+  private camera!: ArcRotateCamera;
+  private tokenRings: Map<string, AbstractMesh> = new Map();
 
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true);
     this.scene = new Scene(this.engine);
 
     // ---- Camera ------------------------------------------------------------
-    const camera = new ArcRotateCamera(
+    this.camera = new ArcRotateCamera(
       "camera",
       -Math.PI / 2,
       Math.PI / 3.2,
@@ -176,11 +178,11 @@ export class Board3D {
       Vector3.Zero(),
       this.scene
     );
-    camera.attachControl(canvas, true);
-    camera.lowerRadiusLimit = 15;
-    camera.upperRadiusLimit = 80;
-    camera.upperBetaLimit = Math.PI / 2.2;
-    camera.lowerBetaLimit = 0.1;
+    this.camera.attachControl(canvas, true);
+    this.camera.lowerRadiusLimit = 15;
+    this.camera.upperRadiusLimit = 80;
+    this.camera.upperBetaLimit = Math.PI / 2.2;
+    this.camera.lowerBetaLimit = 0.1;
 
     // ---- Lighting ----------------------------------------------------------
     const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
@@ -594,7 +596,7 @@ export class Board3D {
     const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
     mat.diffuseColor = color;
     mat.specularColor = new Color3(0.6, 0.6, 0.6);
-    mat.emissiveColor = color.scale(0.55);
+    mat.emissiveColor = color.scale(0.85);
     clone.material = mat;
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
     clone.getChildMeshes().forEach((c) => { c.material = mat; });
@@ -610,7 +612,7 @@ export class Board3D {
     );
     const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
     mat.diffuseColor = color;
-    mat.emissiveColor = color.scale(0.3); // glow a bit so tokens stand out
+    mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
     mesh.material = mat;
     return mesh;
   }
@@ -648,6 +650,8 @@ export class Board3D {
         this.tokenMeshes.delete(id);
         const lbl = this.tokenLabels.get(id);
         if (lbl) { lbl.dispose(); this.tokenLabels.delete(id); }
+        const ring = this.tokenRings.get(id);
+        if (ring) { ring.dispose(); this.tokenRings.delete(id); }
       }
     }
 
@@ -666,6 +670,8 @@ export class Board3D {
         if (old) { old.dispose(); this.tokenMeshes.delete(player.id); }
         const lbl = this.tokenLabels.get(player.id);
         if (lbl) { lbl.dispose(); this.tokenLabels.delete(player.id); }
+        const ring = this.tokenRings.get(player.id);
+        if (ring) { ring.dispose(); this.tokenRings.delete(player.id); }
         continue;
       }
 
@@ -707,6 +713,24 @@ export class Board3D {
         mesh.position.set(targetX, 0.35, targetZ);
         const lbl = this.tokenLabels.get(player.id);
         if (lbl) lbl.position.set(targetX, 1.1, targetZ);
+        // Coloured ring under token (strong colour halo for distinguishability)
+        let ring = this.tokenRings.get(player.id);
+        if (!ring) {
+          const colorHex2 = player.color.startsWith('#') ? player.color : `#${player.color}`;
+          const ringColor = hexToColor3(colorHex2);
+          ring = MeshBuilder.CreateCylinder(
+            `ring_${player.id}`,
+            { diameter: 0.9, height: 0.03, tessellation: 16 },
+            this.scene
+          );
+          const ringMat = new StandardMaterial(`ringMat_${player.id}`, this.scene);
+          ringMat.diffuseColor = ringColor;
+          ringMat.emissiveColor = ringColor.scale(0.9);
+          ring.material = ringMat;
+          ring.isPickable = false;
+          this.tokenRings.set(player.id, ring);
+        }
+        ring.position.set(targetX, 0.03, targetZ);
       }
     }
 
@@ -789,6 +813,19 @@ export class Board3D {
   handleEvents(_events: FormattedEvent[]) {
     // Animations are driven by state diffs in update()/applyStateDiffs().
     void _events;
+  }
+
+  /** Switch camera between angled standard view and flat top-down view. */
+  setView(v: 'standard' | 'top'): void {
+    if (v === 'top') {
+      this.camera.alpha = -Math.PI / 2;
+      this.camera.beta = 0.12; // just above lowerBetaLimit (0.1) → near top-down
+      this.camera.radius = 40;
+    } else {
+      this.camera.alpha = -Math.PI / 2;
+      this.camera.beta = Math.PI / 3.2;
+      this.camera.radius = 32;
+    }
   }
 
   /** Detect per-player position changes and enqueue movement / jail animations. */
@@ -879,11 +916,15 @@ export class Board3D {
 
       const lbl = this.tokenLabels.get(playerId);
       if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
+      const ring = this.tokenRings.get(playerId);
+      if (ring) ring.position.set(mesh.position.x, 0.03, mesh.position.z);
 
       if (t >= 1) {
         this.scene.onBeforeRenderObservable.remove(obs);
         mesh.position.set(targetX, 0.35, targetZ);
         if (lbl) lbl.position.set(targetX, 1.1, targetZ);
+        const ring2 = this.tokenRings.get(playerId);
+        if (ring2) ring2.position.set(targetX, 0.03, targetZ);
         this.driveAnimation(playerId);
       }
     });
