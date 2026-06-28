@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createGame, applyCommand, currentPlayer, aliveCount, legalCommands, canBuild, canSellBuilding, canMortgage, canUnmortgage, canSellProperty, canTravelFrom, ownedPropsOf } from "./engine.js";
-import { makeRng, rollDie } from "./rng.js";
+import { makeRng, rollDie, nextInt } from "./rng.js";
 import { getBoard, JAIL_POS } from "./board.js";
 import type { GameState, Command } from "./types.js";
 
@@ -43,10 +43,12 @@ function applyAll(state: GameState, cmds: Command[]): GameState {
 /**
  * Scan seeds 0..limit to find one where the roll produces the requested sum.
  * Returns [seed, d1, d2] or throws.
+ * NOTE: createGame draws 1 RNG value for firstEvent before dice, so we skip 1 step here.
  */
 function findSeedForRoll(targetD1: number, targetD2: number, limit = 500): [number, number, number] {
   for (let s = 0; s < limit; s++) {
     const rng = makeRng(s);
+    nextInt(rng, 0, 5); // skip firstEvent draw (EVENT_IDS has 6 elements, index range 0-5)
     const d1 = rollDie(rng);
     const d2 = rollDie(rng);
     if (d1 === targetD1 && d2 === targetD2) return [s, d1, d2];
@@ -365,6 +367,7 @@ describe("rent - streets", () => {
     let found: [number, number] | null = null;
     for (let seed = 0; seed < 1000; seed++) {
       const rng = makeRng(seed);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === target.sum && d1 !== d2) {
@@ -397,6 +400,7 @@ describe("rent - streets", () => {
     let found: number | null = null;
     for (let seed = 0; seed < 1000; seed++) {
       const rng = makeRng(seed);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === target.sum && d1 !== d2) {
@@ -431,6 +435,7 @@ describe("rent - stations", () => {
     let seed3: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 2) { seed3 = s; break; } // must be 1+1 doubles
@@ -439,6 +444,7 @@ describe("rent - stations", () => {
     let seedFor: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 4 && d1 !== d2) { seedFor = s; break; }
@@ -476,6 +482,7 @@ describe("rent - attractions", () => {
     let d1F = 0, d2F = 0;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; d1F = d1; d2F = d2; break; }
@@ -502,6 +509,7 @@ describe("rent - attractions", () => {
     let sumF = 0;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; sumF = d1 + d2; break; }
@@ -536,6 +544,7 @@ describe("GO", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
@@ -561,6 +570,7 @@ describe("GO", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 2) { seedF = s; break; } // only 1+1
@@ -591,6 +601,7 @@ describe("jail", () => {
     let doublesNonTriple: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 === d2) { doublesNonTriple = s; break; }
@@ -631,6 +642,7 @@ describe("jail", () => {
     let sumD = 0;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 === d2 && d1 + d2 <= 12) { seedD = s; sumD = d1 + d2; break; }
@@ -659,6 +671,7 @@ describe("jail", () => {
     let seedND: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 !== d2) { seedND = s; break; }
@@ -690,6 +703,7 @@ describe("tax tile", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 2) { seedF = s; break; }
@@ -724,6 +738,7 @@ describe("casino tile (pos 20)", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; break; }
@@ -750,6 +765,7 @@ describe("casino tile (pos 20)", () => {
     let d1F = 0, d2F = 0;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 === d2 && d1 !== 6 && d1 + d2 === 4) { seedF = s; d1F = d1; d2F = d2; break; }
@@ -777,6 +793,7 @@ describe("casino tile (pos 20)", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 5000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 === 6 && d2 === 6) { seedF = s; break; }
@@ -811,6 +828,7 @@ describe("bankruptcy", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; break; }
@@ -838,6 +856,7 @@ describe("bankruptcy", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; break; }
@@ -863,6 +882,7 @@ describe("bankruptcy", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 1000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 7 && d1 !== d2) { seedF = s; break; }

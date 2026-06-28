@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createGame, applyCommand, currentPlayer, legalCommands } from "./engine.js";
 import { getBoard, JAIL_POS } from "./board.js";
-import { makeRng, rollDie } from "./rng.js";
+import { makeRng, rollDie, nextInt } from "./rng.js";
 import type { GameState, Command } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -212,6 +212,7 @@ describe("rent scales with buildings", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 2000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
@@ -250,6 +251,7 @@ describe("rent scales with buildings", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 2000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
@@ -416,6 +418,7 @@ describe("MORTGAGE and UNMORTGAGE", () => {
     let seedF: number | null = null;
     for (let s = 0; s < 2000; s++) {
       const rng = makeRng(s);
+      nextInt(rng, 0, 5); // skip firstEvent draw
       const d1 = rollDie(rng);
       const d2 = rollDie(rng);
       if (d1 + d2 === 3 && d1 !== d2) { seedF = s; break; }
