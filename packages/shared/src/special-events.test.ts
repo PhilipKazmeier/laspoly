@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, applyCommand, currentPlayer } from './engine.js';
+import { createGame, applyCommand } from './engine.js';
 import { nextInt } from './rng.js';
 import { getBoard } from './board.js';
 import type { GameState } from './types.js';
@@ -203,13 +203,11 @@ describe('specialEvents: recession', () => {
     const r1 = ev1.find(e => e.key === 'rentPaid');
     const r2 = ev2.find(e => e.key === 'rentPaid');
 
+    expect(r1).toBeDefined();
+    expect(r2).toBeDefined();
     if (r1 && r2) {
       // recession halves rent (floor)
       expect(r2.params.amount).toBe(Math.floor((r1.params.amount as number) / 2));
-    } else {
-      // Player may land on an unowned property (B doesn't own it yet) —
-      // the test still passes vacuously in that case.
-      expect(true).toBe(true);
     }
   });
 });
