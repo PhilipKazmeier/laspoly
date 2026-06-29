@@ -89,8 +89,6 @@ const SCALE = 20 / 1200; // 1 Java unit → 0.01667 Babylon units
 // Station tile positions (mirror of engine.ts STATION_POSITIONS) used to detect
 // station→station TRAVEL and play the subway dive/emerge animation.
 const STATION_POSITIONS = new Set([5, 15, 25, 35]);
-// How far a settled die tilts its rolled face toward the standard-view camera.
-const DIE_CAMERA_TILT = -0.6; // radians (~34°); sign verified against a screenshot
 
 // Regular tile: 100 J wide × 150 J deep
 const TILE_W = 100 * SCALE; // ≈ 1.667
@@ -1687,9 +1685,7 @@ export class Board3D {
   }
 
   /**
-   * Orient a die so `value` pips face up, then tilt the whole die toward the
-   * camera so that rolled value is also the dominant, readable face in the
-   * standard (angled) view — not just the small top quad (bug 2-4). Base pose
+   * Orient a die so `value` pips face up, lying flat on the felt. Base pose
    * (faceValues above): +Y=1, -Y=6, -Z=2, +Z=5, +X=3, -X=4.
    */
   private orientDie(mesh: AbstractMesh, value: number) {
@@ -1705,10 +1701,7 @@ export class Board3D {
       case 4: q = Quaternion.RotationAxis(Axis.Z, -H); break;      // -X=4 → up
       default: q = Quaternion.Identity(); break;                   // +Y=1 already up
     }
-    // World-space tilt: rotate the top toward the camera (south, +Z) ~30° so the
-    // rolled value faces the standard-view player instead of pointing straight up.
-    const tilt = Quaternion.RotationAxis(Axis.X, DIE_CAMERA_TILT);
-    mesh.rotationQuaternion = tilt.multiply(q);
+    mesh.rotationQuaternion = q;
   }
 
   /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation).

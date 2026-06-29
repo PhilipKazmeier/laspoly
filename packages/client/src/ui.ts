@@ -60,6 +60,7 @@ const css = `
     width: 360px;
     max-height: calc(100vh - 32px);
     overflow-y: auto;
+    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
     box-sizing: border-box;
   }
   #roomPanel {
@@ -69,6 +70,7 @@ const css = `
     width: 360px;
     max-height: calc(100vh - 32px);
     overflow-y: auto;
+    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
     box-sizing: border-box;
   }
   #roomList { margin-top: 12px; max-height: 200px; overflow-y: auto; }

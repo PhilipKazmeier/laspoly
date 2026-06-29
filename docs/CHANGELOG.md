@@ -230,6 +230,13 @@ per-task plans in [superpowers/plans](superpowers/plans/).
 - Verified: 308 unit tests green; dice (all 6 values), lobby, header offsets, active indicator and the
   3D figure preview confirmed via Playwright/WebGL screenshots.
 
+### Live-test round 7 (2 follow-ups) — done
+- **Dice lie flat again:** round 6's camera-ward tilt made the dice look "schräg". Reverted the tilt —
+  dice now lie flat on the felt with the rolled value face-up (orientation still verified for 1–6).
+- **Room-panel h-scrollbar:** off-screen `<select>` `<option>`s pushed `scrollWidth` ~4px past the
+  panel. Added `overflow-x: hidden` to `#lobby` and `#roomPanel` so no horizontal scrollbar ever shows.
+- Verified: 308 unit tests green; flat dice + no scrollbar confirmed via screenshots.
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the
