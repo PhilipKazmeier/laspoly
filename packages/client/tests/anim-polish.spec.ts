@@ -209,7 +209,7 @@ test("anim: on-board player displays render (LPD currency)", async ({ page }) =>
 // ---------------------------------------------------------------------------
 
 test("anim: consecutive bot turns animate sequentially", async ({ page }) => {
-  test.setTimeout(30_000);
+  test.setTimeout(45_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await injectStateRelay(page);
@@ -221,15 +221,31 @@ test("anim: consecutive bot turns animate sequentially", async ({ page }) => {
   );
   await page.locator("#rollBtn").click();
 
-  // Wait for the local turn + bot turns to roll in.
-  // Each turn: dice ~1.4 s + move up to ~1.5 s + ~0.7 s server gap = ~3.6 s × 4 = ~14 s.
-  // But we cap at 20 s well within the 30 s test budget.
-  await page.waitForTimeout(20_000);
+  // After rolling, the human player's state is processed. If the player lands on
+  // an unowned property, the game waits for a buy/decline before bots proceed.
+  // Auto-decline any buy offer so bots can continue, and repeat for a second roll.
+  for (let round = 0; round < 2; round++) {
+    // Wait up to 6 s for a buy offer or for bots to start rolling.
+    await page.waitForTimeout(6_000);
+    const buyVisible = await page.locator("#buyOfferBuyBtn").isVisible().catch(() => false);
+    if (buyVisible) {
+      // Decline so the game moves on to bot turns.
+      const declineBtn = page.locator("#buyOfferDeclineBtn");
+      const declineVisible = await declineBtn.isVisible().catch(() => false);
+      if (declineVisible) await declineBtn.click();
+    }
+    // Also click roll if it's visible (bots may have finished and it's our turn again).
+    const rollVisible = await page.locator("#rollBtn").isVisible().catch(() => false);
+    if (rollVisible && round === 1) await page.locator("#rollBtn").click();
+  }
+
+  // Wait for bot turns to complete.
+  await page.waitForTimeout(8_000);
 
   const countAfter = await page.evaluate(
     () => (window as Record<string, unknown>)["_stateCount"] ?? 0
   );
-  // Expect at least: human turn state + 3 bot states = 4 total, but allow 3 minimum.
+  // Expect at least 3 state messages delivered in this window (human + some bots).
   expect(Number(countAfter) - Number(countBefore)).toBeGreaterThanOrEqual(3);
 
   await page.locator("#renderCanvas").screenshot({
