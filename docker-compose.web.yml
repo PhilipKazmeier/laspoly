@@ -1,8 +1,24 @@
+# LasPoly web stack — single container (HTTP + WebSocket on one port)
+# Usage: docker compose -f docker-compose.web.yml up -d
+#
+# Env vars (override via .env or environment section):
+#   PORT             — server listen port (default: 8080)
+#   ALLOWED_ORIGINS  — comma-separated WS origins; empty = allow all
 services:
   laspoly-web:
     build:
       context: .
       dockerfile: Dockerfile.web
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
+    init: true          # tini/docker-init: correct PID-1 signal handling
     restart: unless-stopped
+    environment:
+      PORT: "${PORT:-8080}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

@@ -8,6 +8,7 @@ import { RoomManager, GameRoom } from "./room.js";
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
 const PORT = Number(process.env["PORT"] ?? 8080);
+const VERSION = process.env["npm_package_version"] ?? "0.1.0";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const CLIENT_DIST = join(__dirname, "../../client/dist");
 const HAS_CLIENT = existsSync(CLIENT_DIST);
@@ -50,6 +51,13 @@ function log(msg: string): void {
 // ---- HTTP server -----------------------------------------------------------
 
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // Health endpoint for container/orchestrator health checks
+  if (req.url === "/health" || req.url === "/healthz") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", version: VERSION }));
+    return;
+  }
+
   if (!HAS_CLIENT) {
     res.writeHead(200);
     res.end("LasPoly server running. No client dist found.");
@@ -529,3 +537,25 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
 httpServer.listen(PORT, () => {
   log(`server listening on port ${PORT}${HAS_CLIENT ? " (serving client)" : ""}`);
 });
+
+// ---- Graceful shutdown -----------------------------------------------------
+
+function shutdown(): void {
+  log("shutting down...");
+  clearInterval(pingInterval);
+  // Close all WebSocket connections
+  for (const client of wss.clients) {
+    client.terminate();
+  }
+  wss.close(() => {
+    httpServer.close(() => {
+      log("server stopped");
+      process.exit(0);
+    });
+  });
+  // Force exit after 5s if something hangs
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

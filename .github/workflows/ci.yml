@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  unit-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build -w @laspoly/client
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: unit-and-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @laspoly/client
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/client
+      - name: Run e2e tests
+        run: npm run test:e2e
+        env:
+          CI: true

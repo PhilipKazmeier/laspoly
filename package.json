@@ -9,6 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "npm -w @laspoly/client run test:e2e",
     "sim": "tsx packages/shared/src/sim.ts",
     "server": "tsx packages/server/src/index.ts",
     "client": "npm -w @laspoly/client run dev",
