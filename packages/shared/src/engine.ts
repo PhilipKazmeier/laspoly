@@ -307,6 +307,7 @@ function canSellHouse(state: GameState, board: BoardDefinition, pos: number): bo
 export function legalCommands(state: GameState): Command["type"][] {
   if (state.phase === "finished") return [];
   if (state.phase === "awaiting-buy") return ["BUY_PROPERTY", "DECLINE_PROPERTY"];
+  if (state.phase === "awaiting-casino") return ["ROLL_CASINO"];
 
   // turn-end: END_TURN + management commands (no ROLL_DICE, no buy phase)
   if (state.phase === "turn-end") {
@@ -759,7 +760,10 @@ function resolveLanding(
       sendToJail(state, board, player, events);
       break;
     case "casino":
-      resolveCasino(state, board, player, events);
+      // Pause for a manual casino roll (bug 8): the player must roll the casino
+      // dice themselves via ROLL_CASINO instead of it resolving automatically.
+      state.phase = "awaiting-casino";
+      events.push({ key: "casinoEntered", params: { player: player.name }, playerId: player.id });
       break;
     case "go":
       // landing bonus already granted in move(); nothing extra
@@ -773,7 +777,7 @@ function resolveLanding(
   }
 }
 
-function resolveCasino(state: GameState, board: BoardDefinition, player: PlayerState, events: GameEvent[]): void {
+function performCasinoRoll(state: GameState, board: BoardDefinition, player: PlayerState, events: GameEvent[]): void {
   // Roll a fresh pair of dice to determine casino luck ("roll again to determine your luck").
   // This makes the casino outcome independent of the movement roll and triggers a
   // second dice animation on the client.
@@ -946,7 +950,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
             events.push({ key: "jailRollFail", params: { player: p.name, turns: p.jailTurns }, playerId: p.id });
           }
         }
-        if (state.phase !== "awaiting-buy") continueOrAdvance(state, events);
+        if (state.phase !== "awaiting-buy" && state.phase !== "awaiting-casino") continueOrAdvance(state, events);
         break;
       }
 
@@ -963,7 +967,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       }
       moveBy(state, board, p, d1 + d2, events);
       resolveLanding(state, board, p, events);
-      if (state.phase !== "awaiting-buy") continueOrAdvance(state, events);
+      if (state.phase !== "awaiting-buy" && state.phase !== "awaiting-casino") continueOrAdvance(state, events);
       break;
     }
 
@@ -981,6 +985,15 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       p.position = 10;
       events.push({ key: "paidRansom", params: { player: p.name, amount: board.rules.ransomCost }, playerId: p.id });
       // player still rolls this turn (now a normal roll)
+      break;
+    }
+
+    case "ROLL_CASINO": {
+      if (state.phase !== "awaiting-casino") throw new Error("Not at the casino");
+      const p = currentPlayer(state);
+      performCasinoRoll(state, board, p, events);
+      // Casino can only ever pay out — back to the normal turn flow afterwards.
+      continueOrAdvance(state, events);
       break;
     }
 

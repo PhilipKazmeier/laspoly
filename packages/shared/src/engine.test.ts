@@ -755,8 +755,10 @@ describe("casino tile (pos 20)", () => {
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
-    expect(state.players[0]!.position).toBe(20);
+    const r1 = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(r1.state.players[0]!.position).toBe(20);
+    expect(r1.state.phase).toBe("awaiting-casino"); // manual casino roll pending (bug 2-8)
+    const { state, events } = applyCommand(r1.state, { type: "ROLL_CASINO" });
     expect(state.players[0]!.money).toBe(1300); // no win
     expect(state.casinoPool).toBe(1200);
     expect(events.some((e) => e.key === "casinoNoWin")).toBe(true);
@@ -772,8 +774,10 @@ describe("casino tile (pos 20)", () => {
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
-    expect(state.players[0]!.position).toBe(20);
+    const r1 = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(r1.state.players[0]!.position).toBe(20);
+    expect(r1.state.phase).toBe("awaiting-casino");
+    const { state, events } = applyCommand(r1.state, { type: "ROLL_CASINO" });
     const share = Math.floor(1200 * 0.2); // 240 (doubleShare=0.2)
     expect(state.players[0]!.money).toBe(1300 + share);
     expect(state.casinoPool).toBe(1200 - share);
@@ -789,8 +793,10 @@ describe("casino tile (pos 20)", () => {
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
-    expect(state.players[0]!.position).toBe(20);
+    const r1 = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(r1.state.players[0]!.position).toBe(20);
+    expect(r1.state.phase).toBe("awaiting-casino");
+    const { state, events } = applyCommand(r1.state, { type: "ROLL_CASINO" });
     const share = Math.floor(1200 * 0.35); // 420 (sixShare=0.35)
     expect(state.players[0]!.money).toBe(1300 + share);
     expect(state.casinoPool).toBe(1200 - share);

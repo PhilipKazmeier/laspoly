@@ -207,6 +207,29 @@ per-task plans in [superpowers/plans](superpowers/plans/).
   header, wood, HUD). Pre-existing `fix3-4` e2e still fails (clicks Leave once but never confirms the
   leave dialog — predates the confirm flow, unrelated to this pass).
 
+### Live-test round 6 (8-bug pass) — done
+- **Street labels (1):** non-corner tile name font halved (148→74 px) so names are 50% smaller, uniform.
+- **Lobby scrollbar (2):** inputs/selects were `width:100%` + padding without `box-sizing`, overflowing
+  the panel by 20 px → added `box-sizing:border-box`. No more horizontal scrollbar.
+- **Audio settings at start (3):** added a ⚙ button to the lobby that opens the settings overlay; moved
+  the overlay from `gameHud` (hidden in lobby) to `root` so it shows before a game starts.
+- **Dice faces (4):** root-caused the persistent mis-read — the previous "fix" was validated with the
+  rotationally-symmetric values 1 & 4. Rebuilt `orientDie` with quaternions and **verified all of 1–6
+  in both views** via a scripted matrix; added a ~34° camera-ward tilt so the rolled value is the
+  dominant, readable face in the standard (angled) view, not a foreshortened top quad.
+- **Header overlap (5):** all top-anchored HUD panels/dialogs (player list, Mein Eigentum, settings,
+  help, deed card, special-event toast, inspector, confirm popups) moved from top:56/64 → top:80 so the
+  taller multi-line header never covers them.
+- **BGM reset (6):** the client calls `startBgm("game")` on every state message and `start()` did
+  `if (running) stop()` — so every roll/SFX restarted the music. `start()` is now idempotent per mode.
+- **Active-player indicator (7):** replaced the flat disc *under* the token (which also showed under
+  jailed players in the cage) with a bobbing, spinning downward cone hovering *above* the active token.
+- **Casino roll (8):** landing on the casino now pauses in a new `awaiting-casino` phase; the player
+  rolls the casino dice themselves via a new `ROLL_CASINO` command (button + dice-cup, phase-aware).
+  Bots/turn-timer auto-roll it. Engine/bot/server/i18n + casino unit tests updated.
+- Verified: 308 unit tests green; dice (all 6 values), lobby, header offsets, active indicator and the
+  3D figure preview confirmed via Playwright/WebGL screenshots.
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the

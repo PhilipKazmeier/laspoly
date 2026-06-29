@@ -17,6 +17,7 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   rentMortgaged: { tile: "Park Lane" },
   factoryRevenue: { player: "Alice", tile: "Park Lane", amount: 100 },
   taxPaid: { player: "Alice", amount: 150 },
+  casinoEntered: { player: "Alice" },
   casinoRoll: { player: "Alice", d1: 3, d2: 4, sum: 7 },
   casinoWin: { player: "Alice", amount: 250 },
   casinoNoWin: { player: "Alice" },

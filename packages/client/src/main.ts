@@ -66,6 +66,11 @@ class StateQueue {
     this.ui.updateGame(state, events, this.net.playerId);
   }
 
+  /** Phase of the most-recently-rendered state (for context-aware cup clicks). */
+  get phase(): string | null {
+    return this.lastProcessed?.phase ?? null;
+  }
+
   /** Reset the queue for a new game (rematch). */
   reset() {
     this.queue = [];
@@ -219,9 +224,11 @@ const board3d = new Board3D(document.getElementById("renderCanvas") as HTMLCanva
 const ui = new UI(document.getElementById("ui") as HTMLDivElement, net, board3d);
 const stateQueue = new StateQueue(board3d, ui, net);
 
-// Clicking the 3D dice cup sends a roll, exactly like the Roll button does.
+// Clicking the 3D dice cup sends a roll. At the casino it sends the casino roll
+// instead of a normal movement roll (bug 2-8).
 board3d.setRollHandler(() => {
-  net.send({ t: "command", command: { type: "ROLL_DICE" } });
+  const type = stateQueue.phase === "awaiting-casino" ? "ROLL_CASINO" : "ROLL_DICE";
+  net.send({ t: "command", command: { type } });
 });
 // Tile clicks are exposed for the HTML property-card popup (owned by the UI agent).
 board3d.setTileClickHandler((pos) => {

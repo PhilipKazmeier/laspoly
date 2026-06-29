@@ -180,9 +180,15 @@ class BgmPlayer {
   private audioEl: HTMLAudioElement | null = null;
   private trackIndex = 0;
   private gestureBound = false;
+  private mode: "lobby" | "game" | null = null;
 
   start(mode: "lobby" | "game") {
+    // Idempotent: the client calls startBgm on every state message, so restarting
+    // here would reset the music on every roll/SFX (bug 6). Only (re)start on a
+    // real mode change.
+    if (this.running && this.mode === mode) return;
     if (this.running) this.stop();
+    this.mode = mode;
     this.running = true;
     this.currentMelody = mode === "lobby" ? BgmPlayer.LOBBY_MELODY : BgmPlayer.GAME_MELODY;
     // Try the original tracks first; fall back to the synth melody if absent.
@@ -231,6 +237,7 @@ class BgmPlayer {
 
   stop() {
     this.running = false;
+    this.mode = null;
     if (this.audioEl) {
       this.audioEl.onended = null;
       this.audioEl.onerror = null;

@@ -342,8 +342,11 @@ describe('specialEvents: jackpot', () => {
     const noJackpot = withEvent(base, 'quietDay');
     const withJackpot = withEvent(base, 'jackpot');
 
-    const { events: ev1 } = applyCommand(noJackpot, { type: 'ROLL_DICE' });
-    const { events: ev2 } = applyCommand(withJackpot, { type: 'ROLL_DICE' });
+    // Land on the casino (awaiting-casino), then roll the casino dice (bug 2-8).
+    const r1 = applyCommand(noJackpot, { type: 'ROLL_DICE' });
+    const r2 = applyCommand(withJackpot, { type: 'ROLL_DICE' });
+    const { events: ev1 } = applyCommand(r1.state, { type: 'ROLL_CASINO' });
+    const { events: ev2 } = applyCommand(r2.state, { type: 'ROLL_CASINO' });
 
     const win1 = ev1.find(e => e.key === 'casinoWin');
     const win2 = ev2.find(e => e.key === 'casinoWin');

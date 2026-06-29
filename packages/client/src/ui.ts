@@ -50,6 +50,7 @@ const css = `
     font-size: 14px;
     margin: 4px 0;
     width: 100%;
+    box-sizing: border-box; /* include padding in width:100% (fixes lobby h-scrollbar, bug 2-2) */
   }
   label { font-size: 13px; color: #aaa; display: block; margin-top: 8px; }
   #lobby {
@@ -74,7 +75,7 @@ const css = `
   .room-item { padding: 8px; border: 1px solid #444; border-radius: 4px; margin: 4px 0; cursor: pointer; }
   .room-item:hover { background: rgba(255,255,255,0.05); }
   #playerList {
-    position: absolute; top: 64px; left: 16px;
+    position: absolute; top: 80px; left: 16px;
     width: 220px;
     max-height: calc(60vh - 48px);
     overflow-y: auto;
@@ -160,7 +161,7 @@ const css = `
   }
   #gameOverBanner h1 { font-size: 2.5rem; color: #facc15; }
   #spectatorBanner {
-    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     background: rgba(100,0,0,0.7); padding: 8px 20px; border-radius: 8px;
     font-size: 14px;
   }
@@ -188,7 +189,7 @@ const css = `
     text-overflow: ellipsis;
   }
   #myPropsPanel {
-    position: absolute; top: 64px; right: 16px;
+    position: absolute; top: 80px; right: 16px;
     width: 280px;
     max-height: calc(70vh - 48px);
     overflow-y: auto;
@@ -264,7 +265,7 @@ const css = `
   }
   #turnToast.visible { opacity: 1; }
   #helpOverlay {
-    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     width: 320px;
     background: rgba(10,10,30,0.95); border: 1px solid #f97316;
     border-radius: 8px; padding: 16px;
@@ -275,7 +276,7 @@ const css = `
   #helpOverlay ul { margin: 0; padding-left: 18px; }
   #helpOverlay li { margin: 4px 0; }
   #settingsOverlay {
-    position: absolute; top: 56px; right: 12px;
+    position: absolute; top: 80px; right: 12px;
     width: 200px;
     background: rgba(10,10,30,0.95); border: 1px solid #444;
     border-radius: 8px; padding: 12px;
@@ -284,7 +285,7 @@ const css = `
   }
   #settingsOverlay label { color: #aaa; font-size: 12px; margin-top: 6px; }
   #deedCardPopup {
-    position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     width: 300px;
     background: #1a1a2e; border: 2px solid #facc15; border-radius: 10px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.7);
@@ -313,7 +314,7 @@ const css = `
   #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: #60a5fa; }
   #deedCardPopup .dc-status { font-size: 11px; color: #f87171; margin-top: 2px; }
   #specialEventToast {
-    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     background: rgba(88, 28, 135, 0.95);
     border: 1px solid #a855f7;
     border-radius: 10px;
@@ -385,7 +386,7 @@ const css = `
   }
   /* Player inspector (feature 1) */
   #playerInspector {
-    position: absolute; top: 64px; left: 250px;
+    position: absolute; top: 80px; left: 250px;
     width: 280px;
     max-height: calc(70vh - 48px);
     overflow-y: auto;
@@ -474,6 +475,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "game.chat": "Chat...",
     "game.send": "Senden",
     "game.roll": "Würfeln",
+    "game.casinoRoll": "Im Casino würfeln",
     "game.ransom": "Freikaufen",
     "game.endTurn": "✓ Zug beenden",
     "game.spectator": "Du bist Zuschauer",
@@ -665,6 +667,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "game.chat": "Chat...",
     "game.send": "Send",
     "game.roll": "Roll",
+    "game.casinoRoll": "Roll at casino",
     "game.ransom": "Pay Bail",
     "game.endTurn": "✓ End Turn",
     "game.spectator": "You are a spectator",
@@ -871,6 +874,7 @@ export class UI {
   private playerList!: HTMLDivElement;
   private eventLog!: HTMLDivElement;
   private rollBtn!: HTMLButtonElement;
+  private casinoRollBtn!: HTMLButtonElement;
   private ransomBtn!: HTMLButtonElement;
   private endTurnBtn!: HTMLButtonElement;
   private chatInput!: HTMLInputElement;
@@ -967,6 +971,7 @@ export class UI {
     lobby.id = "lobby";
     lobby.className = "panel";
     lobby.innerHTML = `
+      <button id="lobbySettingsBtn" class="hdr-btn" title="${t("header.settings")}" style="position:absolute;top:12px;right:12px;">${t("header.settingsTitle")}</button>
       <h2 id="lobbyTitle" style="margin-bottom:12px;color:#facc15;">${t("lobby.title")}</h2>
       <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
       <input id="nickname" type="text" placeholder="Your name" value="Player" />
@@ -1000,6 +1005,13 @@ export class UI {
       opt.textContent = b.name;
       this.boardIdSelect.appendChild(opt);
     }
+
+    // Audio/locale settings reachable from the lobby too (bug 2-3).
+    const lobbySettingsBtn = document.getElementById("lobbySettingsBtn") as HTMLButtonElement;
+    lobbySettingsBtn?.addEventListener("click", () => {
+      const visible = this.settingsOverlay.style.display !== "none";
+      if (visible) hide(this.settingsOverlay); else show(this.settingsOverlay, "block");
+    });
 
     this.createRoomBtn.addEventListener("click", () => {
       const nickname = this.nicknameInput.value.trim() || "Player";
@@ -1109,19 +1121,28 @@ export class UI {
     actionPanel.className = "panel";
     actionPanel.innerHTML = `
       <button id="rollBtn">${t("game.roll")}</button>
+      <button id="casinoRollBtn" style="background:#a855f7;font-weight:bold;display:none;">${t("game.casinoRoll")}</button>
       <button id="ransomBtn">${t("game.ransom")}</button>
       <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">${t("game.endTurn")}</button>
     `;
     hud.appendChild(actionPanel);
 
     this.rollBtn = document.getElementById("rollBtn") as HTMLButtonElement;
+    this.casinoRollBtn = document.getElementById("casinoRollBtn") as HTMLButtonElement;
     this.ransomBtn = document.getElementById("ransomBtn") as HTMLButtonElement;
     this.endTurnBtn = document.getElementById("endTurnBtn") as HTMLButtonElement;
 
     // Hide action buttons initially
     hide(this.rollBtn);
+    hide(this.casinoRollBtn);
     hide(this.ransomBtn);
     hide(this.endTurnBtn);
+
+    this.casinoRollBtn.addEventListener("click", () => {
+      hide(this.casinoRollBtn);
+      this.casinoRollBtn.disabled = true;
+      this.net.send({ t: "command", command: { type: "ROLL_CASINO" } });
+    });
 
     this.rollBtn.addEventListener("click", () => {
       // Hide immediately so it cannot be double-clicked; re-enabled when
@@ -1335,7 +1356,9 @@ export class UI {
     `;
     settings.innerHTML = buildSettingsContent();
     hide(settings);
-    this.gameHud.appendChild(settings);
+    // Append to root (not gameHud) so it can also open from the lobby (bug 2-3),
+    // where gameHud is hidden. It is position:absolute so layout is unaffected.
+    this.root.appendChild(settings);
     this.settingsOverlay = settings;
 
     // Wire locale buttons — send setLocale to server + persist + re-render UI
@@ -1992,7 +2015,7 @@ export class UI {
     const el = document.createElement("div");
     el.className = "confirm-overlay";
     // Position near surrender button
-    el.style.cssText += "right:16px;top:52px;";
+    el.style.cssText += "right:16px;top:80px;";
     el.innerHTML = `<div class="co-msg">${t("game.surrenderConfirm")}</div>`;
     const btns = document.createElement("div");
     btns.className = "co-btns";
@@ -2032,7 +2055,7 @@ export class UI {
     }
     const el = document.createElement("div");
     el.className = "confirm-overlay";
-    el.style.cssText += "right:16px;top:52px;min-width:220px;";
+    el.style.cssText += "right:16px;top:80px;min-width:220px;";
     el.innerHTML = `<div class="co-msg">${t("game.leaveConfirm")}</div>`;
     const btns = document.createElement("div");
     btns.className = "co-btns";
@@ -2652,6 +2675,7 @@ export class UI {
 
     // Show/hide action buttons
     const showRoll = isMyTurn && amAlive && state.phase === "awaiting-roll";
+    const showCasino = isMyTurn && amAlive && state.phase === "awaiting-casino";
     const showBuy = isMyTurn && amAlive && state.phase === "awaiting-buy";
     const showRansom = isMyTurn && amAlive && state.phase === "awaiting-roll" && (me?.inJail ?? false);
     const showEndTurn = isMyTurn && amAlive && state.phase === "turn-end";
@@ -2666,6 +2690,9 @@ export class UI {
 
     if (showRoll) { show(this.rollBtn, "inline-block"); this.rollBtn.disabled = false; }
     else { hide(this.rollBtn); this.rollBtn.disabled = true; }
+
+    if (showCasino) { show(this.casinoRollBtn, "inline-block"); this.casinoRollBtn.disabled = false; }
+    else { hide(this.casinoRollBtn); this.casinoRollBtn.disabled = true; }
 
     if (showRansom) { show(this.ransomBtn, "inline-block"); this.ransomBtn.disabled = false; }
     else { hide(this.ransomBtn); this.ransomBtn.disabled = true; }

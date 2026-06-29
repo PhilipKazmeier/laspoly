@@ -502,15 +502,14 @@ describe("Fix 5: Casino landing uses a fresh dice roll", () => {
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
-    expect(state.players[0]!.position).toBe(20);
-    // casinoRoll event must be emitted
-    const rollEvent = events.find((e) => e.key === "casinoRoll");
-    expect(rollEvent).toBeDefined();
-    // casino dice must be different from movement dice
-    const moveEvent = events.find((e) => e.key === "rolled");
-    expect(moveEvent).toBeDefined();
-    // player.lastRoll must be updated to casino dice
+    const r1 = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(r1.state.players[0]!.position).toBe(20);
+    expect(r1.state.phase).toBe("awaiting-casino"); // manual casino roll pending (bug 2-8)
+    expect(r1.events.find((e) => e.key === "rolled")).toBeDefined(); // movement roll
+    // The casino roll happens on the explicit ROLL_CASINO command.
+    const { state, events } = applyCommand(r1.state, { type: "ROLL_CASINO" });
+    expect(events.find((e) => e.key === "casinoRoll")).toBeDefined();
+    // player.lastRoll must be updated to casino dice (not the movement dice)
     expect(state.players[0]!.lastRoll).not.toEqual([5, 2]);
   });
 
@@ -523,8 +522,10 @@ describe("Fix 5: Casino landing uses a fresh dice roll", () => {
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
-    expect(state.players[0]!.position).toBe(20);
+    const r1 = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(r1.state.players[0]!.position).toBe(20);
+    expect(r1.state.phase).toBe("awaiting-casino");
+    const { state, events } = applyCommand(r1.state, { type: "ROLL_CASINO" });
     const winEvent = events.find((e) => e.key === "casinoWin");
     expect(winEvent).toBeDefined();
     expect(state.players[0]!.money).toBe(1300 + Math.floor(1200 * 0.2));

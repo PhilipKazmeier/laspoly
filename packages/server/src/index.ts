@@ -359,7 +359,7 @@ function validateCommand(cmd: unknown): string | null {
   const type = cmd["type"];
   if (!isStr(type)) return "command.type must be a string";
   switch (type) {
-    case "ROLL_DICE": case "BUY_PROPERTY": case "DECLINE_PROPERTY": case "PAY_RANSOM": case "END_TURN": break;
+    case "ROLL_DICE": case "ROLL_CASINO": case "BUY_PROPERTY": case "DECLINE_PROPERTY": case "PAY_RANSOM": case "END_TURN": break;
     case "BUILD": {
       const pos = cmd["pos"]; const building = cmd["building"];
       if (!isFiniteInt(pos) || pos < 0 || pos > 39) return "BUILD.pos must be integer 0–39";

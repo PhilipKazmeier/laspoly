@@ -23,6 +23,7 @@ export interface PlayerState {
 export type GamePhase =
   | "awaiting-roll"
   | "awaiting-buy"
+  | "awaiting-casino" // landed on the casino: player must roll the casino dice
   | "turn-end"
   | "finished";
 
@@ -85,6 +86,7 @@ export interface PendingSwap {
 
 export type Command =
   | { type: "ROLL_DICE" }
+  | { type: "ROLL_CASINO" }
   | { type: "BUY_PROPERTY" }
   | { type: "DECLINE_PROPERTY" }
   | { type: "PAY_RANSOM" }

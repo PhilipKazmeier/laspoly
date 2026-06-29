@@ -7,6 +7,8 @@ import {
   DirectionalLight,
   Vector3,
   Vector4,
+  Quaternion,
+  Axis,
   MeshBuilder,
   StandardMaterial,
   Color3,
@@ -87,6 +89,8 @@ const SCALE = 20 / 1200; // 1 Java unit → 0.01667 Babylon units
 // Station tile positions (mirror of engine.ts STATION_POSITIONS) used to detect
 // station→station TRAVEL and play the subway dive/emerge animation.
 const STATION_POSITIONS = new Set([5, 15, 25, 35]);
+// How far a settled die tilts its rolled face toward the standard-view camera.
+const DIE_CAMERA_TILT = -0.6; // radians (~34°); sign verified against a screenshot
 
 // Regular tile: 100 J wide × 150 J deep
 const TILE_W = 100 * SCALE; // ≈ 1.667
@@ -612,8 +616,8 @@ export class Board3D {
 
       // Single uniform font size for all non-corner tiles — slightly smaller
       // than the old LARGE size so all names look the same scale on the board.
-      const FONT_SIZE = 148; // px — uniform for all tiles (was 184/140/108)
-      const LINE_H = 172;    // px line height matching this font size
+      const FONT_SIZE = 74; // px — uniform for all tiles, 50% smaller (bug 2-1)
+      const LINE_H = 86;    // px line height matching this font size
       const MAX_W = TEX_W - 32;
 
       ctx.font = `bold ${FONT_SIZE}px Arial`;
@@ -1241,13 +1245,16 @@ export class Board3D {
    * state queue (main.ts) using the previously-rendered state for comparison.
    */
   prepareCupForTurn(state: GameState, prev: GameState | null): void {
+    const needsRoll = (s: GameState) => s.phase === "awaiting-roll" || s.phase === "awaiting-casino";
     if (!prev) {
-      if (state.phase === "awaiting-roll") this.showCup();
+      if (needsRoll(state)) this.showCup();
       return;
     }
+    // Bring the cup back at the start of a roll OR when entering the casino (which
+    // also needs a manual roll, bug 2-8).
     if (
-      state.phase === "awaiting-roll" &&
-      (prev.phase !== "awaiting-roll" || prev.currentPlayerIndex !== state.currentPlayerIndex)
+      needsRoll(state) &&
+      (prev.phase !== state.phase || prev.currentPlayerIndex !== state.currentPlayerIndex)
     ) {
       this.showCup();
     }
@@ -1680,21 +1687,28 @@ export class Board3D {
   }
 
   /**
-   * Rotate a die so `value` pips face up. Base pose (faceValues above):
-   * +Y=1, -Y=6, -Z=2, +Z=5, +X=3, -X=4. Bring the value's face to +Y.
+   * Orient a die so `value` pips face up, then tilt the whole die toward the
+   * camera so that rolled value is also the dominant, readable face in the
+   * standard (angled) view — not just the small top quad (bug 2-4). Base pose
+   * (faceValues above): +Y=1, -Y=6, -Z=2, +Z=5, +X=3, -X=4.
    */
   private orientDie(mesh: AbstractMesh, value: number) {
     const H = Math.PI / 2;
+    // Babylon is left-handed: X-axis rotations are inverted vs the right-handed
+    // derivation, so the -Z/+Z (values 2/5) signs are flipped (verified on board).
+    let q: Quaternion;
     switch (value) {
-      // Babylon is left-handed: X-axis rotations are inverted vs the right-handed
-      // derivation, so the -Z/+Z (values 2/5) signs are flipped (verified on board).
-      case 1: mesh.rotation.set(0, 0, 0); break;        // +Y=1 already up
-      case 6: mesh.rotation.set(Math.PI, 0, 0); break;  // -Y=6 → up
-      case 2: mesh.rotation.set(-H, 0, 0); break;       // -Z=2 → up
-      case 5: mesh.rotation.set(H, 0, 0); break;        // +Z=5 → up
-      case 3: mesh.rotation.set(0, 0, H); break;        // +X=3 → up
-      case 4: mesh.rotation.set(0, 0, -H); break;       // -X=4 → up
+      case 6: q = Quaternion.RotationAxis(Axis.X, Math.PI); break; // -Y=6 → up
+      case 2: q = Quaternion.RotationAxis(Axis.X, -H); break;      // -Z=2 → up
+      case 5: q = Quaternion.RotationAxis(Axis.X, H); break;       // +Z=5 → up
+      case 3: q = Quaternion.RotationAxis(Axis.Z, H); break;       // +X=3 → up
+      case 4: q = Quaternion.RotationAxis(Axis.Z, -H); break;      // -X=4 → up
+      default: q = Quaternion.Identity(); break;                   // +Y=1 already up
     }
+    // World-space tilt: rotate the top toward the camera (south, +Z) ~30° so the
+    // rolled value faces the standard-view player instead of pointing straight up.
+    const tilt = Quaternion.RotationAxis(Axis.X, DIE_CAMERA_TILT);
+    mesh.rotationQuaternion = tilt.multiply(q);
   }
 
   /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation).
@@ -1862,51 +1876,48 @@ export class Board3D {
     this.activeHighlightPlayerId = playerId;
     if (!playerId) return;
 
-    // Create a large pulsing disc under the active token
-    const disc = MeshBuilder.CreateDisc(
+    // Floating downward-pointing cone hovering ABOVE the active token (bug 2-7).
+    // (Replaces the old flat disc under the token, which also showed under jailed
+    // players in the cage — that under-token indicator is gone now.)
+    const cone = MeshBuilder.CreateCylinder(
       "activeHighlight",
-      { radius: 0.55, tessellation: 32 },
+      { diameterTop: 0, diameterBottom: 0.34, height: 0.42, tessellation: 16 },
       this.scene
     );
-    disc.rotation.x = Math.PI / 2; // lay flat
-    disc.isPickable = false;
+    cone.rotation.x = Math.PI; // apex points DOWN toward the token
+    cone.isPickable = false;
 
     const mat = new StandardMaterial("activeHighlightMat", this.scene);
-    mat.diffuseColor = new Color3(1, 1, 0.2);
-    mat.emissiveColor = new Color3(0.9, 0.9, 0.1);
+    mat.diffuseColor = new Color3(1, 0.85, 0.1);
+    mat.emissiveColor = new Color3(0.95, 0.8, 0.05);
     mat.specularColor = new Color3(0, 0, 0);
-    mat.alpha = 0.55;
     mat.backFaceCulling = false;
-    disc.material = mat;
-    this.activeHighlightMesh = disc;
+    cone.material = mat;
+    this.activeHighlightMesh = cone;
 
     // Position it immediately
     this._updateActiveHighlightPosition();
 
-    // Pulse: vary alpha & scale over time
+    // Bob up/down so it reads as a hovering marker.
     let elapsed = 0;
     let lastTime = performance.now();
     this.activeHighlightObs = this.scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
       elapsed += now - lastTime;
       lastTime = now;
-      if (!this.activeHighlightMesh) return;
-      const pulse = 0.5 + 0.5 * Math.sin((elapsed / 600) * Math.PI);
-      (this.activeHighlightMesh.material as StandardMaterial).alpha = 0.25 + 0.45 * pulse;
-      const s = 1.0 + 0.15 * pulse;
-      this.activeHighlightMesh.scaling.setAll(s);
-      // Keep position in sync with moving token
-      this._updateActiveHighlightPosition();
+      this._updateActiveHighlightPosition(elapsed);
     });
   }
 
-  private _updateActiveHighlightPosition(): void {
+  private _updateActiveHighlightPosition(elapsed = 0): void {
     const mesh = this.activeHighlightMesh;
     const pid = this.activeHighlightPlayerId;
     if (!mesh || !pid) return;
     const token = this.tokenMeshes.get(pid);
     if (token) {
-      mesh.position.set(token.position.x, 0.05, token.position.z);
+      const bob = 0.12 * Math.sin((elapsed / 500) * Math.PI);
+      mesh.position.set(token.position.x, token.position.y + 1.05 + bob, token.position.z);
+      mesh.rotation.y = elapsed / 600; // slow spin
     }
   }
 }

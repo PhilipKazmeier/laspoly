@@ -28,6 +28,8 @@ export function pickAutoAction(state: GameState, playerId: string): Command | nu
   if (state.phase === "finished") return null;
   const legal = legalCommandsFor(state, playerId);
   if (legal.length === 0) return null;
+  // At the casino: roll (the only option)
+  if (legal.includes("ROLL_CASINO")) return { type: "ROLL_CASINO" };
   // Awaiting-buy: decline so turn advances
   if (legal.includes("DECLINE_PROPERTY")) return { type: "DECLINE_PROPERTY" };
   // Turn-end: confirm to pass turn

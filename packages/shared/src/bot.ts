@@ -121,6 +121,11 @@ export function botDecide(state: GameState): Command {
     return { type: "END_TURN" };
   }
 
+  // At the casino, just roll (there's no decision to make).
+  if (state.phase === "awaiting-casino") {
+    return { type: "ROLL_CASINO" };
+  }
+
   if (state.phase === "awaiting-buy") {
     const pos = state.pendingPurchase!;
     const tile = board.tiles[pos]!;
