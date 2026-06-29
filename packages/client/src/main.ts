@@ -47,6 +47,12 @@ net.onMessage((msg) => {
           break;
         }
       }
+      for (const ev of msg.events) {
+        if (ev.key.startsWith("specialEvent_")) {
+          ui.showSpecialEventToast(ev.text);
+          break;
+        }
+      }
       board3d.update(msg.state, net.playerId);
       ui.updateGame(msg.state, msg.events, net.playerId);
       break;

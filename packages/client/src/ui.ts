@@ -12,6 +12,7 @@ import {
   ownedPropsOf,
   canTravelFrom,
 } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
 import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } from "@laspoly/shared";
 import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
@@ -73,7 +74,7 @@ const css = `
   }
   .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
   #actionCardPopup {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    position: absolute; top: calc(50% + 24px); left: 50%; transform: translate(-50%, -50%);
     width: 320px;
     background: #1a1a2e; border: 2px solid #f97316; border-radius: 10px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.7);
@@ -229,7 +230,7 @@ const css = `
   .hdr-btn:hover { background: rgba(0,0,0,0.45); }
   #headerVersion { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 4px; }
   #turnToast {
-    position: absolute; bottom: 90px; right: 16px;
+    position: absolute; bottom: 140px; right: 16px;
     background: rgba(15, 15, 35, 0.92);
     border: 1px solid #f97316;
     border-radius: 8px;
@@ -292,6 +293,37 @@ const css = `
   #deedCardPopup .dc-value { color: #fff; text-align: right; }
   #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: #60a5fa; }
   #deedCardPopup .dc-status { font-size: 11px; color: #f87171; margin-top: 2px; }
+  #specialEventToast {
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    background: rgba(88, 28, 135, 0.95);
+    border: 1px solid #a855f7;
+    border-radius: 10px;
+    padding: 10px 16px 10px 16px;
+    font-size: 13px;
+    color: #e9d5ff;
+    max-width: 500px;
+    text-align: center;
+    line-height: 1.5;
+    z-index: 85;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  #specialEventToast .set-text { flex: 1; }
+  #specialEventToast .set-close {
+    background: none; border: none; color: #c4b5fd; font-size: 16px;
+    cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0;
+  }
+  #specialEventToast .set-close:hover { color: #fff; }
+  #figurePicker { margin-top: 12px; }
+  #figurePicker .fp-title { font-size: 12px; color: #aaa; margin-bottom: 6px; }
+  .fp-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .fp-swatch {
+    width: 28px; height: 28px; border-radius: 5px; border: 2px solid transparent;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #fff; font-weight: bold;
+  }
+  .fp-swatch.selected { border-color: #facc15; }
+  .fp-swatch.taken { opacity: 0.35; cursor: default; }
+  .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
 `;
 
 function show(el: HTMLElement, displayValue = "block") {
@@ -354,6 +386,10 @@ export class UI {
   private deedCardPopup!: HTMLDivElement;
   private helpOverlay!: HTMLDivElement;
   private settingsOverlay!: HTMLDivElement;
+  private specialEventToast!: HTMLDivElement;
+  private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private myColor: string = "red";
+  private myFigureIndex: number = 0;
 
   constructor(root: HTMLDivElement, net: Net, board3d: Board3D) {
     this.root = root;
@@ -373,6 +409,7 @@ export class UI {
     this.buildActionCardPopup();
     this.buildBuyOfferPanel();
     this.buildDeedCardPopup();
+    this.buildSpecialEventToast();
   }
 
   private injectStyles() {
@@ -444,7 +481,8 @@ export class UI {
     panel.innerHTML = `
       <h2 style="margin-bottom:12px;color:#facc15;">Room</h2>
       <div id="roomInfo" style="margin-bottom:12px;font-size:13px;color:#ccc;"></div>
-      <button id="startGame" style="width:100%;">Start Game</button>
+      <div id="figurePicker"></div>
+      <button id="startGame" style="width:100%;margin-top:8px;">Start Game</button>
       <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">Leave Room</button>
     `;
     this.root.appendChild(panel);
@@ -622,10 +660,7 @@ export class UI {
     leaveBtn.addEventListener("click", () => {
       clearSession();
       this.net.send({ t: "leaveRoom" });
-      hide(this.gameHud);
-      hide(this.helpOverlay);
-      hide(this.settingsOverlay);
-      this.net.send({ t: "listRooms" });
+      this.showLobbyPanel();
     });
     right.appendChild(leaveBtn);
 
@@ -642,8 +677,11 @@ export class UI {
     const help = document.createElement("div");
     help.id = "helpOverlay";
     help.innerHTML = `
-      <h3>Spielregeln &amp; Steuerung</h3>
-      <ul>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;color:#f97316;font-size:14px;">Spielregeln &amp; Steuerung</h3>
+        <button id="helpCloseBtn" style="background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;padding:0;line-height:1;">×</button>
+      </div>
+      <ul style="margin:0;padding-left:18px;">
         <li><strong>Würfeln:</strong> Klick auf „Würfeln"</li>
         <li><strong>Kaufen:</strong> Kaufangebot erscheint rechts – „Kaufen" oder „Ablehnen"</li>
         <li><strong>Bauen:</strong> Dein Grundstück → Haus/Hotel/Fabrik-Taste</li>
@@ -651,11 +689,19 @@ export class UI {
         <li><strong>Reisen:</strong> Von einem Bahnhof aus „Reisen nach…"</li>
         <li><strong>Ansicht:</strong> Schaltfläche oben rechts wechselt zwischen Schräg- und Vogelperspektive</li>
         <li><strong>Chat:</strong> Eingabefeld unten links</li>
+        <li><strong>Grundstück:</strong> Klick auf ein Feld zeigt Grundbuchdaten</li>
       </ul>
     `;
     hide(help);
     this.gameHud.appendChild(help);
     this.helpOverlay = help;
+    help.querySelector("#helpCloseBtn")!.addEventListener("click", () => hide(help));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        hide(this.helpOverlay);
+        hide(this.settingsOverlay);
+      }
+    });
 
     // Settings overlay (non-modal, toggled)
     const settings = document.createElement("div");
@@ -673,15 +719,21 @@ export class UI {
     this.gameHud.appendChild(settings);
     this.settingsOverlay = settings;
 
-    // Wire locale buttons as visual-only toggle (server formats events)
-    settings.querySelector("#localeDEBtn")!.addEventListener("click", () => {
-      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background = "rgba(255,255,255,0.25)";
-      (settings.querySelector("#localeENBtn") as HTMLElement).style.background = "";
-    });
-    settings.querySelector("#localeENBtn")!.addEventListener("click", () => {
-      (settings.querySelector("#localeENBtn") as HTMLElement).style.background = "rgba(255,255,255,0.25)";
-      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background = "";
-    });
+    // Wire locale buttons — send setLocale to server + persist
+    const LOCALE_KEY = "laspoly_locale";
+    const applyLocale = (locale: "de" | "en") => {
+      localStorage.setItem(LOCALE_KEY, locale);
+      this.net.send({ t: "setLocale", locale });
+      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background =
+        locale === "de" ? "rgba(255,255,255,0.35)" : "";
+      (settings.querySelector("#localeENBtn") as HTMLElement).style.background =
+        locale === "en" ? "rgba(255,255,255,0.35)" : "";
+    };
+    const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as "de" | "en";
+    // Defer applyLocale to after WS is open (constructor runs before connection)
+    setTimeout(() => applyLocale(savedLocale), 0);
+    settings.querySelector("#localeDEBtn")!.addEventListener("click", () => applyLocale("de"));
+    settings.querySelector("#localeENBtn")!.addEventListener("click", () => applyLocale("en"));
   }
 
   private buildTurnToast() {
@@ -753,7 +805,7 @@ export class UI {
     restartBtn.addEventListener("click", () => {
       clearSession();
       hide(this.gameOverBanner);
-      this.net.send({ t: "listRooms" });
+      this.showLobbyPanel();
     });
   }
 
@@ -949,6 +1001,91 @@ export class UI {
     show(panel, "block");
   }
 
+  private buildSpecialEventToast() {
+    const el = document.createElement("div");
+    el.id = "specialEventToast";
+    el.innerHTML = `<span class="set-text"></span><button class="set-close">×</button>`;
+    hide(el);
+    this.root.appendChild(el);
+    this.specialEventToast = el;
+    el.querySelector(".set-close")!.addEventListener("click", () => {
+      hide(el);
+      if (this.specialEventToastTimer) { clearTimeout(this.specialEventToastTimer); this.specialEventToastTimer = null; }
+    });
+  }
+
+  showSpecialEventToast(text: string) {
+    const el = this.specialEventToast;
+    const textEl = el.querySelector(".set-text");
+    if (textEl) textEl.textContent = text;
+    show(el, "flex");
+    if (this.specialEventToastTimer) clearTimeout(this.specialEventToastTimer);
+    this.specialEventToastTimer = setTimeout(() => {
+      hide(el);
+      this.specialEventToastTimer = null;
+    }, 6000);
+  }
+
+  private buildFigurePicker(container: HTMLElement, room: RoomView) {
+    container.innerHTML = "";
+    const title = document.createElement("div");
+    title.className = "fp-title";
+    title.textContent = "Farbe & Figur wählen:";
+    container.appendChild(title);
+
+    const takenMap = new Map<string, string>();
+    for (const p of room.players) {
+      if (p.id !== this.net.playerId && p.color !== undefined && p.figureIndex !== undefined) {
+        takenMap.set(`${p.color}:${p.figureIndex}`, p.nickname);
+      }
+    }
+
+    const colorHex: Record<string, string> = {
+      red: "#ef4444", blue: "#3b82f6", green: "#22c55e",
+      yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
+    };
+
+    for (const color of FIGURE_COLORS) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:4px;";
+      const dot = document.createElement("span");
+      dot.style.cssText = `display:inline-block;width:12px;height:12px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;`;
+      row.appendChild(dot);
+
+      const grid = document.createElement("div");
+      grid.className = "fp-grid";
+      for (let fi = 0; fi < FIGURE_COUNT; fi++) {
+        const key = `${color}:${fi}`;
+        const isTaken = takenMap.has(key);
+        const isSelected = this.myColor === color && this.myFigureIndex === fi;
+        const sw = document.createElement("div");
+        sw.className = "fp-swatch" + (isSelected ? " selected" : "") + (isTaken ? " taken" : "");
+        sw.style.background = colorHex[color] ?? color;
+        sw.textContent = String(fi + 1);
+        sw.title = isTaken ? `${takenMap.get(key)} hat das` : `${color} #${fi + 1}`;
+        if (!isTaken) {
+          sw.addEventListener("click", () => {
+            this.myColor = color;
+            this.myFigureIndex = fi;
+            this.net.send({ t: "chooseFigure", color, figureIndex: fi });
+            this.buildFigurePicker(container, room);
+          });
+        }
+        grid.appendChild(sw);
+      }
+      row.appendChild(grid);
+      container.appendChild(row);
+    }
+
+    const others = room.players.filter(p => p.id !== this.net.playerId && !p.isBot && p.color !== undefined);
+    if (others.length > 0) {
+      const othDiv = document.createElement("div");
+      othDiv.style.cssText = "font-size:11px;color:#888;margin-top:4px;";
+      othDiv.textContent = others.map(p => `${p.nickname}: ${p.color ?? "?"} #${(p.figureIndex ?? 0) + 1}`).join(", ");
+      container.appendChild(othDiv);
+    }
+  }
+
   private renderChipStack(money: number): string {
     const denoms = [100, 10, 1];
     const imgs = ["/assets/laspolydollar100.png", "/assets/laspolydollar10.png", "/assets/laspolydollar1.png"];
@@ -1015,6 +1152,11 @@ export class UI {
     hide(this.roomPanel);
     hide(this.gameHud);
     hide(this.spectatorBanner);
+    if (this.helpOverlay) hide(this.helpOverlay);
+    if (this.settingsOverlay) hide(this.settingsOverlay);
+    if (this.deedCardPopup) hide(this.deedCardPopup);
+    if (this.specialEventToast) hide(this.specialEventToast);
+    this.lastState = null;
     this.wasMyTurn = false;
     this.net.send({ t: "listRooms" });
   }
@@ -1082,6 +1224,10 @@ export class UI {
     } else {
       hide(this.startGameBtn);
     }
+
+    // Figure/colour picker
+    const pickerContainer = document.getElementById("figurePicker");
+    if (pickerContainer) this.buildFigurePicker(pickerContainer, room);
   }
 
   updateGame(state: GameState, events: FormattedEvent[], myId: string | null) {
