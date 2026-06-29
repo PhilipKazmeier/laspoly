@@ -97,10 +97,20 @@ per-task plans in [superpowers/plans](superpowers/plans/).
   at the four board corners; top-down view de-glared (specular zeroed, lights tuned) and readable.
 - New hooks `setRollHandler` / `setTileClickHandler` (backward-compatible).
 
-## Open / in progress
+### UI overlay pass (QA round) — done
+- Header no longer overlaps panels; action-card popup shows localized text for own draws only (others
+  to the log); click a tile (or a property in the panel) → full deed card (rent table, costs,
+  mortgage, owner) in LPD; per-round special-event toast; language DE/EN toggle wired (per-recipient
+  server formatting) + persisted; "?" help dialog closable (X + Esc); lobby figure/colour picker;
+  clean return-to-lobby after game-over/leave (no "already in a room").
 
-- UI pass (header overlap, action-card text display, enlarge property card, event banner, language
-  toggle UI, closable "?" dialog, lobby figure picker UI, already-in-room client reset, wire
-  tile-click → property-card detail popup). On-board corner panels are cramped — tidy in this pass.
+## Open / in progress — animation & render polish (next)
+
+- Client animation QUEUE: play each player's dice+move animation to completion before applying the
+  next state; buy prompt only when the token LANDS; no random jumps / forward-then-back snap; bots
+  can't appear to move simultaneously.
+- Real dice pip faces (drop the number overlay); labels not covered by colour bar; fix upside-down /
+  outside labels on 2 edges; larger/crisper labels (readable in standard + top-down); LPD (not €) in
+  on-board displays; subway-dive animation for station travel (underground model); travel once/round.
 - Clarify: the "Sobald ich die Kamera bewege …" request was cut off.
 - `web-rebuild` branch not yet merged to `main` / pushed (awaiting user go-ahead).
