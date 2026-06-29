@@ -141,6 +141,26 @@ per-task plans in [superpowers/plans](superpowers/plans/).
 - Known minor leftovers: the turn toast string and a couple historical log lines aren't re-localized;
   dice cup sits slightly toward the top edge.
 
+### Audit round 3 (full QA + code review + QoL gaps) — done
+- **Gameplay (engine/server):** bot colours/figures now unique among ALL players (was only vs humans);
+  rematch no longer freezes (schedules bots/timer); pay-ransom GO exploit fixed (token reset to 0);
+  casino action-card backward-teleport no longer grants free GO; **casino re-rolls fresh dice on
+  landing** to decide the payout; bot build-cost crash fixed (+ scheduleBotSteps try/catch);
+  **single-street rebalanced** (house cost up, 3-/4-house rent capped to ≤~40% of starting cash so a
+  lone street can't one-shot a healthy player); game-settings multipliers clamped.
+- **Board-3D:** dice cup rebuilt procedurally (double-sided, bigger, re-shown every roll — fixes the
+  half-render + invisible-after-first-roll); **real distinct dice pips** on all six faces (face-UV
+  atlas); **wood-grain table texture**; movement strictly after the dice settle; **crisp labels**
+  (root cause: mipmaps were OFF → aliasing; now mipmaps + trilinear + anisotropic at 1024px).
+- **Client:** leave works as a spectator; **generated/royalty-free background music** + separate
+  SFX/Music volume sliders (no copyrighted tracks shipped); remaining German strings localized
+  (turn toast, "(Knast)", Bau-Rabatt, tooltips, deed rows); **turn-timer countdown** in the header.
+- **QoL batch B:** player inspector (click a player → holdings + net worth); net-worth ranking badges;
+  ready-up toggle; surrender + leave-confirm; rematch "Neues Spiel" button; host lobby game-settings UI.
+- Verified: 526 unit tests, balance sim 93% finish / 1.5% early-KO / median first-elim turn 90.
+- Known follow-ups: some CI specs (management/playthrough/qa-full-game) time out because they need a
+  full game-over (slow with bots) — flaky, not product bugs; optional 3D figure preview in the picker.
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the
