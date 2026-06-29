@@ -7,3 +7,6 @@ coverage/
 
 # local Claude config/worktrees
 .claude/
+
+# playwright run artifacts
+packages/*/test-results/

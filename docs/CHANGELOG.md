@@ -86,12 +86,21 @@ per-task plans in [superpowers/plans](superpowers/plans/).
 - `npm run sim` — headless seeded bot games with invariant checks + balance/fairness metrics.
 - `npm run test:e2e` — Playwright (lobby → game → animations, screenshot-verified).
 
+### Board-3D visual rework (QA round) — done
+- Colour bars moved to the inner (centre-facing) edge; street labels horizontal + wrapping below the bar.
+- Tokens shrunk + clustered so they no longer overlap; movement confirmed CLOCKWISE; backward
+  teleports jump directly instead of walking the long way.
+- Click the dice cup to roll; after a roll the cup vanishes and the two dice rest on the felt showing
+  the real value (DynamicTexture pip faces, no reliance on OBJ face layout); the token moves only
+  after the dice animation finishes.
+- On-tile ownership markers (owner-colour stripe, grey if mortgaged); per-player money + deed displays
+  at the four board corners; top-down view de-glared (specular zeroed, lights tuned) and readable.
+- New hooks `setRollHandler` / `setTileClickHandler` (backward-compatible).
+
 ## Open / in progress
 
-- Board-3D visual rework (color bars inward, horizontal wrapping labels, smaller non-overlapping
-  tokens, clockwise movement, click-cup-to-roll, cup-vanishes + dice-on-felt, move-after-dice,
-  on-tile ownership markers, on-board deeds/money, top-down glare fix, tile-click card popup).
 - UI pass (header overlap, action-card text display, enlarge property card, event banner, language
-  toggle UI, closable "?" dialog, lobby figure picker UI, already-in-room client reset).
+  toggle UI, closable "?" dialog, lobby figure picker UI, already-in-room client reset, wire
+  tile-click → property-card detail popup). On-board corner panels are cramped — tidy in this pass.
 - Clarify: the "Sobald ich die Kamera bewege …" request was cut off.
 - `web-rebuild` branch not yet merged to `main` / pushed (awaiting user go-ahead).
