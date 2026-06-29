@@ -11,9 +11,10 @@ import {
   canSellProperty,
   ownedPropsOf,
   canTravelFrom,
+  netWorth,
 } from "@laspoly/shared";
 import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
-import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } from "@laspoly/shared";
+import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile, GameSettings } from "@laspoly/shared";
 import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
@@ -365,6 +366,62 @@ const css = `
     from { opacity: 1; }
     to   { opacity: 0.45; }
   }
+  /* Player inspector (feature 1) */
+  #playerInspector {
+    position: absolute; top: 64px; left: 250px;
+    width: 280px;
+    max-height: calc(70vh - 48px);
+    overflow-y: auto;
+    z-index: 70;
+  }
+  #playerInspector .pi-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  #playerInspector .pi-title { font-size: 13px; color: #facc15; font-weight: bold; }
+  #playerInspector .pi-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 0; line-height: 1;
+  }
+  #playerInspector .pi-close:hover { color: #fff; }
+  #playerInspector .pi-stat { font-size: 12px; color: #ccc; margin: 2px 0; }
+  #playerInspector .pi-worth { font-size: 13px; color: #86efac; font-weight: bold; margin: 4px 0; }
+  #playerInspector .pi-group { margin-top: 8px; }
+  #playerInspector .pi-group-title { font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 4px; }
+  #playerInspector .pi-prop { font-size: 11px; color: #eee; padding: 2px 0; border-bottom: 1px solid #2a2a4a; }
+  /* Net worth rank badge */
+  .nw-rank { font-size: 10px; font-weight: bold; color: #1a1a2e; background: #facc15; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+  .nw-worth { font-size: 10px; color: #86efac; margin-left: 4px; }
+  /* Player row clickable hint */
+  .player-row { cursor: pointer; }
+  .player-row:hover { background: rgba(255,255,255,0.04); }
+  /* Surrender button */
+  #surrenderBtn {
+    background: rgba(153,27,27,0.7); border: 1px solid rgba(239,68,68,0.5);
+    color: #fff; border-radius: 5px; padding: 4px 8px;
+    font-size: 12px; cursor: pointer; white-space: nowrap;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  #surrenderBtn:hover { background: rgba(153,27,27,0.95); }
+  /* Room ready UI (feature 3) */
+  .rp-player-row { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 0; }
+  .rp-ready-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .rp-ready-dot.ready { background: #22c55e; }
+  .rp-ready-dot.not-ready { background: #6b7280; }
+  /* Room settings (feature 6) */
+  #roomSettingsPanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; }
+  #roomSettingsPanel .rs-title { font-size: 12px; color: #facc15; font-weight: bold; margin-bottom: 6px; }
+  #roomSettingsPanel label { font-size: 11px; color: #aaa; margin-top: 6px; display: block; }
+  #roomSettingsPanel select { font-size: 12px; padding: 4px 6px; margin-top: 2px; }
+  #roomSettingsPanel .rs-readonly { font-size: 11px; color: #888; margin-top: 4px; }
+  /* Confirm overlay (non-modal, inline) */
+  .confirm-overlay {
+    background: rgba(10,10,30,0.97); border: 1px solid #ef4444;
+    border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #eee;
+    position: absolute; z-index: 200;
+  }
+  .confirm-overlay .co-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .confirm-overlay .co-msg { margin-bottom: 6px; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -524,6 +581,44 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     // Settings volume
     "settings.sfxVolume": "Soundeffekte",
     "settings.musicVolume": "Musik",
+    // Player inspector (feature 1)
+    "inspector.title": "Spieler-Details",
+    "inspector.cash": "Kapital:",
+    "inspector.netWorth": "Nettovermögen:",
+    "inspector.properties": "Grundstücke:",
+    "inspector.none": "Keine Grundstücke",
+    "inspector.mortgaged": "(Hyp.)",
+    // Net worth rank (feature 2)
+    "rank.leader": "#1",
+    // Room ready (feature 3)
+    "room.readyToggle.ready": "Bereit",
+    "room.readyToggle.notReady": "Nicht bereit",
+    "room.readyStatus": "Bereit",
+    "room.notReadyStatus": "Nicht bereit",
+    // Surrender (feature 4)
+    "game.surrender": "Aufgeben",
+    "game.surrenderConfirm": "Wirklich aufgeben? Du scheidest aus dem Spiel aus.",
+    "game.surrenderYes": "Aufgeben",
+    "game.surrenderNo": "Abbrechen",
+    // Leave confirm (feature 4)
+    "game.leaveConfirm": "Spiel wirklich verlassen?",
+    "game.leaveYes": "Verlassen",
+    "game.leaveNo": "Bleiben",
+    // Rematch (feature 5)
+    "gameover.rematch": "Neues Spiel",
+    "gameover.waitHost": "Warte auf Host…",
+    // Game settings (feature 6)
+    "settings.game.title": "Spieleinstellungen",
+    "settings.game.startCap": "Startkapital",
+    "settings.game.buildCost": "Gebäudekosten",
+    "settings.game.botDiff": "Bot-Schwierigkeit",
+    "settings.game.easy": "Einfach",
+    "settings.game.normal": "Normal",
+    "settings.game.hard": "Schwer",
+    "settings.game.halfX": "0,5×",
+    "settings.game.oneX": "1×",
+    "settings.game.twoX": "2×",
+    "settings.game.readonly": "Einstellungen (nur Host kann ändern)",
   },
   en: {
     // Lobby
@@ -676,6 +771,44 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     // Settings volume
     "settings.sfxVolume": "Sound effects",
     "settings.musicVolume": "Music",
+    // Player inspector (feature 1)
+    "inspector.title": "Player Details",
+    "inspector.cash": "Cash:",
+    "inspector.netWorth": "Net worth:",
+    "inspector.properties": "Properties:",
+    "inspector.none": "No properties",
+    "inspector.mortgaged": "(Mortg.)",
+    // Net worth rank (feature 2)
+    "rank.leader": "#1",
+    // Room ready (feature 3)
+    "room.readyToggle.ready": "Ready",
+    "room.readyToggle.notReady": "Not Ready",
+    "room.readyStatus": "Ready",
+    "room.notReadyStatus": "Not ready",
+    // Surrender (feature 4)
+    "game.surrender": "Surrender",
+    "game.surrenderConfirm": "Really surrender? You will be eliminated from the game.",
+    "game.surrenderYes": "Surrender",
+    "game.surrenderNo": "Cancel",
+    // Leave confirm (feature 4)
+    "game.leaveConfirm": "Really leave the game?",
+    "game.leaveYes": "Leave",
+    "game.leaveNo": "Stay",
+    // Rematch (feature 5)
+    "gameover.rematch": "New Game",
+    "gameover.waitHost": "Waiting for host…",
+    // Game settings (feature 6)
+    "settings.game.title": "Game Settings",
+    "settings.game.startCap": "Starting Capital",
+    "settings.game.buildCost": "Building Costs",
+    "settings.game.botDiff": "Bot Difficulty",
+    "settings.game.easy": "Easy",
+    "settings.game.normal": "Normal",
+    "settings.game.hard": "Hard",
+    "settings.game.halfX": "0.5×",
+    "settings.game.oneX": "1×",
+    "settings.game.twoX": "2×",
+    "settings.game.readonly": "Settings (only host can change)",
   },
 };
 
@@ -761,6 +894,21 @@ export class UI {
   // Turn-timer countdown
   private turnTimerEl: HTMLSpanElement | null = null;
   private turnTimerHideTimer: ReturnType<typeof setTimeout> | null = null;
+  // Player inspector (feature 1)
+  private playerInspector!: HTMLDivElement;
+  private inspectedPlayerId: string | null = null;
+  // Surrender button ref (feature 4)
+  private surrenderBtn!: HTMLButtonElement;
+  private surrenderConfirmEl: HTMLDivElement | null = null;
+  // Leave confirm element (feature 4)
+  private leaveConfirmEl: HTMLDivElement | null = null;
+  // Room ready state (feature 3)
+  private myReady: boolean = true;
+  // Current room settings from server (feature 6)
+  private currentRoomSettings: GameSettings = {};
+  private currentIsHost: boolean = false;
+  // Game-over rematch host id (feature 5)
+  private gameOverHostId: string | null = null;
 
   constructor(root: HTMLDivElement, net: Net, board3d: Board3D) {
     this.root = root;
@@ -782,6 +930,7 @@ export class UI {
     this.buildDeedCardPopup();
     this.buildSpecialEventToast();
     this.buildPaymentToast();
+    this.buildPlayerInspector();
     this.setupKeyboardShortcuts();
     this.checkRoomFromUrl();
   }
@@ -855,11 +1004,14 @@ export class UI {
     panel.innerHTML = `
       <h2 id="roomPanelTitle" style="margin-bottom:12px;color:#facc15;">${t("room.title")}</h2>
       <div id="roomInfo" style="margin-bottom:12px;font-size:13px;color:#ccc;"></div>
+      <div id="roomPlayerList" style="margin-bottom:8px;"></div>
+      <div id="roomReadyRow" style="margin:8px 0;"></div>
       <div id="roomLinkRow">
         <input id="roomLinkInput" type="text" readonly placeholder="Raum-Link…" />
         <button id="roomLinkCopyBtn" style="flex-shrink:0;white-space:nowrap;">${t("room.copyLink")}</button>
       </div>
       <div id="figurePicker"></div>
+      <div id="roomSettingsPanel"></div>
       <button id="startGame" style="width:100%;margin-top:8px;">${t("room.startGame")}</button>
       <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">${t("room.leaveRoom")}</button>
     `;
@@ -1079,19 +1231,24 @@ export class UI {
     });
     right.appendChild(helpBtn);
 
+    // Surrender button (feature 4)
+    const surrenderBtn = document.createElement("button");
+    surrenderBtn.id = "surrenderBtn";
+    surrenderBtn.textContent = t("game.surrender");
+    hide(surrenderBtn);
+    surrenderBtn.addEventListener("click", () => {
+      this.showSurrenderConfirm();
+    });
+    right.appendChild(surrenderBtn);
+    this.surrenderBtn = surrenderBtn;
+
     const leaveBtn = document.createElement("button");
     leaveBtn.className = "hdr-btn";
     leaveBtn.id = "leaveGameBtn";
     leaveBtn.textContent = t("header.leave");
     leaveBtn.style.background = "rgba(153,27,27,0.6)";
     leaveBtn.addEventListener("click", () => {
-      clearSession();
-      this.net.send({ t: "leaveRoom" });
-      // Works for both alive players and spectators (alive=false):
-      // showLobbyPanel hides gameHud, spectatorBanner, all overlays.
-      audio.stopBgm();
-      audio.startBgm("lobby");
-      this.showLobbyPanel();
+      this.showLeaveConfirm(leaveBtn);
     });
     right.appendChild(leaveBtn);
 
@@ -1274,6 +1431,13 @@ export class UI {
     if (gameOverTitle) gameOverTitle.textContent = t("gameover.title");
     const gameOverRestart = document.getElementById("gameOverRestart");
     if (gameOverRestart) gameOverRestart.textContent = t("gameover.back");
+    const gameOverRematch = document.getElementById("gameOverRematch");
+    if (gameOverRematch) gameOverRematch.textContent = t("gameover.rematch");
+    const gameOverWaitHost = document.getElementById("gameOverWaitHost");
+    if (gameOverWaitHost) gameOverWaitHost.textContent = t("gameover.waitHost");
+    // Surrender button
+    const surrenderBtnEl = document.getElementById("surrenderBtn");
+    if (surrenderBtnEl) surrenderBtnEl.textContent = t("game.surrender");
 
     // Figure picker title in room panel
     const figureTitle = document.querySelector("#figurePicker .fp-title");
@@ -1343,18 +1507,40 @@ export class UI {
     banner.innerHTML = `
       <h1>${t("gameover.title")}</h1>
       <div id="gameOverWinner" style="font-size:1.5rem;color:#fff;"></div>
-      <button id="gameOverRestart" style="margin-top:16px;">${t("gameover.back")}</button>
+      <div id="gameOverBtns" style="display:flex;gap:12px;margin-top:16px;align-items:center;justify-content:center;"></div>
     `;
     hide(banner);
     this.root.appendChild(banner);
     this.gameOverBanner = banner;
 
-    const restartBtn = document.getElementById("gameOverRestart") as HTMLButtonElement;
+    const btnsEl = document.getElementById("gameOverBtns") as HTMLDivElement;
+
+    // Rematch button (feature 5)
+    const rematchBtn = document.createElement("button");
+    rematchBtn.id = "gameOverRematch";
+    rematchBtn.style.cssText = "background:#16a34a;";
+    rematchBtn.textContent = t("gameover.rematch");
+    rematchBtn.addEventListener("click", () => {
+      this.net.send({ t: "newGame" });
+    });
+    btnsEl.appendChild(rematchBtn);
+
+    // Wait for host label (feature 5) - shown when non-host
+    const waitLabel = document.createElement("span");
+    waitLabel.id = "gameOverWaitHost";
+    waitLabel.style.cssText = "font-size:13px;color:#aaa;display:none;";
+    waitLabel.textContent = t("gameover.waitHost");
+    btnsEl.appendChild(waitLabel);
+
+    const restartBtn = document.createElement("button");
+    restartBtn.id = "gameOverRestart";
+    restartBtn.textContent = t("gameover.back");
     restartBtn.addEventListener("click", () => {
       clearSession();
       hide(this.gameOverBanner);
       this.showLobbyPanel();
     });
+    btnsEl.appendChild(restartBtn);
   }
 
   private buildVersion() {
@@ -1596,6 +1782,196 @@ export class UI {
       el.classList.remove("visible");
       this.paymentToastTimer = null;
     }, 3500);
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature 1: Player inspector
+  // -------------------------------------------------------------------------
+  private buildPlayerInspector() {
+    const el = document.createElement("div");
+    el.id = "playerInspector";
+    el.className = "panel";
+    hide(el);
+    this.gameHud.appendChild(el);
+    this.playerInspector = el;
+  }
+
+  private openInspector(playerId: string) {
+    this.inspectedPlayerId = playerId;
+    this.refreshInspector();
+    show(this.playerInspector, "block");
+  }
+
+  private refreshInspector() {
+    const state = this.lastState;
+    const playerId = this.inspectedPlayerId;
+    const el = this.playerInspector;
+    el.innerHTML = "";
+    if (!state || !playerId) { hide(el); return; }
+
+    const player = state.players.find(p => p.id === playerId);
+    if (!player) { hide(el); return; }
+
+    const board = getBoard(state.boardId);
+    const worth = netWorth(state, playerId);
+
+    // Header
+    const hdr = document.createElement("div");
+    hdr.className = "pi-header";
+    const dot = player.color ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${player.color};margin-right:6px;"></span>` : "";
+    const titleEl = document.createElement("div");
+    titleEl.className = "pi-title";
+    titleEl.innerHTML = `${dot}${player.name}${player.isBot ? " (Bot)" : ""}`;
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "pi-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => { hide(el); this.inspectedPlayerId = null; });
+    hdr.appendChild(titleEl);
+    hdr.appendChild(closeBtn);
+    el.appendChild(hdr);
+
+    // Stats
+    const cashEl = document.createElement("div");
+    cashEl.className = "pi-stat";
+    cashEl.textContent = `${t("inspector.cash")} ${player.money} LPD`;
+    el.appendChild(cashEl);
+
+    const worthEl = document.createElement("div");
+    worthEl.className = "pi-worth";
+    worthEl.textContent = `${t("inspector.netWorth")} ${worth} LPD`;
+    el.appendChild(worthEl);
+
+    // Properties grouped by colour
+    const ownedPositions = Object.entries(state.ownership)
+      .filter(([, ownerId]) => ownerId === playerId)
+      .map(([pos]) => Number(pos))
+      .sort((a, b) => a - b);
+
+    const propsTitle = document.createElement("div");
+    propsTitle.style.cssText = "font-size:12px;color:#aaa;margin-top:8px;margin-bottom:4px;";
+    propsTitle.textContent = t("inspector.properties");
+    el.appendChild(propsTitle);
+
+    if (ownedPositions.length === 0) {
+      const none = document.createElement("div");
+      none.className = "pi-stat";
+      none.textContent = t("inspector.none");
+      el.appendChild(none);
+    } else {
+      // Group by colour group
+      const groups = new Map<string, number[]>();
+      for (const pos of ownedPositions) {
+        const tile = board.tiles[pos];
+        const group = (tile as { group?: string }).group ?? "other";
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(pos);
+      }
+      for (const [group, positions] of groups) {
+        const grpEl = document.createElement("div");
+        grpEl.className = "pi-group";
+        const grpTitle = document.createElement("div");
+        grpTitle.className = "pi-group-title";
+        const grpColor = this.groupCssColor(group);
+        grpTitle.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${grpColor};margin-right:4px;"></span>${group}`;
+        grpEl.appendChild(grpTitle);
+        for (const pos of positions) {
+          const tile = board.tiles[pos];
+          if (!tile) continue;
+          const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+          const isMortgaged = !!state.mortgaged[pos];
+          let bStr = "";
+          if (b.hotel) bStr = ` [${t("deed.hotel")}]`;
+          else if (b.factory) bStr = ` [${t("deed.factory")}]`;
+          else if (b.houses > 0) bStr = ` [${b.houses}H]`;
+          const mortgStr = isMortgaged ? ` ${t("inspector.mortgaged")}` : "";
+          const propEl = document.createElement("div");
+          propEl.className = "pi-prop";
+          propEl.textContent = `${tile.name}${bStr}${mortgStr}`;
+          grpEl.appendChild(propEl);
+        }
+        el.appendChild(grpEl);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature 4: Surrender confirm (non-modal inline)
+  // -------------------------------------------------------------------------
+  private showSurrenderConfirm() {
+    if (this.surrenderConfirmEl) return; // already shown
+    const el = document.createElement("div");
+    el.className = "confirm-overlay";
+    // Position near surrender button
+    el.style.cssText += "right:16px;top:52px;";
+    el.innerHTML = `<div class="co-msg">${t("game.surrenderConfirm")}</div>`;
+    const btns = document.createElement("div");
+    btns.className = "co-btns";
+    const yesBtn = document.createElement("button");
+    yesBtn.style.background = "#991b1b";
+    yesBtn.textContent = t("game.surrenderYes");
+    yesBtn.addEventListener("click", () => {
+      this.net.send({ t: "command", command: { type: "SURRENDER" } });
+      this.closeSurrenderConfirm();
+    });
+    const noBtn = document.createElement("button");
+    noBtn.style.background = "#555";
+    noBtn.textContent = t("game.surrenderNo");
+    noBtn.addEventListener("click", () => this.closeSurrenderConfirm());
+    btns.appendChild(yesBtn);
+    btns.appendChild(noBtn);
+    el.appendChild(btns);
+    this.gameHud.appendChild(el);
+    this.surrenderConfirmEl = el;
+  }
+
+  private closeSurrenderConfirm() {
+    if (this.surrenderConfirmEl) {
+      this.surrenderConfirmEl.remove();
+      this.surrenderConfirmEl = null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature 4: Leave confirm (non-modal inline)
+  // -------------------------------------------------------------------------
+  private showLeaveConfirm(anchor: HTMLElement) {
+    if (this.leaveConfirmEl) {
+      this.leaveConfirmEl.remove();
+      this.leaveConfirmEl = null;
+      return;
+    }
+    const el = document.createElement("div");
+    el.className = "confirm-overlay";
+    el.style.cssText += "right:16px;top:52px;min-width:220px;";
+    el.innerHTML = `<div class="co-msg">${t("game.leaveConfirm")}</div>`;
+    const btns = document.createElement("div");
+    btns.className = "co-btns";
+    const yesBtn = document.createElement("button");
+    yesBtn.style.background = "#991b1b";
+    yesBtn.textContent = t("game.leaveYes");
+    yesBtn.addEventListener("click", () => {
+      clearSession();
+      this.net.send({ t: "leaveRoom" });
+      audio.stopBgm();
+      audio.startBgm("lobby");
+      this.leaveConfirmEl?.remove();
+      this.leaveConfirmEl = null;
+      this.showLobbyPanel();
+    });
+    const noBtn = document.createElement("button");
+    noBtn.style.background = "#555";
+    noBtn.textContent = t("game.leaveNo");
+    noBtn.addEventListener("click", () => {
+      this.leaveConfirmEl?.remove();
+      this.leaveConfirmEl = null;
+    });
+    btns.appendChild(yesBtn);
+    btns.appendChild(noBtn);
+    el.appendChild(btns);
+    this.gameHud.appendChild(el);
+    this.leaveConfirmEl = el;
+    // Keep anchor reference (suppress TS unused warning)
+    void anchor;
   }
 
   // -------------------------------------------------------------------------
@@ -1866,9 +2242,13 @@ export class UI {
     if (this.tradePanel) hide(this.tradePanel);
     if (this.incomingSwapPanel) hide(this.incomingSwapPanel);
     if (this.gameOverBanner) hide(this.gameOverBanner);
+    if (this.playerInspector) hide(this.playerInspector);
+    this.closeSurrenderConfirm();
+    this.leaveConfirmEl?.remove(); this.leaveConfirmEl = null;
     this.hideTurnTimer();
     this.lastState = null;
     this.wasMyTurn = false;
+    this.inspectedPlayerId = null;
     this.net.send({ t: "listRooms" });
   }
 
@@ -1919,37 +2299,166 @@ export class UI {
   showRoom(room: RoomView) {
     this.currentHostId = room.host;
     this.currentRoom = { name: room.name, boardId: room.boardId };
+    this.currentRoomSettings = room.settings ?? {};
+    this.currentIsHost = this.net.playerId === room.host;
     if (this.currentRoomId) this.updateRoomLink(this.currentRoomId);
     hide(this.lobby);
     show(this.roomPanel);
     hide(this.gameHud);
 
-    const playerNames = room.players.map(p => p.nickname + (p.isBot ? " (Bot)" : "")).join(", ");
     this.roomInfo.innerHTML = `
       <div><strong>${room.name}</strong></div>
-      <div style="margin-top:4px;">${t("room.players")}: ${playerNames}</div>
       <div style="margin-top:4px;color:#aaa;">${t("room.board")}: ${room.boardId} | ${t("room.bots")}: ${room.botCount}</div>
     `;
 
-    // Show start button only if we're the host
-    if (this.net.playerId === room.host) {
+    // Player list with ready indicators (feature 3)
+    const rpList = document.getElementById("roomPlayerList");
+    if (rpList) {
+      rpList.innerHTML = `<div style="font-size:12px;color:#aaa;margin-bottom:4px;">${t("room.players")}:</div>`;
+      for (const p of room.players) {
+        if (p.isBot) continue;
+        const row = document.createElement("div");
+        row.className = "rp-player-row";
+        const dot = document.createElement("span");
+        dot.className = `rp-ready-dot ${p.ready ? "ready" : "not-ready"}`;
+        dot.title = p.ready ? t("room.readyStatus") : t("room.notReadyStatus");
+        const nameEl = document.createElement("span");
+        nameEl.textContent = p.nickname + (p.id === room.host ? " ★" : "");
+        const readyLabel = document.createElement("span");
+        readyLabel.style.cssText = "font-size:11px;color:" + (p.ready ? "#22c55e" : "#9ca3af") + ";margin-left:auto;";
+        readyLabel.textContent = p.ready ? t("room.readyStatus") : t("room.notReadyStatus");
+        row.appendChild(dot);
+        row.appendChild(nameEl);
+        row.appendChild(readyLabel);
+        rpList.appendChild(row);
+      }
+    }
+
+    // Ready toggle (feature 3) — only for local human player
+    const readyRow = document.getElementById("roomReadyRow");
+    if (readyRow) {
+      readyRow.innerHTML = "";
+      const meInRoom = room.players.find(p => p.id === this.net.playerId && !p.isBot);
+      if (meInRoom) {
+        this.myReady = meInRoom.ready;
+        const readyBtn = document.createElement("button");
+        readyBtn.id = "readyToggleBtn";
+        readyBtn.style.cssText = "width:100%;background:" + (this.myReady ? "#16a34a" : "#6b7280") + ";";
+        readyBtn.textContent = this.myReady ? t("room.readyToggle.ready") : t("room.readyToggle.notReady");
+        readyBtn.addEventListener("click", () => {
+          this.myReady = !this.myReady;
+          this.net.send({ t: "setReady", ready: this.myReady });
+          readyBtn.textContent = this.myReady ? t("room.readyToggle.ready") : t("room.readyToggle.notReady");
+          readyBtn.style.background = this.myReady ? "#16a34a" : "#6b7280";
+        });
+        readyRow.appendChild(readyBtn);
+      }
+    }
+
+    // Show start button only if we're the host; disable if canStart is false
+    if (this.currentIsHost) {
       show(this.startGameBtn, "block");
-      const humanCount = room.players.filter(p => !p.isBot).length;
-      const totalPlayers = humanCount + room.botCount;
-      if (totalPlayers < 2) {
-        this.startGameBtn.disabled = true;
-        this.startGameBtn.title = t("tooltip.minPlayers");
+      const canStart = room.canStart;
+      this.startGameBtn.disabled = !canStart;
+      if (!canStart) {
+        const humanCount = room.players.filter(p => !p.isBot).length;
+        const totalPlayers = humanCount + room.botCount;
+        this.startGameBtn.title = totalPlayers < 2 ? t("tooltip.minPlayers") : t("room.waiting");
       } else {
-        this.startGameBtn.disabled = false;
         this.startGameBtn.title = "";
       }
     } else {
       hide(this.startGameBtn);
     }
 
+    // Game settings panel (feature 6)
+    this.buildRoomSettingsPanel(room);
+
     // Figure/colour picker
     const pickerContainer = document.getElementById("figurePicker");
     if (pickerContainer) this.buildFigurePicker(pickerContainer, room);
+  }
+
+  private buildRoomSettingsPanel(room: RoomView) {
+    const container = document.getElementById("roomSettingsPanel");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const isHost = this.net.playerId === room.host;
+    const settings = room.settings ?? {};
+
+    const panel = document.createElement("div");
+    panel.id = "roomSettingsPanelInner";
+    const titleEl = document.createElement("div");
+    titleEl.className = "rs-title";
+    titleEl.textContent = t("settings.game.title");
+    panel.appendChild(titleEl);
+
+    const multOptions = [
+      { value: "0.5", label: t("settings.game.halfX") },
+      { value: "1", label: t("settings.game.oneX") },
+      { value: "2", label: t("settings.game.twoX") },
+    ];
+    const diffOptions = [
+      { value: "easy", label: t("settings.game.easy") },
+      { value: "normal", label: t("settings.game.normal") },
+      { value: "hard", label: t("settings.game.hard") },
+    ];
+
+    const addSetting = (labelKey: string, id: string, options: { value: string; label: string }[], currentVal: string, onChange: (v: string) => void) => {
+      const lbl = document.createElement("label");
+      lbl.htmlFor = id;
+      lbl.textContent = t(labelKey);
+      panel.appendChild(lbl);
+
+      if (isHost) {
+        const sel = document.createElement("select");
+        sel.id = id;
+        for (const opt of options) {
+          const o = document.createElement("option");
+          o.value = opt.value;
+          o.textContent = opt.label;
+          if (opt.value === currentVal) o.selected = true;
+          sel.appendChild(o);
+        }
+        sel.addEventListener("change", () => onChange(sel.value));
+        panel.appendChild(sel);
+      } else {
+        const readonlyEl = document.createElement("div");
+        readonlyEl.className = "rs-readonly";
+        const found = options.find(o => o.value === currentVal);
+        readonlyEl.textContent = found?.label ?? currentVal;
+        panel.appendChild(readonlyEl);
+      }
+    };
+
+    const curCap = String(settings.startingCapitalMult ?? 1);
+    addSetting("settings.game.startCap", "rsStartCap", multOptions, curCap, (v) => {
+      this.net.send({ t: "setGameSettings", settings: { ...this.currentRoomSettings, startingCapitalMult: parseFloat(v) } });
+      this.currentRoomSettings = { ...this.currentRoomSettings, startingCapitalMult: parseFloat(v) };
+    });
+
+    const curBuild = String(settings.buildingCostMult ?? 1);
+    addSetting("settings.game.buildCost", "rsBuildCost", multOptions, curBuild, (v) => {
+      this.net.send({ t: "setGameSettings", settings: { ...this.currentRoomSettings, buildingCostMult: parseFloat(v) } });
+      this.currentRoomSettings = { ...this.currentRoomSettings, buildingCostMult: parseFloat(v) };
+    });
+
+    const curDiff = settings.botDifficulty ?? "normal";
+    addSetting("settings.game.botDiff", "rsBotDiff", diffOptions, curDiff, (v) => {
+      this.net.send({ t: "setGameSettings", settings: { ...this.currentRoomSettings, botDifficulty: v as "easy" | "normal" | "hard" } });
+      this.currentRoomSettings = { ...this.currentRoomSettings, botDifficulty: v as "easy" | "normal" | "hard" };
+    });
+
+    if (!isHost) {
+      const note = document.createElement("div");
+      note.className = "rs-readonly";
+      note.textContent = t("settings.game.readonly");
+      note.style.marginTop = "8px";
+      panel.appendChild(note);
+    }
+
+    container.appendChild(panel);
   }
 
   updateGame(state: GameState, events: FormattedEvent[], myId: string | null) {
@@ -1985,8 +2494,18 @@ export class UI {
       }
     }
 
-    // Update player list
+    // Update player list with net worth ranking (feature 2)
     this.playerList.innerHTML = "";
+    // Compute net worth for alive players and assign ranks
+    const alivePlayers = state.players.filter(p => p.alive);
+    const worthMap = new Map<string, number>();
+    for (const p of alivePlayers) {
+      worthMap.set(p.id, netWorth(state, p.id));
+    }
+    const sortedByWorth = [...alivePlayers].sort((a, b) => (worthMap.get(b.id) ?? 0) - (worthMap.get(a.id) ?? 0));
+    const rankMap = new Map<string, number>();
+    sortedByWorth.forEach((p, i) => rankMap.set(p.id, i + 1));
+
     for (let i = 0; i < state.players.length; i++) {
       const p = state.players[i];
       if (!p) continue;
@@ -1997,8 +2516,27 @@ export class UI {
       const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
       const rollStr = p.lastRoll[0] > 0 ? ` [${p.lastRoll[0]}+${p.lastRoll[1]}]` : "";
       const jail = p.inJail ? t("player.jail") : "";
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${this.renderChipStack(p.money)}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
+      const rank = rankMap.get(p.id);
+      const rankBadge = rank === 1 ? `<span class="nw-rank">#1</span>` : (rank ? `<span class="nw-worth">#${rank}</span>` : "");
+      const worth = worthMap.get(p.id);
+      const worthStr = worth !== undefined ? `<span class="nw-worth">${worth} NW</span>` : "";
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderChipStack(p.money)}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
+
+      // Feature 1: clicking row opens inspector
+      row.addEventListener("click", () => {
+        if (this.inspectedPlayerId === p.id && this.playerInspector.style.display !== "none") {
+          hide(this.playerInspector);
+          this.inspectedPlayerId = null;
+        } else {
+          this.openInspector(p.id);
+        }
+      });
       this.playerList.appendChild(row);
+    }
+
+    // Refresh inspector if open
+    if (this.inspectedPlayerId && this.playerInspector.style.display !== "none") {
+      this.refreshInspector();
     }
 
     // Append new events to log
@@ -2038,6 +2576,14 @@ export class UI {
     const showBuy = isMyTurn && amAlive && state.phase === "awaiting-buy";
     const showRansom = isMyTurn && amAlive && state.phase === "awaiting-roll" && (me?.inJail ?? false);
     const showEndTurn = isMyTurn && amAlive && state.phase === "turn-end";
+
+    // Surrender button (feature 4): show when alive in an active game
+    if (amAlive && state.phase !== "finished") {
+      show(this.surrenderBtn, "inline-block");
+    } else {
+      hide(this.surrenderBtn);
+      this.closeSurrenderConfirm();
+    }
 
     if (showRoll) { show(this.rollBtn, "inline-block"); this.rollBtn.disabled = false; }
     else { hide(this.rollBtn); this.rollBtn.disabled = true; }
@@ -2121,10 +2667,19 @@ export class UI {
     setTimeout(() => hide(this.errorBanner), 4000);
   }
 
-  showGameOver(winnerName: string) {
+  showGameOver(winnerName: string, _winnerId?: string) {
     const winnerEl = document.getElementById("gameOverWinner");
     if (winnerEl) winnerEl.textContent = `${t("gameover.winner")} ${winnerName}`;
+
+    // Rematch button (feature 5): only host sees it
+    const rematchBtn = document.getElementById("gameOverRematch") as HTMLButtonElement | null;
+    const waitLabel = document.getElementById("gameOverWaitHost") as HTMLSpanElement | null;
+    const isHost = this.currentIsHost || this.net.playerId === this.currentHostId;
+    if (rematchBtn) rematchBtn.style.display = isHost ? "inline-block" : "none";
+    if (waitLabel) waitLabel.style.display = isHost ? "none" : "inline";
+
     show(this.gameOverBanner, "flex");
+    hide(this.surrenderBtn);
   }
 
   private groupCssColor(group: string): string {

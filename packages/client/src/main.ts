@@ -66,6 +66,13 @@ class StateQueue {
     this.ui.updateGame(state, events, this.net.playerId);
   }
 
+  /** Reset the queue for a new game (rematch). */
+  reset() {
+    this.queue = [];
+    this.processing = false;
+    this.lastProcessed = null;
+  }
+
   private async processNext(): Promise<void> {
     if (this.queue.length === 0) { this.processing = false; return; }
     this.processing = true;
@@ -217,7 +224,18 @@ net.onMessage((msg) => {
     case "room":
       // Server sends the current room view whenever something changes (player
       // joins, figure pick, etc.). Show the room panel with the start button.
-      if (!resuming) ui.showRoom(msg.room);
+      // Also handles post-rematch reset (game-over banner → room waiting panel).
+      if (!resuming) {
+        // If game-over banner is showing, a new game was requested: hide it and show room.
+        const govBanner = document.getElementById("gameOverBanner");
+        if (govBanner && govBanner.style.display !== "none") {
+          govBanner.style.display = "none";
+          // Clear state queue so the new game starts fresh.
+          stateQueue.reset();
+          audio.startBgm("lobby");
+        }
+        ui.showRoom(msg.room);
+      }
       break;
     case "resumed":
       // Keep `resuming` true so the first post-resume `state` snaps (no backlog
