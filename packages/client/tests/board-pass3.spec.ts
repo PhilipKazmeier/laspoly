@@ -33,9 +33,13 @@ test("board pass3 – header bar visible with room name and turn status", async 
   const turnText = await turnStatus.textContent();
   expect(turnText).toMatch(/am Zug/);
 
-  // Roll and wait for bots to settle so a toast and tokens appear
+  // Roll and wait for animation + state (then handle turn-end)
   await page.locator("#rollBtn").click();
-  await page.waitForTimeout(5_000);
+  await page.waitForTimeout(8_000);
+  if (await page.locator("#endTurnBtn").isVisible().catch(() => false)) {
+    await page.locator("#endTurnBtn").click();
+  }
+  await page.waitForTimeout(1_000);
 
   // Full-page screenshot showing header
   await page.screenshot({
@@ -61,7 +65,10 @@ test("board pass3 – view toggle switches to top-down view", async ({ page }) =
 
   // Roll so there's something on the board
   await page.locator("#rollBtn").click();
-  await page.waitForTimeout(3_000);
+  await page.waitForTimeout(8_000);
+  if (await page.locator("#endTurnBtn").isVisible().catch(() => false)) {
+    await page.locator("#endTurnBtn").click();
+  }
 
   // Click the view toggle button → top-down
   const viewBtn = page.locator("#headerViewBtn");
@@ -102,12 +109,16 @@ test("board pass3 – tokens have distinguishable colours on board", async ({ pa
   for (let i = 0; i < 4; i++) {
     if (await page.locator("#rollBtn").isVisible()) {
       await page.locator("#rollBtn").click();
-      await page.waitForTimeout(3_000);
+      await page.waitForTimeout(8_000); // wait for animation
     }
     if (await page.locator("#buyOfferBuyBtn").isVisible()) {
       await page.locator("#buyOfferBuyBtn").click();
+      await page.waitForTimeout(500);
     }
-    await page.waitForTimeout(1_000);
+    if (await page.locator("#endTurnBtn").isVisible()) {
+      await page.locator("#endTurnBtn").click();
+    }
+    await page.waitForTimeout(500);
   }
 
   // Dismiss any action-card popup that may be covering the board

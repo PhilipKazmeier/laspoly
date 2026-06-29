@@ -381,6 +381,7 @@ export class UI {
   private eventLog!: HTMLDivElement;
   private rollBtn!: HTMLButtonElement;
   private ransomBtn!: HTMLButtonElement;
+  private endTurnBtn!: HTMLButtonElement;
   private chatInput!: HTMLInputElement;
   private gameOverBanner!: HTMLDivElement;
   private spectatorBanner!: HTMLDivElement;
@@ -593,22 +594,34 @@ export class UI {
     actionPanel.innerHTML = `
       <button id="rollBtn">Würfeln</button>
       <button id="ransomBtn">Freikaufen</button>
+      <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">✓ Zug beenden</button>
     `;
     hud.appendChild(actionPanel);
 
     this.rollBtn = document.getElementById("rollBtn") as HTMLButtonElement;
     this.ransomBtn = document.getElementById("ransomBtn") as HTMLButtonElement;
+    this.endTurnBtn = document.getElementById("endTurnBtn") as HTMLButtonElement;
 
     // Hide action buttons initially
     hide(this.rollBtn);
     hide(this.ransomBtn);
+    hide(this.endTurnBtn);
 
-    this.rollBtn.addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "ROLL_DICE" } })
-    );
+    this.rollBtn.addEventListener("click", () => {
+      // Hide immediately so it cannot be double-clicked; re-enabled when
+      // it's genuinely the player's next roll (set in updateGame).
+      hide(this.rollBtn);
+      this.rollBtn.disabled = true;
+      this.net.send({ t: "command", command: { type: "ROLL_DICE" } });
+    });
     this.ransomBtn.addEventListener("click", () =>
       this.net.send({ t: "command", command: { type: "PAY_RANSOM" } })
     );
+    this.endTurnBtn.addEventListener("click", () => {
+      hide(this.endTurnBtn);
+      this.endTurnBtn.disabled = true;
+      this.net.send({ t: "command", command: { type: "END_TURN" } });
+    });
 
     // Spectator banner
     const spectatorBanner = document.createElement("div");
@@ -907,8 +920,9 @@ export class UI {
     const textEl = document.getElementById("actionCardText");
     if (textEl) textEl.textContent = text;
     show(this.actionCardPopup, "block");
-    if (this.actionCardTimer) clearTimeout(this.actionCardTimer);
-    this.actionCardTimer = setTimeout(() => this.dismissActionCard(), 4000);
+    // No auto-dismiss: the local player must click Confirm (✓) to dismiss.
+    // Any pre-existing timer (from a prior card) is cancelled.
+    if (this.actionCardTimer) { clearTimeout(this.actionCardTimer); this.actionCardTimer = null; }
   }
 
   private dismissActionCard() {
@@ -1409,7 +1423,7 @@ export class UI {
       if (boardLabel) boardLabel.textContent = state.boardId;
 
       const turnText = isMyTurn && amAlive
-        ? "Du bist am Zug"
+        ? (state.phase === "turn-end" ? "Zug beenden" : "Du bist am Zug")
         : `${currentPlayer?.name ?? "?"} ist am Zug`;
       this.headerTurnStatus.textContent = turnText;
       this.headerRound.textContent = `Runde ${state.round}`;
@@ -1482,12 +1496,16 @@ export class UI {
     const showRoll = isMyTurn && amAlive && state.phase === "awaiting-roll";
     const showBuy = isMyTurn && amAlive && state.phase === "awaiting-buy";
     const showRansom = isMyTurn && amAlive && state.phase === "awaiting-roll" && (me?.inJail ?? false);
+    const showEndTurn = isMyTurn && amAlive && state.phase === "turn-end";
 
     if (showRoll) { show(this.rollBtn, "inline-block"); this.rollBtn.disabled = false; }
     else { hide(this.rollBtn); this.rollBtn.disabled = true; }
 
     if (showRansom) { show(this.ransomBtn, "inline-block"); this.ransomBtn.disabled = false; }
     else { hide(this.ransomBtn); this.ransomBtn.disabled = true; }
+
+    if (showEndTurn) { show(this.endTurnBtn, "inline-block"); this.endTurnBtn.disabled = false; }
+    else { hide(this.endTurnBtn); this.endTurnBtn.disabled = true; }
 
     // Buy offer panel (tile name / price / balance)
     if (showBuy && myId && state.pendingPurchase !== null) {
@@ -1522,8 +1540,8 @@ export class UI {
       hide(this.incomingSwapPanel);
     }
 
-    // My-properties panel + travel (only during my awaiting-roll turn, not in jail)
-    const showMgmt = isMyTurn && amAlive && state.phase === "awaiting-roll" && !(me?.inJail ?? false);
+    // My-properties panel + travel (during awaiting-roll OR turn-end, not in jail)
+    const showMgmt = isMyTurn && amAlive && (state.phase === "awaiting-roll" || state.phase === "turn-end") && !(me?.inJail ?? false);
     if (showMgmt && myId) {
       this.refreshMyPropsPanel(state, myId);
 

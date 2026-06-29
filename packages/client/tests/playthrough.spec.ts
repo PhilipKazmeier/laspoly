@@ -53,7 +53,7 @@ async function injectStateRelay(page: Page) {
  * Returns which condition was met.
  */
 async function waitForActionOrEnd(page: Page, timeout = 60_000): Promise<
-  "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout"
+  "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout"
 > {
   try {
     const result = await page.waitForFunction(
@@ -69,13 +69,14 @@ async function waitForActionOrEnd(page: Page, timeout = 60_000): Promise<
         if (visible("rollBtn")) return "roll";
         if (visible("buyOfferPanel")) return "buy";
         if (visible("ransomBtn")) return "ransom";
+        if (visible("endTurnBtn")) return "endTurn";
         return null;
       },
       undefined,
       { timeout },
     );
     const val = await result.jsonValue() as string | null;
-    return (val ?? "timeout") as "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout";
+    return (val ?? "timeout") as "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout";
   } catch {
     return "timeout";
   }
@@ -217,6 +218,13 @@ test.describe("LasPoly Phase-1 playthrough", () => {
         // ---- Handle actions -----------------------------------------------
         if (arrived === "ransom") {
           await page.locator("#ransomBtn").click();
+          // After ransom, wait for turn-end and click it
+          await page.waitForTimeout(300);
+          const endAfterRansom = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+          if (endAfterRansom) await page.locator("#endTurnBtn").click();
+        } else if (arrived === "endTurn") {
+          // Server put us in turn-end phase; confirm to advance.
+          await page.locator("#endTurnBtn").click();
         } else if (arrived === "buy") {
           buyPhaseEncountered = true;
 
@@ -237,6 +245,10 @@ test.describe("LasPoly Phase-1 playthrough", () => {
 
           // Decline to keep game moving quickly (less money spent = game ends sooner)
           await page.locator("#buyOfferDeclineBtn").click();
+          // After declining, turn-end phase: click "Zug beenden"
+          await page.waitForTimeout(8_000); // wait for animation + state
+          const endAfterDecline = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+          if (endAfterDecline) await page.locator("#endTurnBtn").click();
         } else {
           // arrived === "roll"
           botsAutoPlayedAtLeastOnce = true;
@@ -251,12 +263,20 @@ test.describe("LasPoly Phase-1 playthrough", () => {
 
           await page.locator("#rollBtn").click();
 
-          // After rolling, if buy offer appears, decline it
-          // Wait briefly to let state update
-          await page.waitForTimeout(300);
+          // After rolling, wait for animation + state, then handle buy or turn-end.
+          await page.waitForTimeout(8_000);
           const afterBuyVisible = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
           if (afterBuyVisible) {
             await page.locator("#buyOfferDeclineBtn").click();
+            // After declining, turn-end: click "Zug beenden"
+            await page.waitForTimeout(1_000);
+            const endAfterDecline2 = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+            if (endAfterDecline2) await page.locator("#endTurnBtn").click();
+          } else {
+            // No buy offer — either landed on already-owned tile or special tile.
+            // turn-end button may appear.
+            const endVisible = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+            if (endVisible) await page.locator("#endTurnBtn").click();
           }
         }
 

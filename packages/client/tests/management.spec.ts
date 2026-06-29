@@ -48,7 +48,7 @@ async function injectStateRelay(page: Page) {
 }
 
 async function waitForAction(page: Page, timeout = 60_000): Promise<
-  "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout"
+  "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout"
 > {
   try {
     const result = await page.waitForFunction(
@@ -63,13 +63,14 @@ async function waitForAction(page: Page, timeout = 60_000): Promise<
         if (visible("rollBtn")) return "roll";
         if (visible("buyOfferPanel")) return "buy";
         if (visible("ransomBtn")) return "ransom";
+        if (visible("endTurnBtn")) return "endTurn";
         return null;
       },
       undefined,
       { timeout },
     );
     const val = await result.jsonValue() as string | null;
-    return (val ?? "timeout") as "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout";
+    return (val ?? "timeout") as "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout";
   } catch {
     return "timeout";
   }
@@ -122,6 +123,15 @@ test.describe("Phase 2c Management UI", () => {
 
         if (arrived === "ransom") {
           await page.locator("#ransomBtn").click();
+          await page.waitForTimeout(150);
+          // After ransom roll, handle turn-end
+          const endAfterRansom = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+          if (endAfterRansom) await page.locator("#endTurnBtn").click();
+          continue;
+        }
+
+        if (arrived === "endTurn") {
+          await page.locator("#endTurnBtn").click();
           await page.waitForTimeout(150);
           continue;
         }
@@ -202,10 +212,14 @@ test.describe("Phase 2c Management UI", () => {
 
             // Now roll to advance the turn
             await page.locator("#rollBtn").click();
-            await page.waitForTimeout(300);
+            await page.waitForTimeout(8_000); // wait for animation
             // Decline purchase after roll (we already did the mortgage action)
             const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
             if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
+            await page.waitForTimeout(500);
+            // Handle turn-end
+            const endAfterRoll = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+            if (endAfterRoll) await page.locator("#endTurnBtn").click();
             await page.waitForTimeout(150);
             continue;
           }
@@ -213,7 +227,7 @@ test.describe("Phase 2c Management UI", () => {
 
         // Default: roll
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(8_000); // wait for animation
 
         // After roll: buy if we can afford it (state relay check)
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
@@ -236,6 +250,10 @@ test.describe("Phase 2c Management UI", () => {
             await page.locator("#buyOfferDeclineBtn").click();
           }
         }
+        await page.waitForTimeout(500);
+        // Handle turn-end
+        const endDefault = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+        if (endDefault) await page.locator("#endTurnBtn").click();
         await page.waitForTimeout(150);
       }
 

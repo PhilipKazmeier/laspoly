@@ -81,7 +81,7 @@ async function getState(page: Page): Promise<Record<string, unknown> | null> {
   });
 }
 
-type ActionResult = "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout";
+type ActionResult = "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout";
 
 /** Wait for the next actionable state or terminal condition. */
 async function waitForAction(page: Page, timeout = 60_000): Promise<ActionResult> {
@@ -98,6 +98,7 @@ async function waitForAction(page: Page, timeout = 60_000): Promise<ActionResult
         if (vis("rollBtn")) return "roll";
         if (vis("buyOfferPanel")) return "buy";
         if (vis("ransomBtn")) return "ransom";
+        if (vis("endTurnBtn")) return "endTurn";
         return null;
       },
       undefined,
@@ -368,7 +369,17 @@ test.describe("QA Full-Game Playthrough", () => {
             flags.screenshotsTaken.jail = true;
           }
           await page.locator("#ransomBtn").click();
+          await page.waitForTimeout(8_000); // wait for animation
+          const endAfterRansom = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+          if (endAfterRansom) await page.locator("#endTurnBtn").click();
           await page.waitForTimeout(200);
+          continue;
+        }
+
+        // -- Handle turn-end phase --
+        if (arrived === "endTurn") {
+          await page.locator("#endTurnBtn").click();
+          await page.waitForTimeout(150);
           continue;
         }
 
@@ -409,7 +420,11 @@ test.describe("QA Full-Game Playthrough", () => {
             flags.buyPhaseDeclined = true;
             await page.locator("#buyOfferDeclineBtn").click();
           }
-          await page.waitForTimeout(200);
+          await page.waitForTimeout(500);
+          // After buying/declining, handle turn-end
+          const endAfterBuy = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+          if (endAfterBuy) await page.locator("#endTurnBtn").click();
+          await page.waitForTimeout(150);
           continue;
         }
 
@@ -443,6 +458,9 @@ test.describe("QA Full-Game Playthrough", () => {
           flags.screenshotsTaken.dice = true;
         }
 
+        // Wait for full animation (dice + movement)
+        await page.waitForTimeout(7_600);
+
         // If buy offer appeared after roll, handle it
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) {
@@ -470,10 +488,10 @@ test.describe("QA Full-Game Playthrough", () => {
           } else {
             await page.locator("#buyOfferDeclineBtn").click();
           }
-          await page.waitForTimeout(200);
+          await page.waitForTimeout(500);
         }
 
-        // Check for action card that appeared after roll
+        // Check for action card that appeared after roll (now strictly post-animation)
         const acAfterRoll = await page.locator("#actionCardPopup").isVisible().catch(() => false);
         if (acAfterRoll) {
           flags.actionCardPopupSeen = true;
@@ -485,6 +503,9 @@ test.describe("QA Full-Game Playthrough", () => {
           await page.waitForTimeout(300);
         }
 
+        // Handle turn-end phase after roll
+        const endAfterRoll = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+        if (endAfterRoll) await page.locator("#endTurnBtn").click();
         await page.waitForTimeout(150);
       }
 

@@ -50,7 +50,7 @@ async function injectStateRelay(page: Page) {
 async function waitForAction(
   page: Page,
   timeout = 60_000
-): Promise<"roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout"> {
+): Promise<"roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout"> {
   try {
     const r = await page.waitForFunction(() => {
       const vis = (id: string) => {
@@ -63,10 +63,11 @@ async function waitForAction(
       if (vis("rollBtn")) return "roll";
       if (vis("buyOfferPanel")) return "buy";
       if (vis("ransomBtn")) return "ransom";
+      if (vis("endTurnBtn")) return "endTurn";
       return null;
     }, undefined, { timeout });
     const v = await r.jsonValue() as string | null;
-    return (v ?? "timeout") as "roll" | "buy" | "ransom" | "gameover" | "spectator" | "timeout";
+    return (v ?? "timeout") as "roll" | "buy" | "ransom" | "endTurn" | "gameover" | "spectator" | "timeout";
   } catch {
     return "timeout";
   }
@@ -132,15 +133,23 @@ test.describe("UI Overlay Fixes", () => {
         await page.locator("#ransomBtn").click();
       } else if (arrived === "buy") {
         await page.locator("#buyOfferBuyBtn").click();
+      } else if (arrived === "endTurn") {
+        await page.locator("#endTurnBtn").click();
+        await page.waitForTimeout(200);
+        continue; // back to top of loop — now awaiting-roll for next player
       } else {
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(8_000); // wait for animation
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) await page.locator("#buyOfferBuyBtn").click();
       }
       // Dismiss action card if any
       const ac = await page.locator("#actionCardPopup").isVisible().catch(() => false);
       if (ac) await page.locator("#actionCardConfirmBtn").click().catch(() => {});
+      // Handle turn-end after any action
+      await page.waitForTimeout(1_000);
+      const endNow = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+      if (endNow) await page.locator("#endTurnBtn").click();
       await page.waitForTimeout(200);
 
       // Check if we have property rows (panel visible during our turn)
@@ -283,10 +292,14 @@ test.describe("UI Overlay Fixes", () => {
         await page.locator("#ransomBtn").click();
       } else if (arrived === "buy") {
         await page.locator("#buyOfferDeclineBtn").click();
+      } else if (arrived === "endTurn") {
+        await page.locator("#endTurnBtn").click();
+        await page.waitForTimeout(200);
+        continue;
       } else {
         await page.locator("#rollBtn").click();
       }
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(8_000); // wait for animation
       const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
       if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
 
@@ -301,8 +314,15 @@ test.describe("UI Overlay Fixes", () => {
         expect(cardText).not.toMatch(/^\[action/);
         await shot(page, "6-action-card-popup");
         await page.locator("#actionCardConfirmBtn").click().catch(() => {});
+        await page.waitForTimeout(500);
+        // After confirming card, handle turn-end
+        const endAfterCard = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+        if (endAfterCard) await page.locator("#endTurnBtn").click();
         break;
       }
+      // Handle turn-end
+      const endNow = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+      if (endNow) await page.locator("#endTurnBtn").click();
       await page.waitForTimeout(100);
     }
     console.log(`Action card popup seen in own turn: ${cardSeen}`);
@@ -367,14 +387,21 @@ test.describe("UI Overlay Fixes", () => {
         await page.locator("#ransomBtn").click();
       } else if (arrived === "buy") {
         await page.locator("#buyOfferDeclineBtn").click();
+      } else if (arrived === "endTurn") {
+        await page.locator("#endTurnBtn").click();
+        await page.waitForTimeout(150);
+        continue;
       } else {
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(8_000); // wait for animation
         const b = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (b) await page.locator("#buyOfferDeclineBtn").click();
       }
       const ac = await page.locator("#actionCardPopup").isVisible().catch(() => false);
       if (ac) await page.locator("#actionCardConfirmBtn").click().catch(() => {});
+      await page.waitForTimeout(500);
+      const end = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+      if (end) await page.locator("#endTurnBtn").click();
       await page.waitForTimeout(150);
     }
 

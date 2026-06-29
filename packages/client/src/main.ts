@@ -85,14 +85,10 @@ class StateQueue {
     const prev = this.lastProcessed;
     const myId = this.net.playerId;
 
-    // 1. Toasts / popups (UI only — no animation wait).
+    // 1. Board-side event hooks (no animation wait needed here).
     this.board.handleEvents(events);
-    for (const ev of events) {
-      if (ev.key.startsWith("actionCard")) {
-        if (ev.playerId && myId && ev.playerId === myId) this.ui.showActionCard(ev.text);
-        break;
-      }
-    }
+
+    // Special-event toasts can appear right away (not tied to movement).
     for (const ev of events) {
       if (ev.key.startsWith("specialEvent_")) {
         this.ui.showSpecialEventToast(ev.text);
@@ -111,7 +107,11 @@ class StateQueue {
       for (const p of state.players) {
         const pp = prev.players.find((pl) => pl.id === p.id);
         if (!pp) continue;
-        if (p.lastRoll[0] > 0 && (pp.lastRoll[0] !== p.lastRoll[0] || pp.lastRoll[1] !== p.lastRoll[1])) {
+        // Detect a new roll: either die changed AND at least one die is > 0.
+        if (
+          p.lastRoll[0] > 0 &&
+          (pp.lastRoll[0] !== p.lastRoll[0] || pp.lastRoll[1] !== p.lastRoll[1])
+        ) {
           rolledD1 = p.lastRoll[0];
           rolledD2 = p.lastRoll[1];
         }
@@ -123,7 +123,7 @@ class StateQueue {
       }
     }
 
-    // 3. Dice FIRST (cup lift → shake → settle with the rolled value face-up).
+    // (a) Dice FIRST (cup lift → shake → settle with the rolled value face-up).
     //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
       audio.play("dice");
@@ -133,7 +133,7 @@ class StateQueue {
       ]);
     }
 
-    // 4. Movers ONE AT A TIME so bots animate sequentially, never simultaneously.
+    // (b) Movers ONE AT A TIME so bots animate sequentially, never simultaneously.
     //    Safety timeout: 15 s per mover (12 tiles × 120 ms + margin).
     for (const { id, from, to } of movers) {
       this.board.ensureTokenExists(id, state, myId);
@@ -143,14 +143,17 @@ class StateQueue {
       ]);
     }
 
-    // 5. Apply visuals (HUD, board, ownership, displays) only after movement.
+    // (c) After animation: apply visuals, show action-card popup, update HUD.
+    //     Everything in this block is strictly after dice + movement.
+
+    // Apply visuals (HUD, board, ownership, displays).
     this.board.applyVisuals(state, myId);
 
-    // 5a. Active-player highlight (feature #3)
+    // Active-player highlight.
     const activePlayer = state.players[state.currentPlayerIndex];
     this.board.setActivePlayer(activePlayer?.id ?? null);
 
-    // 5b. Sound effects for events
+    // Sound effects for events.
     for (const ev of events) {
       if (ev.key === "bought") { audio.play("buy"); break; }
     }
@@ -164,8 +167,19 @@ class StateQueue {
       if (ev.key === "built") { audio.play("build"); break; }
     }
 
-    // 6. Buy prompt is gated here: ui.updateGame surfaces the buy panel when
-    //    phase === "awaiting-buy", which now happens AFTER the token landed.
+    // Action-card popup: only for the LOCAL player's card, shown HERE (after animation).
+    // Other players' cards go to the log only (via ui.updateGame below).
+    for (const ev of events) {
+      if (ev.key.startsWith("actionCard")) {
+        if (ev.playerId && myId && ev.playerId === myId) {
+          this.ui.showActionCard(ev.text);
+        }
+        break;
+      }
+    }
+
+    // ui.updateGame: surfaces buy panel (phase=awaiting-buy), "Zug beenden" button
+    // (phase=turn-end), and all HUD updates — now strictly after animation.
     this.ui.updateGame(state, events, myId);
 
     this.lastProcessed = state;

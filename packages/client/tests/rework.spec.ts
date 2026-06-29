@@ -88,10 +88,14 @@ test("rework – top-down view readable without glare", async ({ page }) => {
   await startGame(page, "ReworkTop");
 
   await page.locator("#rollBtn").click();
-  await page.waitForTimeout(5_000);
+  await page.waitForTimeout(8_000);
   if (await page.locator("#buyOfferBuyBtn").isVisible().catch(() => false)) {
     await page.locator("#buyOfferBuyBtn").click();
     await page.waitForTimeout(700);
+  }
+  if (await page.locator("#endTurnBtn").isVisible().catch(() => false)) {
+    await page.locator("#endTurnBtn").click();
+    await page.waitForTimeout(500);
   }
 
   const viewBtn = page.locator("#headerViewBtn");
@@ -117,7 +121,7 @@ test("rework – ownership markers + player displays accumulate", async ({ page 
   for (let i = 0; i < 6; i++) {
     if (await page.locator("#rollBtn").isVisible().catch(() => false)) {
       await page.locator("#rollBtn").click();
-      await page.waitForTimeout(4_000);
+      await page.waitForTimeout(8_000); // wait for animation
     }
     if (await page.locator("#buyOfferBuyBtn").isVisible().catch(() => false)) {
       await page.locator("#buyOfferBuyBtn").click();
@@ -125,6 +129,10 @@ test("rework – ownership markers + player displays accumulate", async ({ page 
     }
     if (await page.locator("#actionCardConfirmBtn").isVisible().catch(() => false)) {
       await page.locator("#actionCardConfirmBtn").click().catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    if (await page.locator("#endTurnBtn").isVisible().catch(() => false)) {
+      await page.locator("#endTurnBtn").click();
       await page.waitForTimeout(500);
     }
   }

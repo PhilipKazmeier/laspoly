@@ -26,7 +26,12 @@ test("board pass2 – tokens visible as vehicles on board", async ({ page }) => 
 
   // Let bots move a few turns so tokens spread around the board
   await page.locator("#rollBtn").click();
-  await page.waitForTimeout(6_000); // let bots and animations settle
+  await page.waitForTimeout(8_000); // wait for animation, then handle turn-end
+  // Click "Zug beenden" if it appeared after our roll
+  if (await page.locator("#endTurnBtn").isVisible().catch(() => false)) {
+    await page.locator("#endTurnBtn").click();
+  }
+  await page.waitForTimeout(2_000); // let bots animate
 
   await page.locator("#renderCanvas").screenshot({
     path: path.join(SCREENSHOTS_DIR, "board-pass2-tokens.png"),
@@ -75,16 +80,21 @@ test("board pass2 – chip stacks and deed display visible", async ({ page }) =>
 
   await expect(page.locator("#rollBtn")).toBeVisible({ timeout: 30_000 });
 
-  // Play several turns; buy whenever offered so we accumulate deeds
+  // Play several turns; buy whenever offered so we accumulate deeds.
+  // Also handle turn-end phase ("Zug beenden" button).
   for (let i = 0; i < 12; i++) {
     if (await page.locator("#rollBtn").isVisible()) {
       await page.locator("#rollBtn").click();
-      await page.waitForTimeout(1_500);
+      await page.waitForTimeout(8_000); // wait for dice + movement animation
     }
     if (await page.locator("#buyOfferBuyBtn").isVisible()) {
       await page.locator("#buyOfferBuyBtn").click();
+      await page.waitForTimeout(500);
     }
-    await page.waitForTimeout(1_500);
+    if (await page.locator("#endTurnBtn").isVisible()) {
+      await page.locator("#endTurnBtn").click();
+    }
+    await page.waitForTimeout(500);
   }
 
   await page.screenshot({

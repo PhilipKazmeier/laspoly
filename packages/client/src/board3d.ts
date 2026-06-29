@@ -98,49 +98,61 @@ const CORNER = 150 * SCALE; // ≈ 2.5
 function tileXZ(pos: number): [number, number] {
   if (pos === JAIL_POS) return [0, 0]; // jailed tokens → cage in felt centre
 
-  // Corners
-  if (pos === 0) return [-525 * SCALE, -525 * SCALE]; // GO       bottom-left
-  if (pos === 10) return [525 * SCALE, -525 * SCALE]; // FreePark bottom-right
-  if (pos === 20) return [525 * SCALE, 525 * SCALE]; // Casino   top-right
-  if (pos === 30) return [-525 * SCALE, 525 * SCALE]; // GoJail   top-left
+  // Z is negated vs. the original Java layout so that increasing position
+  // (0→1→…→39) progresses CLOCKWISE as seen from the default camera (which
+  // sits at z≈-30, looking toward the origin).
+  //
+  // Corners:  GO=bottom-left, FreePark=bottom-right, Casino=top-right, GoJail=top-left
+  // "Bottom" of screen = near camera = large +z; "Top" = far = large -z.
+  if (pos === 0) return [-525 * SCALE,  525 * SCALE]; // GO        bottom-left
+  if (pos === 10) return [ 525 * SCALE,  525 * SCALE]; // FreePark  bottom-right
+  if (pos === 20) return [ 525 * SCALE, -525 * SCALE]; // Casino    top-right
+  if (pos === 30) return [-525 * SCALE, -525 * SCALE]; // GoJail    top-left
 
-  // Bottom edge  (pos 1–9):  z fixed, x varies left→right
+  // Bottom edge (pos 1–9):  z=+525, x varies left→right (clockwise)
   if (pos < 10) {
     const x = (-600 + pos * 100 - 50 + 150) * SCALE;
-    return [x, -525 * SCALE];
-  }
-  // Right edge   (pos 11–19): x fixed, z varies top→bottom (in Java +z is "up")
-  if (pos < 20) {
-    const z = (-600 + (pos - 10) * 100 - 50 + 150) * SCALE;
-    return [525 * SCALE, z];
-  }
-  // Top edge     (pos 21–29): z fixed, x varies right→left
-  if (pos < 30) {
-    const x = (600 - (pos - 20) * 100 + 50 - 150) * SCALE;
     return [x, 525 * SCALE];
   }
-  // Left edge    (pos 31–39): x fixed, z varies bottom→top
-  const z = (600 - (pos - 30) * 100 + 50 - 150) * SCALE;
+  // Right edge  (pos 11–19): x=+525, z varies near→far (z decreasing, clockwise)
+  if (pos < 20) {
+    const z = (600 - (pos - 10) * 100 + 50 - 150) * SCALE;
+    return [525 * SCALE, z];
+  }
+  // Top edge    (pos 21–29): z=−525, x varies right→left (clockwise)
+  if (pos < 30) {
+    const x = (600 - (pos - 20) * 100 + 50 - 150) * SCALE;
+    return [x, -525 * SCALE];
+  }
+  // Left edge   (pos 31–39): x=−525, z varies far→near (z increasing, clockwise)
+  const z = (-600 + (pos - 30) * 100 - 50 + 150) * SCALE;
   return [-525 * SCALE, z];
 }
 
-/** Rotation angle (degrees around Y) for a tile at this position (from Board.java). */
+/**
+ * Rotation angle (degrees around Y) for a tile at this position.
+ * Each tile is oriented so that the text label reads from OUTSIDE the board edge,
+ * and the colour bar sits on the INNER edge (toward centre).
+ * After the z-flip (clockwise movement), bottom/top edges swap their angles.
+ */
 function getFieldAngle(pos: number): number {
-  if (pos <= 10) return 0;
-  if (pos <= 20) return 270;
-  if (pos <= 30) return 180;
-  return 90;
+  if (pos <= 10) return 180; // bottom edge → text "up" faces +z (outward, toward camera)
+  if (pos <= 20) return 270; // right edge  → unchanged
+  if (pos <= 30) return 0;   // top edge    → text "up" faces -z (outward, away from camera)
+  return 90;                  // left edge   → unchanged
 }
 
 /**
- * For a tile at `pos`, returns the XZ offset FROM tile centre toward the OUTER
- * edge of the board, so the colour-bar sits on that outer edge.
+ * For a tile at `pos`, returns the XZ unit vector pointing FROM tile centre
+ * toward the OUTER edge of the board.  Used for colour-bar placement and
+ * building/ownership-marker offsets.
+ * After the z-flip (clockwise movement), bottom and top edges swap signs.
  */
 function outerDirection(pos: number): [number, number] {
-  if (pos <= 10) return [0, -1]; // bottom edge  → outer is –z
-  if (pos <= 20) return [1, 0]; //  right edge   → outer is +x
-  if (pos <= 30) return [0, 1]; //  top edge     → outer is +z
-  return [-1, 0]; //              left edge    → outer is –x
+  if (pos <= 10) return [0, 1];  // bottom edge → outer is +z (toward camera/near)
+  if (pos <= 20) return [1, 0];  // right edge  → outer is +x (unchanged)
+  if (pos <= 30) return [0, -1]; // top edge    → outer is -z (away from camera/far)
+  return [-1, 0];                 // left edge   → outer is -x (unchanged)
 }
 
 /**
@@ -1445,10 +1457,29 @@ export class Board3D {
   }
 
   private async initDice(): Promise<void> {
-    // Felt centre is empty except the jail cage (origin) and deck (+4,+4).
-    // Place the dice area in the opposite felt corner so it stays on-screen.
+    // Place the dice area in the felt corner opposite the card deck (+4,+4 in world).
+    // With the z-flip the near corner is at +z, so we use CZ = +3.5 to stay visible.
     const CX = -3.5, CZ = 3.5;
+    // Cup sits at a fixed XZ spot on the felt.  The lift animation moves it straight
+    // up (Y only) and back — it never shifts horizontally.
+    const CUP_BASE_Y = 0.5; // rests on the felt surface
 
+    // Always build a clean procedural cup first (reliable > fancy OBJ).
+    const fallbackCup = MeshBuilder.CreateCylinder(
+      "diceCup",
+      { diameterTop: 1.4, diameterBottom: 0.9, height: 1.8, tessellation: 16 },
+      this.scene
+    );
+    fallbackCup.position.set(CX, CUP_BASE_Y + 0.9, CZ); // y = base + half-height so bottom rests on felt
+    fallbackCup.isPickable = true; // click-to-roll
+    const cupMat = new StandardMaterial("cupMatFb", this.scene);
+    cupMat.diffuseColor = new Color3(0.22, 0.13, 0.05); // dark leather brown
+    cupMat.emissiveColor = new Color3(0.06, 0.03, 0.01);
+    cupMat.specularColor = new Color3(0.3, 0.2, 0.1);
+    fallbackCup.material = cupMat;
+    this.diceCupMesh = fallbackCup;
+
+    // Try to load the OBJ cup; if it works and looks reasonable, replace the procedural one.
     try {
       const cupResult = await SceneLoader.ImportMeshAsync("", "/assets/", "DiceCup.obj", this.scene);
       const cupReal = cupResult.meshes.filter(
@@ -1458,45 +1489,47 @@ export class Board3D {
         ? cupReal[0]!
         : Mesh.MergeMeshes(cupReal, true, true, undefined, false, false);
       if (cup) {
-        const cupMat = new StandardMaterial("cupMat", this.scene);
-        cupMat.diffuseColor = new Color3(0.18, 0.12, 0.06);
-        cupMat.specularColor = new Color3(0.4, 0.3, 0.2);
-        cupMat.emissiveColor = new Color3(0.08, 0.05, 0.02);
-        cup.material = cupMat;
-        // Normalise raw cup (~0.9 units) to a ~1.3-unit cup.
         const ext = cup.getBoundingInfo().boundingBox.extendSize;
         const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
-        cup.scaling.setAll(1.3 / maxDim);
-        cup.name = "diceCup";
-        cup.isPickable = true; // click-to-roll
-        cup.position.set(CX, 0.6, CZ);
-        this.diceCupMesh = cup;
+        // Only accept the OBJ if it has reasonable geometry.
+        if (maxDim > 0.01 && maxDim < 50) {
+          const objMat = new StandardMaterial("cupMatObj", this.scene);
+          objMat.diffuseColor = new Color3(0.18, 0.12, 0.06);
+          objMat.specularColor = new Color3(0.4, 0.3, 0.2);
+          objMat.emissiveColor = new Color3(0.08, 0.05, 0.02);
+          cup.material = objMat;
+          // Scale to ~1.8 units tall (clearly bigger than a single die).
+          cup.scaling.setAll(1.8 / maxDim);
+          cup.name = "diceCupObj";
+          cup.isPickable = true;
+          cup.position.set(CX, CUP_BASE_Y + 0.9, CZ);
+          // Retire the procedural fallback and use the OBJ.
+          fallbackCup.dispose();
+          this.diceCupMesh = cup;
+        } else {
+          cup.dispose();
+        }
       } else {
         throw new Error("no cup mesh");
       }
     } catch {
-      const fallbackCup = MeshBuilder.CreateCylinder(
-        "diceCup",
-        { diameterTop: 1.0, diameterBottom: 0.7, height: 1.2, tessellation: 14 },
-        this.scene
-      );
-      fallbackCup.position.set(CX, 0.6, CZ);
-      fallbackCup.isPickable = true; // click-to-roll
-      const cupMat = new StandardMaterial("cupMatFb", this.scene);
-      cupMat.diffuseColor = new Color3(0.2, 0.12, 0.05);
-      fallbackCup.material = cupMat;
-      this.diceCupMesh = fallbackCup;
+      // Keep procedural cup — already assigned above.
     }
 
-    // Pip dice — built procedurally as cubes whose six faces carry real pip
-    // patterns (1–6 dots). No OBJ / number-overlay needed.
+    // Ensure the cup's name is "diceCup" so the click picker finds it.
+    if (this.diceCupMesh) this.diceCupMesh.name = "diceCup";
+
+    // Pip dice — built procedurally as cubes with real pip-face textures.
+    // They start HIDDEN below the felt (y < 0) and only become visible after
+    // the cup lifts away.
     const DIE_SIZE = 0.45;
     for (let d = 0; d < 2; d++) {
       const dx = CX + (d === 0 ? -0.3 : 0.3);
       const dz = CZ + (d === 0 ? -0.12 : 0.12);
       const die = this.createPipDie(`die_${d}`, DIE_SIZE);
       die.isPickable = false;
-      die.position.set(dx, 0.25, dz);
+      // Hide below the felt until the cup lifts away.
+      die.position.set(dx, -2, dz);
       if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
     }
   }
@@ -1584,17 +1617,23 @@ export class Board3D {
 
     const die1 = this.dieMesh1;
     const die2 = this.dieMesh2;
+
+    // Fixed XZ position of the cup — the cup ONLY moves up/down, never sideways.
+    const fixedCupX = cup.position.x;
+    const fixedCupZ = cup.position.z;
+    // baseY is the resting Y (bottom of cup on the felt).
     const baseY = cup.position.y;
-    const LIFT = 1.5;
-    const SHAKE_CYCLES = 4;
-    const SHAKE_AMP = 0.25;
+    const LIFT = 2.0;          // how far the cup rises (Y only)
+    const SHAKE_CYCLES = 5;
+    const SHAKE_AMP = 0.28;
 
     let phase: "lift" | "shake" | "descend" | "settle" = "lift";
     let elapsed = 0;
     let lastTime = performance.now();
 
-    if (die1) die1.position.y = -1;
-    if (die2) die2.position.y = -1;
+    // Keep dice hidden below the felt while the cup is up.
+    if (die1) die1.position.y = -2;
+    if (die2) die2.position.y = -2;
 
     const obs = this.scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
@@ -1604,41 +1643,43 @@ export class Board3D {
       if (phase === "lift") {
         elapsed += dt;
         const t = Math.min(elapsed / 300, 1);
-        cup.position.y = baseY + LIFT * t;
+        // Only Y changes — X/Z stay fixed at the cup's rest spot.
+        cup.position.set(fixedCupX, baseY + LIFT * t, fixedCupZ);
         cup.rotation.z = Math.sin(t * Math.PI * 2) * SHAKE_AMP * 0.5;
         if (t >= 1) { elapsed = 0; phase = "shake"; }
       } else if (phase === "shake") {
         elapsed += dt;
         const t = elapsed / (100 * SHAKE_CYCLES);
+        cup.position.set(fixedCupX, baseY + LIFT, fixedCupZ); // stay at peak Y, no drift
         cup.rotation.z = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_AMP;
         if (elapsed >= 100 * SHAKE_CYCLES * 4) { elapsed = 0; phase = "descend"; }
       } else if (phase === "descend") {
         elapsed += dt;
         const t = Math.min(elapsed / 300, 1);
-        cup.position.y = baseY + LIFT * (1 - t);
+        cup.position.set(fixedCupX, baseY + LIFT * (1 - t), fixedCupZ); // Y only, X/Z fixed
         cup.rotation.z = 0;
         if (t >= 1) {
           elapsed = 0;
           phase = "settle";
           // Cup vanishes; the two pip dice are revealed lying on the felt,
-          // oriented (in the settle phase) so the rolled value faces up.
+          // oriented so the rolled value faces up — dice were hidden until now.
           this.hideCup();
         }
       } else {
-        const cx = cup.position.x;
-        const cz = cup.position.z;
-        if (die1) { die1.position.set(cx - 0.3, 0.25, cz - 0.12); this.orientDie(die1, d1); }
-        if (die2) { die2.position.set(cx + 0.3, 0.25, cz + 0.12); this.orientDie(die2, d2); }
+        // "settle" phase: dice drop onto the felt and bounce to a stop.
+        // Dice appear at the cup's fixed XZ, spread slightly apart.
+        if (die1) { die1.position.set(fixedCupX - 0.3, 0.25, fixedCupZ - 0.12); this.orientDie(die1, d1); }
+        if (die2) { die2.position.set(fixedCupX + 0.3, 0.25, fixedCupZ + 0.12); this.orientDie(die2, d2); }
         elapsed += dt;
         const decay = 1 - Math.min(elapsed / 300, 1);
         const bounce = Math.abs(Math.sin((elapsed / 80) * Math.PI)) * 0.15 * decay;
         if (die1) die1.position.y = 0.25 + bounce;
         if (die2) die2.position.y = 0.25 + bounce;
         if (elapsed >= 400) {
-          // No number overlay — the dice pips themselves show the rolled value.
+          // Dice have settled — pips show the rolled value (no number overlay).
           this.scene.onBeforeRenderObservable.remove(obs);
           this.diceAnimating = false;
-          // Dice have settled — now release any token moves that were waiting,
+          // Release any token moves that were waiting for the dice to settle,
           // so figures only walk AFTER the dice animation completes.
           for (const [pid, move] of this.movePending) {
             this.enqueueMove(pid, move.from, move.to);

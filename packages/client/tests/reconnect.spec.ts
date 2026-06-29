@@ -86,7 +86,7 @@ test("Fix 1 — create room with 1 bot (not 3) and start successfully", async ({
         };
         const govEl = document.getElementById("gameOverBanner");
         if (govEl && govEl.style.display === "flex") return true;
-        return visible("rollBtn") || visible("buyOfferPanel") || visible("ransomBtn") || visible("spectatorBanner");
+        return visible("rollBtn") || visible("buyOfferPanel") || visible("ransomBtn") || visible("endTurnBtn") || visible("spectatorBanner");
       },
       undefined,
       { timeout: 40_000 },

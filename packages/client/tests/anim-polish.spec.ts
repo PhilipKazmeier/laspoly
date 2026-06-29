@@ -223,18 +223,24 @@ test("anim: consecutive bot turns animate sequentially", async ({ page }) => {
 
   // After rolling, the human player's state is processed. If the player lands on
   // an unowned property, the game waits for a buy/decline before bots proceed.
-  // Auto-decline any buy offer so bots can continue, and repeat for a second roll.
+  // After buying/declining or landing on a special tile, turn-end phase appears.
+  // Auto-handle buy/endTurn so bots can continue, and repeat for a second roll.
   for (let round = 0; round < 2; round++) {
-    // Wait up to 6 s for a buy offer or for bots to start rolling.
-    await page.waitForTimeout(6_000);
+    // Wait up to 8 s for animation to complete and state to settle.
+    await page.waitForTimeout(8_000);
     const buyVisible = await page.locator("#buyOfferBuyBtn").isVisible().catch(() => false);
     if (buyVisible) {
-      // Decline so the game moves on to bot turns.
+      // Decline so the game moves on.
       const declineBtn = page.locator("#buyOfferDeclineBtn");
       const declineVisible = await declineBtn.isVisible().catch(() => false);
       if (declineVisible) await declineBtn.click();
+      await page.waitForTimeout(1_000);
     }
+    // After declining (or no buy), handle turn-end.
+    const endVisible = await page.locator("#endTurnBtn").isVisible().catch(() => false);
+    if (endVisible) await page.locator("#endTurnBtn").click();
     // Also click roll if it's visible (bots may have finished and it's our turn again).
+    await page.waitForTimeout(500);
     const rollVisible = await page.locator("#rollBtn").isVisible().catch(() => false);
     if (rollVisible && round === 1) await page.locator("#rollBtn").click();
   }
