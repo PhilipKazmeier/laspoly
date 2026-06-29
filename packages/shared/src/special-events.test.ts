@@ -322,28 +322,15 @@ describe('specialEvents: jackpot', () => {
     const casinoPos = board.tiles.findIndex(t => t.type === 'casino');
     if (casinoPos < 0) return;
 
-    // We need a casino win: player lands on casino tile while rolling doubles.
-    // Strategy: find a seed where the first roll is doubles AND the dice sum
-    // lands the player on casinoPos from (casinoPos - sum + 40) % 40.
-    // After createGame draws 1 RNG value (firstEvent), the next two are d1/d2.
-
-    let doubleSeed: number | null = null;
-    let doubleSum = 0;
-    for (let seed = 0; seed < 500; seed++) {
-      const tmp = twoPlayers(seed);
-      const rng = { seed: tmp.rng.seed };
-      const d1 = nextInt(rng, 1, 6);
-      const d2 = nextInt(rng, 1, 6);
-      if (d1 === d2) {
-        doubleSeed = seed;
-        doubleSum = d1 + d2;
-        break;
-      }
-    }
-    if (doubleSeed === null) return; // extremely unlikely
-
-    // Place player A so that rolling doubleSum lands them on the casino
-    const startPos = ((casinoPos - doubleSum) % 40 + 40) % 40;
+    // Fix 5: casino now rolls FRESH dice after landing. We need a seed where:
+    //   1. Movement roll lands player on casinoPos (any sum is fine)
+    //   2. The subsequent 2 RNG draws (casino dice) are doubles → casino win.
+    // RNG order: firstEvent(1 draw), move_d1, move_d2, casino_d1, casino_d2.
+    // Pre-computed: seed=60 moves 2+2=4 from pos 16 → casino, then casino=4+4 (doubles, not 6).
+    // startPos = 16, seed = 60.
+    const doubleSeed = 60;
+    const moveSum = 4; // 2+2
+    const startPos = ((casinoPos - moveSum) % 40 + 40) % 40; // 20-4=16
 
     let base = twoPlayers(doubleSeed);
     base = structuredClone(base);

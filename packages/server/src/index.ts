@@ -282,42 +282,47 @@ function scheduleBotSteps(room: GameRoom, delayMs = 700): void {
     if (!room.state || room.state.phase === "finished") return;
     if (!room.currentIsBot()) return;
 
-    const cp = currentPlayer(room.state!);
-    const cmd = botDecide(room.state!);
-    const result = applyCommand(room.state!, cmd);
-    room.state = result.state;
+    try {
+      const cp = currentPlayer(room.state!);
+      const cmd = botDecide(room.state!);
+      const result = applyCommand(room.state!, cmd);
+      room.state = result.state;
 
-    log(`room:${room.id} ${cp.name} (bot) → ${cmd.type}`);
+      log(`room:${room.id} ${cp.name} (bot) → ${cmd.type}`);
 
-    broadcastState(room, result.events);
+      broadcastState(room, result.events);
 
-    if (room.state.phase === "finished" && room.state.winnerId) {
-      const winner = room.state.players.find((p) => p.id === room.state!.winnerId);
-      if (winner) {
-        log(`room:${room.id} game over — winner: ${winner.name}`);
-        broadcastToRoom(room, { t: "gameOver", winnerId: winner.id, winnerName: winner.name });
+      if (room.state.phase === "finished" && room.state.winnerId) {
+        const winner = room.state.players.find((p) => p.id === room.state!.winnerId);
+        if (winner) {
+          log(`room:${room.id} game over — winner: ${winner.name}`);
+          broadcastToRoom(room, { t: "gameOver", winnerId: winner.id, winnerName: winner.name });
+        }
+        // Disassociate all connections from the finished room and clean up
+        for (const [, rcs] of getRoomConns(room.id)) {
+          rcs.roomId = null;
+          rcs.playerId = null;
+        }
+        rooms.delete(room.id);
+        broadcastRoomList();
+        return;
       }
-      // Disassociate all connections from the finished room and clean up
-      for (const [, rcs] of getRoomConns(room.id)) {
-        rcs.roomId = null;
-        rcs.playerId = null;
+
+      // Log notable events
+      for (const ev of result.events) {
+        if (ev.key === "went_to_jail") log(`room:${room.id} ${cp.name} → jail`);
+        if (ev.key === "bankrupt") log(`room:${room.id} ${cp.name} went bankrupt`);
       }
-      rooms.delete(room.id);
-      broadcastRoomList();
-      return;
-    }
 
-    // Log notable events
-    for (const ev of result.events) {
-      if (ev.key === "went_to_jail") log(`room:${room.id} ${cp.name} → jail`);
-      if (ev.key === "bankrupt") log(`room:${room.id} ${cp.name} went bankrupt`);
-    }
-
-    if (room.currentIsBot()) {
-      scheduleBotSteps(room, delayMs);
-    } else {
-      // Human's turn now — start the turn timer
-      scheduleTurnTimer(room);
+      if (room.currentIsBot()) {
+        scheduleBotSteps(room, delayMs);
+      } else {
+        // Human's turn now — start the turn timer
+        scheduleTurnTimer(room);
+      }
+    } catch (err) {
+      log(`room:${room.id} bot step error: ${err instanceof Error ? err.message : String(err)} — rescheduling`);
+      scheduleBotSteps(room, delayMs * 2);
     }
   }, delayMs);
 }
@@ -727,15 +732,17 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (!isObj(msg.settings)) throw new Error("settings must be an object");
       const s = msg.settings;
       const settings: import("@laspoly/shared").GameSettings = {};
+      const MULT_MIN = 0.25;
+      const MULT_MAX = 5;
       if (s["startingCapitalMult"] !== undefined) {
-        if (typeof s["startingCapitalMult"] !== "number" || s["startingCapitalMult"] <= 0)
-          throw new Error("startingCapitalMult must be a positive number");
-        settings.startingCapitalMult = s["startingCapitalMult"] as number;
+        if (typeof s["startingCapitalMult"] !== "number" || !Number.isFinite(s["startingCapitalMult"] as number))
+          throw new Error("startingCapitalMult must be a finite number");
+        settings.startingCapitalMult = Math.min(MULT_MAX, Math.max(MULT_MIN, s["startingCapitalMult"] as number));
       }
       if (s["buildingCostMult"] !== undefined) {
-        if (typeof s["buildingCostMult"] !== "number" || s["buildingCostMult"] <= 0)
-          throw new Error("buildingCostMult must be a positive number");
-        settings.buildingCostMult = s["buildingCostMult"] as number;
+        if (typeof s["buildingCostMult"] !== "number" || !Number.isFinite(s["buildingCostMult"] as number))
+          throw new Error("buildingCostMult must be a finite number");
+        settings.buildingCostMult = Math.min(MULT_MAX, Math.max(MULT_MIN, s["buildingCostMult"] as number));
       }
       if (s["botDifficulty"] !== undefined) {
         if (!["easy", "normal", "hard"].includes(s["botDifficulty"] as string))
@@ -759,6 +766,8 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       log(`room:${room.id} restarted (seed:${newSeed})`);
       broadcastState(room, []);
       broadcastRoomList();
+      if (room.currentIsBot()) scheduleBotSteps(room);
+      else scheduleTurnTimer(room);
       break;
     }
 

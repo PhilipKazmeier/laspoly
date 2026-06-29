@@ -1,5 +1,5 @@
 import { getBoard, groupMembers, mortgageValue } from "./board.js";
-import { currentPlayer, legalCommands } from "./engine.js";
+import { buildingChargeCost, currentPlayer, legalCommands } from "./engine.js";
 import type { Command, GameState } from "./types.js";
 
 /**
@@ -105,12 +105,14 @@ export function botDecide(state: GameState): Command {
         const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
         if (b.hotel || b.factory) continue;
         if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {
-          if (p.money - tile.hotelCost >= threshold) {
+          const cost = buildingChargeCost(tile, "hotel", state);
+          if (p.money - cost >= threshold) {
             return { type: "BUILD", pos, building: "hotel" };
           }
         }
         if (b.houses < 4 && canBuildHouseAt(state, board, pos)) {
-          if (p.money - tile.houseCost >= threshold) {
+          const cost = buildingChargeCost(tile, "house", state);
+          if (p.money - cost >= threshold) {
             return { type: "BUILD", pos, building: "house" };
           }
         }
@@ -193,14 +195,16 @@ export function botDecide(state: GameState): Command {
 
       // Hotel upgrade: validate with engine-mirrored check
       if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {
-        if (p.money - tile.hotelCost >= threshold) {
+        const cost = buildingChargeCost(tile, "hotel", state);
+        if (p.money - cost >= threshold) {
           return { type: "BUILD", pos, building: "hotel" };
         }
       }
 
       // House: validate with engine-mirrored check
       if (b.houses < 4 && canBuildHouseAt(state, board, pos)) {
-        if (p.money - tile.houseCost >= threshold) {
+        const cost = buildingChargeCost(tile, "house", state);
+        if (p.money - cost >= threshold) {
           return { type: "BUILD", pos, building: "house" };
         }
       }

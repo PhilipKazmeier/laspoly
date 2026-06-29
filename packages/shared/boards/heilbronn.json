@@ -50,16 +50,16 @@
       "group": "brown",
       "price": 60,
       "mortgage": 30,
-      "houseCost": 30,
-      "hotelCost": 30,
+      "houseCost": 50,
+      "hotelCost": 50,
       "factoryCost": 60,
       "factoryRevenue": 230,
       "rent": [
         2,
         10,
         30,
-        90,
-        170,
+        70,
+        120,
         260
       ]
     },
@@ -192,16 +192,16 @@
       "group": "violet",
       "price": 130,
       "mortgage": 65,
-      "houseCost": 65,
-      "hotelCost": 65,
+      "houseCost": 100,
+      "hotelCost": 100,
       "factoryCost": 130,
       "factoryRevenue": 750,
       "rent": [
         10,
         50,
         100,
-        300,
-        550,
+        200,
+        380,
         850
       ]
     },
@@ -334,16 +334,16 @@
       "group": "lightgreen",
       "price": 220,
       "mortgage": 110,
-      "houseCost": 110,
-      "hotelCost": 110,
+      "houseCost": 175,
+      "hotelCost": 175,
       "factoryCost": 220,
       "factoryRevenue": 1350,
       "rent": [
         18,
         90,
         180,
-        540,
-        990,
+        300,
+        480,
         1530
       ]
     },
@@ -476,16 +476,16 @@
       "group": "darkviolet",
       "price": 300,
       "mortgage": 150,
-      "houseCost": 150,
-      "hotelCost": 150,
+      "houseCost": 250,
+      "hotelCost": 250,
       "factoryCost": 300,
       "factoryRevenue": 1950,
       "rent": [
         26,
         130,
         260,
-        780,
-        1430,
+        380,
+        520,
         2210
       ]
     },

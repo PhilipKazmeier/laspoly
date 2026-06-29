@@ -736,86 +736,65 @@ describe("tax tile", () => {
 // ---------------------------------------------------------------------------
 
 describe("casino tile (pos 20)", () => {
-  it("non-doubles win nothing", () => {
-    // Put A at pos 13, need sum=7 (non-doubles) to land on 20
-    let seedF: number | null = null;
-    for (let s = 0; s < 1000; s++) {
-      const rng = makeRng(s);
-      nextInt(rng, 0, 5); // skip firstEvent draw
-      const d1 = rollDie(rng);
-      const d2 = rollDie(rng);
-      if (d1 + d2 === 7 && d1 !== d2) { seedF = s; break; }
-    }
-    if (seedF === null) throw new Error("No seed for sum=7 non-doubles");
+  // Since Fix 5: landing on the casino triggers a FRESH dice roll whose result
+  // determines the payout (not the movement roll). Seeds are pre-computed to
+  // produce a specific movement roll that lands on pos 20, followed by casino
+  // dice (the next 2 RNG draws) that produce the desired outcome.
+  //
+  // Seed search (RNG order: firstEvent, move_d1, move_d2, casino_d1, casino_d2):
+  //   no-win:          seed=5,    move=5+2=7 (non-doubles), casino=4+1 (non-doubles)
+  //   non-6 doubles:   seed=60,   move=2+2=4,              casino=4+4
+  //   6-6 doubles:     seed=2904, move=6+6=12,             casino=6+6
 
-    const gs: GameState = structuredClone(twoPlayers(seedF));
-    gs.players[0]!.position = 13;
+  it("non-doubles casino roll wins nothing", () => {
+    // seed=5: move 5+2=7 from pos 13 → lands 20; casino roll 4+1 (non-doubles) → no win
+    const gs: GameState = structuredClone(twoPlayers(5));
+    gs.players[0]!.position = 13; // 13+7=20
     gs.players[0]!.money = 1300;
     gs.casinoPool = 1200;
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
-    if (state.players[0]!.position === 20) {
-      expect(state.players[0]!.money).toBe(1300); // no win
-      expect(state.casinoPool).toBe(1200);
-    }
+    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(state.players[0]!.position).toBe(20);
+    expect(state.players[0]!.money).toBe(1300); // no win
+    expect(state.casinoPool).toBe(1200);
+    expect(events.some((e) => e.key === "casinoNoWin")).toBe(true);
+    expect(events.some((e) => e.key === "casinoRoll")).toBe(true);
   });
 
-  it("doubles (not 6-6) pays doubleShare (0.2) of pool", () => {
-    // Find a seed that gives non-6 doubles (e.g. 2+2=4) from pos 16 to land on 20
-    let seedF: number | null = null;
-    let d1F = 0, d2F = 0;
-    for (let s = 0; s < 1000; s++) {
-      const rng = makeRng(s);
-      nextInt(rng, 0, 5); // skip firstEvent draw
-      const d1 = rollDie(rng);
-      const d2 = rollDie(rng);
-      if (d1 === d2 && d1 !== 6 && d1 + d2 === 4) { seedF = s; d1F = d1; d2F = d2; break; }
-    }
-    if (seedF === null) throw new Error("No seed for 2+2 doubles");
-
-    const gs: GameState = structuredClone(twoPlayers(seedF));
+  it("doubles (not 6-6) casino roll pays doubleShare (0.2) of pool", () => {
+    // seed=60: move 2+2=4 from pos 16 → lands 20; casino roll 4+4 (doubles, not 6) → win
+    const gs: GameState = structuredClone(twoPlayers(60));
     gs.players[0]!.position = 16; // 16+4=20
     gs.players[0]!.money = 1300;
     gs.casinoPool = 1200;
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
-    if (state.players[0]!.position === 20) {
-      const share = Math.floor(1200 * 0.2); // 240 (doubleShare=0.2, was 0.25)
-      expect(state.players[0]!.money).toBe(1300 + share);
-      expect(state.casinoPool).toBe(1200 - share);
-    }
+    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(state.players[0]!.position).toBe(20);
+    const share = Math.floor(1200 * 0.2); // 240 (doubleShare=0.2)
+    expect(state.players[0]!.money).toBe(1300 + share);
+    expect(state.casinoPool).toBe(1200 - share);
+    expect(events.some((e) => e.key === "casinoWin")).toBe(true);
   });
 
-  it("doubles 6-6 pays sixShare (0.35) of pool", () => {
-    // Find a seed that gives 6+6 from some position to land on 20
-    // 6+6=12, so pos 8 would work (8+12=20)
-    let seedF: number | null = null;
-    for (let s = 0; s < 5000; s++) {
-      const rng = makeRng(s);
-      nextInt(rng, 0, 5); // skip firstEvent draw
-      const d1 = rollDie(rng);
-      const d2 = rollDie(rng);
-      if (d1 === 6 && d2 === 6) { seedF = s; break; }
-    }
-    if (seedF === null) throw new Error("No seed for 6+6");
-
-    const gs: GameState = structuredClone(twoPlayers(seedF));
+  it("6-6 casino roll pays sixShare (0.35) of pool", () => {
+    // seed=2904: move 6+6=12 from pos 8 → lands 20; casino roll 6+6 → sixShare win
+    const gs: GameState = structuredClone(twoPlayers(2904));
     gs.players[0]!.position = 8; // 8+12=20
     gs.players[0]!.money = 1300;
     gs.casinoPool = 1200;
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
 
-    const { state } = applyCommand(gs, { type: "ROLL_DICE" });
-    if (state.players[0]!.position === 20) {
-      const share = Math.floor(1200 * 0.35); // 420 (sixShare=0.35, was 0.5)
-      expect(state.players[0]!.money).toBe(1300 + share);
-      expect(state.casinoPool).toBe(1200 - share);
-    }
+    const { state, events } = applyCommand(gs, { type: "ROLL_DICE" });
+    expect(state.players[0]!.position).toBe(20);
+    const share = Math.floor(1200 * 0.35); // 420 (sixShare=0.35)
+    expect(state.players[0]!.money).toBe(1300 + share);
+    expect(state.casinoPool).toBe(1200 - share);
+    expect(events.some((e) => e.key === "casinoWin")).toBe(true);
   });
 });
 

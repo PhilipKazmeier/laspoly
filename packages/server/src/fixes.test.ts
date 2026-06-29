@@ -229,3 +229,39 @@ describe("Fix 4 — specialEvent complete sentences in both locales", () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Fix 5 — bot colours/figures are unique across all players (incl. bots)
+// ---------------------------------------------------------------------------
+describe("Fix 5 — bot colours and figures are all distinct after start()", () => {
+  it("1 human + 5 bots all have unique colours and figureIndices", () => {
+    const room = new GameRoom("Test", BOARD, 5);
+    room.addHuman("Alice");
+    room.start(1);
+    const players = room.players;
+    expect(players).toHaveLength(6);
+
+    const colors = players.map((p) => p.color);
+    const figures = players.map((p) => p.figureIndex);
+
+    // All colours must be distinct
+    expect(new Set(colors).size).toBe(6);
+    // All figureIndices must be distinct
+    expect(new Set(figures).size).toBe(6);
+  });
+
+  it("multiple human players also get distinct defaults", () => {
+    const room = new GameRoom("Test", BOARD, 2);
+    room.addHuman("Alice");
+    room.addHuman("Bob");
+    room.addHuman("Carol");
+    room.start(1);
+    const players = room.players;
+    expect(players).toHaveLength(5); // 3 humans + 2 bots, capped at min(6, total)
+
+    const colors = players.map((p) => p.color);
+    const figures = players.map((p) => p.figureIndex);
+    expect(new Set(colors).size).toBe(players.length);
+    expect(new Set(figures).size).toBe(players.length);
+  });
+});

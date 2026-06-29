@@ -69,18 +69,18 @@ export class GameRoom {
     this.botCount = botCount;
   }
 
-  /** Returns the first color not already taken by a human player. */
+  /** Returns the first color not already taken by any player (human or bot). */
   private _nextFreeColor(): string {
-    const taken = new Set(this.players.filter((p) => !p.isBot).map((p) => p.color));
+    const taken = new Set(this.players.map((p) => p.color));
     for (const c of FIGURE_COLORS) {
       if (!taken.has(c)) return c;
     }
     return FIGURE_COLORS[this.players.length % FIGURE_COLORS.length]!;
   }
 
-  /** Returns the first figureIndex not already taken by a human player. */
+  /** Returns the first figureIndex not already taken by any player (human or bot). */
   private _nextFreeFigureIndex(): number {
-    const taken = new Set(this.players.filter((p) => !p.isBot).map((p) => p.figureIndex));
+    const taken = new Set(this.players.map((p) => p.figureIndex));
     for (let i = 0; i < FIGURE_COUNT; i++) {
       if (!taken.has(i)) return i;
     }

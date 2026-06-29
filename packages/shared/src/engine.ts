@@ -202,6 +202,32 @@ function isInPendingSwap(state: GameState, pos: number): boolean {
   return s.give.props.includes(pos) || s.receive.props.includes(pos);
 }
 
+// ---- building cost helper -------------------------------------------------
+
+/**
+ * Returns the actual cost charged by the engine to build `kind` on `tile` given
+ * the current game state (respects buildingCostMult and the buildingSale event).
+ * Used by both the BUILD handler and bot.ts so the bot gates itself on the real cost.
+ */
+export function buildingChargeCost(
+  tile: StreetTile,
+  kind: "house" | "hotel" | "factory",
+  state: GameState,
+): number {
+  const isSale = state.activeEvent?.id === 'buildingSale';
+  if (kind === "house") {
+    const base = isSale ? Math.floor(tile.houseCost / 2) : tile.houseCost;
+    return Math.round(base * state.buildingCostMult);
+  }
+  if (kind === "hotel") {
+    const base = isSale ? Math.floor(tile.hotelCost / 2) : tile.hotelCost;
+    return Math.round(base * state.buildingCostMult);
+  }
+  // factory
+  const base = isSale ? Math.floor(tile.factoryCost / 2) : tile.factoryCost;
+  return Math.round(base * state.buildingCostMult);
+}
+
 // ---- building validation --------------------------------------------------
 
 function canConstructHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
@@ -539,6 +565,11 @@ function applyActionCard(
       else if (curPos < 25) nextStation = 25;
       else nextStation = 35;
       events.push({ key: "actionCardNextStation", params: { player: player.name }, playerId: player.id });
+      // Award GO-pass if wrapping forward past GO (curPos >= 35, nextStation = 5)
+      if (nextStation < curPos) {
+        player.money += board.rules.goPassMoney;
+        events.push({ key: "goPassed", params: { player: player.name, amount: board.rules.goPassMoney }, playerId: player.id });
+      }
       teleportPlayer(state, board, player, nextStation, events);
       resolveLanding(state, board, player, events);
       break;
@@ -641,8 +672,13 @@ function drawActionCard(
 // ---- movement helpers -----------------------------------------------------
 
 /**
- * Teleport player to an absolute position, crossing GO if targetPos < fromPos.
+ * Teleport player to an absolute position.
  * Does NOT call resolveLanding.
+ * Does NOT award GO-pass money — action-card teleports should not grant GO
+ * for backward jumps (e.g. move-to-casino at pos 20 from pos 30 is a backward
+ * jump, not a real clockwise lap of the board). Callers that genuinely cross GO
+ * going forward (e.g. move-next-station wrapping past 0) must award GO themselves
+ * if desired, or use moveBy instead.
  */
 function teleportPlayer(
   state: GameState,
@@ -651,13 +687,7 @@ function teleportPlayer(
   targetPos: number,
   events: GameEvent[],
 ): void {
-  const from = player.position;
   player.position = targetPos;
-  if (targetPos < from) {
-    // wrapped around, passed GO
-    player.money += board.rules.goPassMoney;
-    events.push({ key: "goPassed", params: { player: player.name, amount: board.rules.goPassMoney }, playerId: player.id });
-  }
   const tile = tileAt(board, targetPos);
   events.push({ key: "moved", params: { player: player.name, tile: tile.name, pos: targetPos }, playerId: player.id });
 }
@@ -743,14 +773,21 @@ function resolveLanding(
 }
 
 function resolveCasino(state: GameState, board: BoardDefinition, player: PlayerState, events: GameEvent[]): void {
-  const [d1, d2] = player.lastRoll;
-  if (d1 >= 1 && d1 === d2) {
+  // Roll a fresh pair of dice to determine casino luck ("roll again to determine your luck").
+  // This makes the casino outcome independent of the movement roll and triggers a
+  // second dice animation on the client.
+  const cd1 = rollDie(state.rng);
+  const cd2 = rollDie(state.rng);
+  player.lastRoll = [cd1, cd2];
+  events.push({ key: 'casinoRoll', params: { player: player.name, d1: cd1, d2: cd2, sum: cd1 + cd2 }, playerId: player.id });
+
+  if (cd1 === cd2) {
     // Read tunable payout fractions from board rules (with pre-tuning fallback).
     // Before 2026-06 tuning: sixShare=0.5, doubleShare=0.25 caused 52.9% of wins
     // to exceed the winner's cash — too swingy. Now sixShare=0.35, doubleShare=0.2.
     const sixShare = board.rules.casino?.sixShare ?? 0.5;
     const doubleShare = board.rules.casino?.doubleShare ?? 0.25;
-    const fraction = d1 === 6 ? sixShare : doubleShare;
+    const fraction = cd1 === 6 ? sixShare : doubleShare;
     const rawShare = Math.floor(state.casinoPool * fraction);
     const share = state.activeEvent?.id === 'jackpot'
       ? Math.floor(rawShare * 1.5)
@@ -758,9 +795,9 @@ function resolveCasino(state: GameState, board: BoardDefinition, player: PlayerS
     const actualShare = Math.min(share, state.casinoPool); // never exceed pool
     player.money += actualShare;
     state.casinoPool -= actualShare;
-    events.push({ key: 'casinoWin', params: { player: player.name, amount: actualShare }, playerId: player.id });
+    events.push({ key: 'casinoWin', params: { player: player.name, amount: actualShare, d1: cd1, d2: cd2 }, playerId: player.id });
   } else {
-    events.push({ key: 'casinoNoWin', params: { player: player.name }, playerId: player.id });
+    events.push({ key: 'casinoNoWin', params: { player: player.name, d1: cd1, d2: cd2 }, playerId: player.id });
   }
 }
 
@@ -937,6 +974,10 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       p.money -= board.rules.ransomCost;
       p.inJail = false;
       p.jailTurns = 0;
+      // Reset position to 0 (Just Visiting) so the subsequent ROLL_DICE moveBy
+      // starts from a normal position, not JAIL_POS=40, which would falsely trigger
+      // the GO-pass bonus (to < from whenever the roll didn't wrap past 40).
+      p.position = 0;
       events.push({ key: "paidRansom", params: { player: p.name, amount: board.rules.ransomCost }, playerId: p.id });
       // player still rolls this turn (now a normal roll)
       break;
@@ -989,20 +1030,14 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
 
       if (command.building === 'house') {
         if (!canConstructHouse(state, board, pos)) throw new Error('Cannot build house here (even-build rule or other restriction)');
-        const baseCost = state.activeEvent?.id === 'buildingSale'
-          ? Math.floor(st.houseCost / 2)
-          : st.houseCost;
-        const cost = Math.round(baseCost * state.buildingCostMult);
+        const cost = buildingChargeCost(st, 'house', state);
         if (p.money < cost) throw new Error('Cannot afford house');
         p.money -= cost;
         b.houses += 1;
         events.push({ key: 'built', params: { player: p.name, building: 'house', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'hotel') {
         if (!canConstructHotel(state, board, pos)) throw new Error('Cannot build hotel here');
-        const baseCost = state.activeEvent?.id === 'buildingSale'
-          ? Math.floor(st.hotelCost / 2)
-          : st.hotelCost;
-        const cost = Math.round(baseCost * state.buildingCostMult);
+        const cost = buildingChargeCost(st, 'hotel', state);
         if (p.money < cost) throw new Error('Cannot afford hotel');
         p.money -= cost;
         b.houses = 0;
@@ -1011,10 +1046,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         events.push({ key: 'built', params: { player: p.name, building: 'hotel', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'factory') {
         if (!canConstructFactory(state, board, pos)) throw new Error('Cannot build factory here');
-        const baseCost = state.activeEvent?.id === 'buildingSale'
-          ? Math.floor(st.factoryCost / 2)
-          : st.factoryCost;
-        const cost = Math.round(baseCost * state.buildingCostMult);
+        const cost = buildingChargeCost(st, 'factory', state);
         if (p.money < cost) throw new Error('Cannot afford factory');
         p.money -= cost;
         b.houses = 0;

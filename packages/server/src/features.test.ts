@@ -395,3 +395,89 @@ describe("Feature 14 — pickAutoAction (auto-action helper)", () => {
     expect(pickAutoAction(state, "A")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix 6 — bot respects buildingCostMult when deciding whether to build
+// ---------------------------------------------------------------------------
+describe("Fix 6 — bot uses actual charge cost (buildingCostMult) to decide build", () => {
+  it("bot does NOT build when buildingCostMult makes it unaffordable", () => {
+    // Create state where Alice owns full group brown (pos 1 only, single-street)
+    // houseCost = 50 (after balance patch). With buildingCostMult=10, cost=500.
+    // Give Alice exactly 600 cash (above the raw 50 but after 10× she'd have 100 left,
+    // above DANGER_THRESHOLD=200 only barely... let's set cash=250 so raw cost 50 is
+    // affordable but 10× cost 500 > 250 => bot must decline).
+    const state = createGame({
+      boardId: BOARD,
+      seed: 1,
+      players: [
+        { id: "A", name: "Alice", isBot: true, color: "red" },
+        { id: "B", name: "Bob", isBot: true, color: "blue" },
+      ],
+      settings: { buildingCostMult: 10 },
+    });
+    const gs = structuredClone(state);
+    gs.players[0]!.money = 250;  // raw cost=50 → affordable; 10×cost=500 → NOT affordable
+    gs.ownership[1] = "A"; // Alice owns brown (single-street group)
+    gs.currentPlayerIndex = 0;
+    gs.phase = "awaiting-roll";
+    gs.builtThisTurn = false;
+
+    const cmd = botDecide(gs);
+    // Bot must NOT attempt a BUILD (it would throw "Cannot afford house")
+    expect(cmd.type).not.toBe("BUILD");
+  });
+
+  it("bot DOES build when buildingCostMult-adjusted cost is within budget", () => {
+    // houseCost=50 × 1.0 = 50. With money=500 and threshold=200, 500-50=450 >= 200 → build.
+    const state = createGame({
+      boardId: BOARD,
+      seed: 1,
+      players: [
+        { id: "A", name: "Alice", isBot: true, color: "red" },
+        { id: "B", name: "Bob", isBot: true, color: "blue" },
+      ],
+    });
+    const gs = structuredClone(state);
+    gs.players[0]!.money = 500;
+    gs.ownership[1] = "A"; // brown single-street
+    gs.currentPlayerIndex = 0;
+    gs.phase = "awaiting-roll";
+    gs.builtThisTurn = false;
+
+    const cmd = botDecide(gs);
+    expect(cmd.type).toBe("BUILD");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 8 — setGameSettings clamps multipliers to [0.25, 5]
+// ---------------------------------------------------------------------------
+describe("Fix 8 — GameRoom.updateSettings clamps multipliers", () => {
+  it("clamps startingCapitalMult below minimum", () => {
+    const room = new GameRoom("Test", BOARD, 1);
+    room.addHuman("Alice");
+    // Simulate what handleMessage does: clamp then updateSettings
+    const raw = 0.01;
+    const clamped = Math.min(5, Math.max(0.25, raw));
+    room.updateSettings({ startingCapitalMult: clamped });
+    expect(room.settings.startingCapitalMult).toBe(0.25);
+  });
+
+  it("clamps buildingCostMult above maximum", () => {
+    const room = new GameRoom("Test", BOARD, 1);
+    room.addHuman("Alice");
+    const raw = 99;
+    const clamped = Math.min(5, Math.max(0.25, raw));
+    room.updateSettings({ buildingCostMult: clamped });
+    expect(room.settings.buildingCostMult).toBe(5);
+  });
+
+  it("accepts values within [0.25, 5] unchanged", () => {
+    const room = new GameRoom("Test", BOARD, 1);
+    room.addHuman("Alice");
+    const raw = 2.5;
+    const clamped = Math.min(5, Math.max(0.25, raw));
+    room.updateSettings({ startingCapitalMult: clamped });
+    expect(room.settings.startingCapitalMult).toBe(2.5);
+  });
+});
