@@ -203,6 +203,9 @@ board3d.setTileClickHandler((pos) => {
 // Track whether we are attempting a session resume (suppress initial lobby flash).
 let resuming = false;
 
+// Start lobby BGM as soon as the app loads.
+audio.startBgm("lobby");
+
 net.onMessage((msg) => {
   switch (msg.t) {
     case "rooms":
@@ -228,6 +231,8 @@ net.onMessage((msg) => {
       } else {
         stateQueue.enqueue(msg.state, msg.events);
       }
+      // Switch to game BGM on first state (game started)
+      audio.startBgm("game");
       break;
     case "chat":
       ui.addChat(msg.from, msg.text);
@@ -246,7 +251,11 @@ net.onMessage((msg) => {
     case "gameOver":
       clearSession();
       audio.play("gameover");
+      audio.stopBgm();
       ui.showGameOver(msg.winnerName);
+      break;
+    case "turnTimer":
+      ui.showTurnTimer(msg.playerId, msg.secondsLeft);
       break;
   }
 });

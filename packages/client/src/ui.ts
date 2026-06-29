@@ -344,6 +344,27 @@ const css = `
   .fp-swatch.selected { border-color: #facc15; }
   .fp-swatch.taken { opacity: 0.35; cursor: default; }
   .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
+  #turnTimer {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.35);
+    border-radius: 4px;
+    padding: 1px 7px;
+    margin-left: 6px;
+    vertical-align: middle;
+    min-width: 36px;
+    text-align: center;
+  }
+  #turnTimer.urgent {
+    color: #f87171;
+    animation: timerPulse 0.6s ease-in-out infinite alternate;
+  }
+  @keyframes timerPulse {
+    from { opacity: 1; }
+    to   { opacity: 0.45; }
+  }
 `;
 
 // ---------------------------------------------------------------------------
@@ -484,6 +505,25 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino-Jackpot-Nacht",
     "event.buildingSale": "🏗️ Bau-Rabatt",
     "event.quietDay": "😴 Ruhiger Tag",
+    // Player list
+    "player.jail": " (Knast)",
+    // My properties panel
+    "props.buildingSaleActive": "🏗️ Bau-Rabatt aktiv (50%)",
+    // Tooltips
+    "tooltip.minPlayers": "Mindestens 2 Spieler nötig",
+    "tooltip.onlyYourTurn": "Nur in deinem Zug verfügbar",
+    // Figure picker tooltip
+    "figurePicker.colorTaken": "hat diese Farbe",
+    // Turn toast
+    "turn.mine.toast": "Du bist am Zug",
+    "turn.atReihe": "ist an der Reihe.",
+    // Deed building strings
+    "deed.house": "Haus",
+    "deed.houses": "Häuser",
+    "deed.diceX": "Würfel ×",
+    // Settings volume
+    "settings.sfxVolume": "Soundeffekte",
+    "settings.musicVolume": "Musik",
   },
   en: {
     // Lobby
@@ -617,6 +657,25 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino Jackpot Night",
     "event.buildingSale": "🏗️ Building Sale",
     "event.quietDay": "😴 Quiet Day",
+    // Player list
+    "player.jail": " (Jail)",
+    // My properties panel
+    "props.buildingSaleActive": "🏗️ Building Sale active (50%)",
+    // Tooltips
+    "tooltip.minPlayers": "At least 2 players needed",
+    "tooltip.onlyYourTurn": "Only available on your turn",
+    // Figure picker tooltip
+    "figurePicker.colorTaken": "has this colour",
+    // Turn toast
+    "turn.mine.toast": "Your turn",
+    "turn.atReihe": "is playing now.",
+    // Deed building strings
+    "deed.house": "House",
+    "deed.houses": "Houses",
+    "deed.diceX": "Dice ×",
+    // Settings volume
+    "settings.sfxVolume": "Sound effects",
+    "settings.musicVolume": "Music",
   },
 };
 
@@ -699,6 +758,9 @@ export class UI {
   private muteBtn!: HTMLButtonElement;
   // Current room id for share link (feature #6)
   private currentRoomId: string | null = null;
+  // Turn-timer countdown
+  private turnTimerEl: HTMLSpanElement | null = null;
+  private turnTimerHideTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(root: HTMLDivElement, net: Net, board3d: Board3D) {
     this.root = root;
@@ -936,7 +998,7 @@ export class UI {
     `;
     hdr.appendChild(left);
 
-    // Center: turn status + round + event
+    // Center: turn status + round + event + turn timer
     const center = document.createElement("div");
     center.id = "headerCenter";
     center.innerHTML = `
@@ -948,6 +1010,13 @@ export class UI {
     this.headerTurnStatus = center.querySelector("#headerTurnStatus") as HTMLDivElement;
     this.headerRound = center.querySelector("#headerRound") as HTMLDivElement;
     this.headerEvent = center.querySelector("#headerEvent") as HTMLDivElement;
+
+    // Turn-timer badge (sibling of turn status, inside headerCenter)
+    const timerEl = document.createElement("span");
+    timerEl.id = "turnTimer";
+    timerEl.style.display = "none";
+    center.appendChild(timerEl); // append to center, NOT to headerTurnStatus (which uses .textContent)
+    this.turnTimerEl = timerEl;
 
     // Right: view toggle, settings, help, leave, version
     const right = document.createElement("div");
@@ -1018,6 +1087,10 @@ export class UI {
     leaveBtn.addEventListener("click", () => {
       clearSession();
       this.net.send({ t: "leaveRoom" });
+      // Works for both alive players and spectators (alive=false):
+      // showLobbyPanel hides gameHud, spectatorBanner, all overlays.
+      audio.stopBgm();
+      audio.startBgm("lobby");
       this.showLobbyPanel();
     });
     right.appendChild(leaveBtn);
@@ -1077,6 +1150,10 @@ export class UI {
         <button id="localeENBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'en' ? 'rgba(255,255,255,0.35)' : ''};">🇬🇧 EN</button>
       </div>
       <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
+      <label id="settingsSfxLabel" style="margin-top:10px;">${t("settings.sfxVolume")}</label>
+      <input id="sfxVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentSfxVolume * 100)}" style="width:100%;margin-top:2px;" />
+      <label id="settingsMusicLabel" style="margin-top:6px;">${t("settings.musicVolume")}</label>
+      <input id="musicVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentMusicVolume * 100)}" style="width:100%;margin-top:2px;" />
     `;
     settings.innerHTML = buildSettingsContent();
     hide(settings);
@@ -1090,13 +1167,15 @@ export class UI {
       this.currentLocale = locale;
       localStorage.setItem(LOCALE_KEY, locale);
       this.net.send({ t: "setLocale", locale });
-      // Rebuild settings panel with new locale
+      // Rebuild settings panel with new locale (preserves slider values)
       settings.innerHTML = buildSettingsContent();
       this.wireLocaleButtons(settings, applyLocale);
+      this.wireVolumeSliders(settings);
       // Re-render all static UI text
       this.relabelUI();
     };
     this.wireLocaleButtons(settings, applyLocale);
+    this.wireVolumeSliders(settings);
     const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
     setTimeout(() => applyLocale(savedLocale), 0);
@@ -1105,6 +1184,21 @@ export class UI {
   private wireLocaleButtons(settings: HTMLElement, applyLocale: (locale: Locale) => void) {
     settings.querySelector("#localeDEBtn")?.addEventListener("click", () => applyLocale("de"));
     settings.querySelector("#localeENBtn")?.addEventListener("click", () => applyLocale("en"));
+  }
+
+  private wireVolumeSliders(settings: HTMLElement) {
+    const sfxSlider = settings.querySelector("#sfxVolumeSlider") as HTMLInputElement | null;
+    const musicSlider = settings.querySelector("#musicVolumeSlider") as HTMLInputElement | null;
+    if (sfxSlider) {
+      sfxSlider.addEventListener("input", () => {
+        audio.setSfxVolume(parseInt(sfxSlider.value, 10) / 100);
+      });
+    }
+    if (musicSlider) {
+      musicSlider.addEventListener("input", () => {
+        audio.setMusicVolume(parseInt(musicSlider.value, 10) / 100);
+      });
+    }
   }
 
   /** Re-apply i18n labels to all static UI text after a locale switch. */
@@ -1414,8 +1508,8 @@ export class UI {
       const a = board.rules.attraction;
       row(t("deed.price"), `${a.price} LPD`);
       row(t("deed.mortgage"), `${a.mortgage} LPD`);
-      row(t("deed.rentAttr1"), `Würfel × ${a.factorOne}`);
-      row(t("deed.rentAttr2"), `Würfel × ${a.factorBoth}`);
+      row(t("deed.rentAttr1"), `${t("deed.diceX")}${a.factorOne}`);
+      row(t("deed.rentAttr2"), `${t("deed.diceX")}${a.factorBoth}`);
     }
 
     // Owner + buildings
@@ -1429,9 +1523,9 @@ export class UI {
 
       const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
       let buildStr = "";
-      if (b.hotel) buildStr = "Hotel";
-      else if (b.factory) buildStr = "Fabrik";
-      else if (b.houses > 0) buildStr = `${b.houses} Haus${b.houses > 1 ? "häuser" : ""}`;
+      if (b.hotel) buildStr = t("deed.hotel");
+      else if (b.factory) buildStr = t("deed.factory");
+      else if (b.houses > 0) buildStr = `${b.houses} ${b.houses > 1 ? t("deed.houses") : t("deed.house")}`;
       if (buildStr) {
         const bDiv = document.createElement("div");
         bDiv.className = "dc-status";
@@ -1502,6 +1596,33 @@ export class UI {
       el.classList.remove("visible");
       this.paymentToastTimer = null;
     }, 3500);
+  }
+
+  // -------------------------------------------------------------------------
+  // Turn-timer countdown
+  // -------------------------------------------------------------------------
+  showTurnTimer(playerId: string, secondsLeft: number) {
+    const el = this.turnTimerEl;
+    if (!el) return;
+
+    // Determine if it's the local player's timer
+    const isMe = this.net.playerId !== null && playerId === this.net.playerId;
+
+    el.textContent = `⏱ ${secondsLeft}s`;
+    el.style.display = "inline-block";
+    el.classList.toggle("urgent", secondsLeft <= 10 && isMe);
+
+    // Auto-hide 2 s after timer would expire (server stops sending at 0)
+    if (this.turnTimerHideTimer) clearTimeout(this.turnTimerHideTimer);
+    this.turnTimerHideTimer = setTimeout(() => {
+      if (el) el.style.display = "none";
+      this.turnTimerHideTimer = null;
+    }, (secondsLeft + 2) * 1000);
+  }
+
+  private hideTurnTimer() {
+    if (this.turnTimerEl) this.turnTimerEl.style.display = "none";
+    if (this.turnTimerHideTimer) { clearTimeout(this.turnTimerHideTimer); this.turnTimerHideTimer = null; }
   }
 
   // -------------------------------------------------------------------------
@@ -1612,7 +1733,7 @@ export class UI {
       // Colour swatch dot on the left
       const dot = document.createElement("span");
       dot.style.cssText = `display:inline-block;width:14px;height:14px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;`;
-      if (isColorTaken) dot.title = `${takerName} hat diese Farbe`;
+      if (isColorTaken) dot.title = `${takerName} ${t("figurePicker.colorTaken")}`;
       colorRow.appendChild(dot);
 
       // Figure thumbnails
@@ -1640,7 +1761,7 @@ export class UI {
         }
 
         if (isColorTaken) {
-          sw.title = `${takerName} hat diese Farbe`;
+          sw.title = `${takerName} ${t("figurePicker.colorTaken")}`;
         } else {
           sw.title = `${color} #${fi + 1}`;
         }
@@ -1745,6 +1866,7 @@ export class UI {
     if (this.tradePanel) hide(this.tradePanel);
     if (this.incomingSwapPanel) hide(this.incomingSwapPanel);
     if (this.gameOverBanner) hide(this.gameOverBanner);
+    this.hideTurnTimer();
     this.lastState = null;
     this.wasMyTurn = false;
     this.net.send({ t: "listRooms" });
@@ -1781,7 +1903,7 @@ export class UI {
     this.currentRoomId = roomId;
     hide(this.lobby);
     show(this.roomPanel);
-    this.roomInfo.textContent = "Warte auf Spielstart...";
+    this.roomInfo.textContent = t("room.waiting");
     hide(this.startGameBtn);
     // Update room link (feature #6)
     this.updateRoomLink(roomId);
@@ -1816,7 +1938,7 @@ export class UI {
       const totalPlayers = humanCount + room.botCount;
       if (totalPlayers < 2) {
         this.startGameBtn.disabled = true;
-        this.startGameBtn.title = "Mindestens 2 Spieler nötig";
+        this.startGameBtn.title = t("tooltip.minPlayers");
       } else {
         this.startGameBtn.disabled = false;
         this.startGameBtn.title = "";
@@ -1874,7 +1996,7 @@ export class UI {
 
       const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
       const rollStr = p.lastRoll[0] > 0 ? ` [${p.lastRoll[0]}+${p.lastRoll[1]}]` : "";
-      const jail = p.inJail ? " (Knast)" : "";
+      const jail = p.inJail ? t("player.jail") : "";
       row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${this.renderChipStack(p.money)}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
       this.playerList.appendChild(row);
     }
@@ -1898,15 +2020,15 @@ export class UI {
       }
     }
 
-    // Emit a local "ist an der Reihe" notification when our turn begins
+    // Emit a local turn-change notification
     if (isMyTurn && !this.wasMyTurn && amAlive) {
-      const name = me?.name ?? this.myName ?? "Du";
-      this.appendEventLine(`${name} ist an der Reihe.`);
-      this.showToast("Du bist am Zug");
+      // It just became our turn — server already sends a nextTurn event to the
+      // log, so we only show the toast here (skip the duplicate log inject).
+      this.showToast(t("turn.mine.toast"));
     } else if (!isMyTurn && this.wasMyTurn) {
       // Our turn just ended — show whose turn it is now
       if (currentPlayer) {
-        this.showToast(`${currentPlayer.name} ist am Zug`);
+        this.showToast(`${currentPlayer.name} ${t("turn.other")}`);
       }
     }
     this.wasMyTurn = isMyTurn && amAlive;
@@ -2065,7 +2187,7 @@ export class UI {
     if (state.activeEvent?.id === "buildingSale") {
       const saleLabel = document.createElement("div");
       saleLabel.style.cssText = "font-size:11px;color:#f97316;";
-      saleLabel.textContent = "🏗️ Bau-Rabatt aktiv (50%)";
+      saleLabel.textContent = t("props.buildingSaleActive");
       header.appendChild(saleLabel);
     }
 
@@ -2097,7 +2219,7 @@ export class UI {
       let buildingStr = "";
       if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
       else if (b.factory) buildingStr = `[${t("deed.factory")}]`;
-      else if (b.houses > 0) buildingStr = `[${b.houses} ${t("deed.house1").replace("1 ", "")}${b.houses > 1 ? "" : ""}]`;
+      else if (b.houses > 0) buildingStr = `[${b.houses} ${b.houses > 1 ? t("deed.houses") : t("deed.house")}]`;
       else buildingStr = "—";
 
       const mortgageStr = isMortgaged ? ` <span style='color:#f87171;'>[${t("deed.mortgaged")}]</span>` : "";
@@ -2123,7 +2245,7 @@ export class UI {
           btn.disabled = true;
           btn.style.opacity = "0.4";
           if (unaffordable) btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
-          else if (!canAct) btn.title = "Nur in deinem Zug verfügbar";
+          else if (!canAct) btn.title = t("tooltip.onlyYourTurn");
         } else {
           btn.addEventListener("click", onClick);
         }
