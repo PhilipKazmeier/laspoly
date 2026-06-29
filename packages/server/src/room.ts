@@ -90,7 +90,9 @@ export class GameRoom {
     const token = randomBytes(16).toString("hex");
     const color = this._nextFreeColor();
     const figureIndex = this._nextFreeFigureIndex();
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, ready: false };
+    // Default humans to ready so a host can start immediately (the ready-up UI,
+    // when present, lets a player toggle this off). Avoids blocking the start flow.
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, ready: true };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
@@ -294,8 +296,8 @@ export class GameRoom {
     if (this.state.phase !== "finished") throw new Error("Game is not finished yet");
     // Remove bots that were added by start(), keep only the humans
     this.players = this.players.filter((p) => !p.isBot);
-    // Reset ready state for humans
-    for (const p of this.players) p.ready = false;
+    // Keep humans ready so a rematch can start immediately (ready-up UI may toggle).
+    for (const p of this.players) p.ready = true;
     this.started = false;
     this.state = null;
     return this.start(newSeed);

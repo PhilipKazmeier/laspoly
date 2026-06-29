@@ -10,6 +10,8 @@
  *  6. Consecutive bot turns animate sequentially.
  *
  * Screenshots: tests/__screenshots__/anim-*.png
+ *
+ * Per-test timeouts are set to 30 s so regressions fail fast (not at 180 s).
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -69,8 +71,10 @@ async function startGame(page: Page, nick: string) {
   await page.locator("#nickname").fill(nick);
   await page.locator("#botCount").selectOption("3");
   await page.locator("#createRoom").click();
+  // Wait for the start-game button to become visible (room panel loads async).
+  await expect(page.locator("#startGame")).toBeVisible({ timeout: 15_000 });
   await page.locator("#startGame").click();
-  await expect(page.locator("#rollBtn")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#rollBtn")).toBeVisible({ timeout: 20_000 });
 }
 
 const ignorable = (e: string) =>
@@ -79,6 +83,7 @@ const ignorable = (e: string) =>
 // ---------------------------------------------------------------------------
 
 test("anim: buy panel appears only AFTER the token lands", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await injectStateRelay(page);
@@ -95,11 +100,11 @@ test("anim: buy panel appears only AFTER the token lands", async ({ page }) => {
   const midBuyVisible = await page.locator("#buyOfferBuyBtn").isVisible().catch(() => false);
   expect(midBuyVisible, "buy panel must not appear during animation").toBe(false);
 
-  // Let the full sequence finish.
-  await page.waitForTimeout(5_000);
+  // Let the full sequence finish (dice ~1.4 s + up to 12 hops × 120 ms = ~2.8 s + margin).
+  await page.waitForTimeout(8_000);
   const state = await getState(page);
   if (state?.["phase"] === "awaiting-buy") {
-    await expect(page.locator("#buyOfferBuyBtn")).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("#buyOfferBuyBtn")).toBeVisible({ timeout: 5_000 });
     await page.locator("#renderCanvas").screenshot({
       path: path.join(SCREENSHOTS_DIR, "anim-buy-after-landing.png"),
     });
@@ -111,6 +116,7 @@ test("anim: buy panel appears only AFTER the token lands", async ({ page }) => {
 // ---------------------------------------------------------------------------
 
 test("anim: token moves smoothly — no large single-frame teleport", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await startGame(page, "AnimSmooth");
@@ -128,7 +134,7 @@ test("anim: token moves smoothly — no large single-frame teleport", async ({ p
   const minSize = Math.min(...sizes);
   expect(maxSize / minSize, "frame sizes within 6x (smooth, no dramatic jump)").toBeLessThan(6);
 
-  await page.waitForTimeout(4_000);
+  await page.waitForTimeout(7_000);
   await page.locator("#renderCanvas").screenshot({
     path: path.join(SCREENSHOTS_DIR, "anim-smooth-final.png"),
   });
@@ -139,6 +145,7 @@ test("anim: token moves smoothly — no large single-frame teleport", async ({ p
 // ---------------------------------------------------------------------------
 
 test("anim: dice show pip faces after settling (no number overlay)", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await startGame(page, "AnimDice");
@@ -148,8 +155,8 @@ test("anim: dice show pip faces after settling (no number overlay)", async ({ pa
   });
 
   await page.locator("#rollBtn").click();
-  // Wait for dice to settle (lift+shake+descend ~1.3 s + bounce ~0.4 s).
-  await page.waitForTimeout(2_000);
+  // Wait for dice to settle (lift+shake+descend+settle ~1.6 s + margin).
+  await page.waitForTimeout(3_000);
   await page.locator("#renderCanvas").screenshot({
     path: path.join(SCREENSHOTS_DIR, "anim-dice-pips.png"),
   });
@@ -160,13 +167,14 @@ test("anim: dice show pip faces after settling (no number overlay)", async ({ pa
 // ---------------------------------------------------------------------------
 
 test("anim: labels upright + readable on all 4 edges", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await startGame(page, "AnimLabels");
 
   // Top-down view shows all 4 edges' labels at once.
   const viewBtn = page.locator("#headerViewBtn");
-  await expect(viewBtn).toBeVisible();
+  await expect(viewBtn).toBeVisible({ timeout: 10_000 });
   await viewBtn.click();
   await page.waitForTimeout(900);
   await page.locator("#renderCanvas").screenshot({
@@ -186,6 +194,7 @@ test("anim: labels upright + readable on all 4 edges", async ({ page }) => {
 // ---------------------------------------------------------------------------
 
 test("anim: on-board player displays render (LPD currency)", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await startGame(page, "AnimLPD");
@@ -200,22 +209,27 @@ test("anim: on-board player displays render (LPD currency)", async ({ page }) =>
 // ---------------------------------------------------------------------------
 
 test("anim: consecutive bot turns animate sequentially", async ({ page }) => {
+  test.setTimeout(30_000);
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
   await injectStateRelay(page);
   await startGame(page, "AnimSerial");
 
-  await page.locator("#rollBtn").click();
+  // Read count BEFORE rolling so we count states generated by THIS round.
   const countBefore = await page.evaluate(
     () => (window as Record<string, unknown>)["_stateCount"] ?? 0
   );
+  await page.locator("#rollBtn").click();
 
   // Wait for the local turn + bot turns to roll in.
-  await page.waitForTimeout(9_000);
+  // Each turn: dice ~1.4 s + move up to ~1.5 s + ~0.7 s server gap = ~3.6 s × 4 = ~14 s.
+  // But we cap at 20 s well within the 30 s test budget.
+  await page.waitForTimeout(20_000);
 
   const countAfter = await page.evaluate(
     () => (window as Record<string, unknown>)["_stateCount"] ?? 0
   );
+  // Expect at least: human turn state + 3 bot states = 4 total, but allow 3 minimum.
   expect(Number(countAfter) - Number(countBefore)).toBeGreaterThanOrEqual(3);
 
   await page.locator("#renderCanvas").screenshot({

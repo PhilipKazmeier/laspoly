@@ -1,6 +1,13 @@
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
-const WS_URL = `ws://${location.hostname}:8080`;
+// Connect to the SAME origin (host + port) the page was served from, so when the
+// server is mapped to any port (e.g. Docker -p 8081:8080) the WebSocket follows it.
+// `wss:` is used automatically on HTTPS pages (avoids mixed-content blocking).
+// VITE_WS_URL overrides this for the split-port dev/e2e setup (vite preview :4173
+// while the game server runs on :8080).
+const WS_URL =
+  (import.meta.env.VITE_WS_URL as string | undefined) ||
+  `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
 
 type Handler = (msg: ServerMessage) => void;
 

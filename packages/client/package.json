@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "VITE_WS_URL=ws://localhost:8080 vite",
     "build": "vite build",
     "preview": "vite preview --port 4173",
     "test:e2e": "playwright test"

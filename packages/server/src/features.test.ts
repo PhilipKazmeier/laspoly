@@ -283,11 +283,11 @@ describe("Feature 13 — restart / rematch", () => {
     room.state!.phase = "finished";
     room.state!.winnerId = a;
     room.restart(3);
-    // After restart, humans should not be ready
+    // After restart, humans stay ready so a rematch can start immediately.
     const view = room.toView();
     const humanPlayers = view.players.filter((p) => !p.isBot);
-    expect(humanPlayers.every((p) => !p.ready)).toBe(true);
-    expect(room.canStart()).toBe(false);
+    expect(humanPlayers.every((p) => p.ready)).toBe(true);
+    expect(room.canStart()).toBe(true);
   });
 });
 
@@ -295,18 +295,21 @@ describe("Feature 13 — restart / rematch", () => {
 // Feature 10: Ready-up in lobby
 // ---------------------------------------------------------------------------
 describe("Feature 10 — ready-up", () => {
-  it("canStart() is false when no one is ready", () => {
+  it("canStart() is false when a human un-readies", () => {
     const room = new GameRoom("Test", BOARD, 0);
-    room.addHuman("Alice");
-    room.addHuman("Bob");
+    const a = room.addHuman("Alice");
+    const b = room.addHuman("Bob");
+    // humans default to ready; un-readying one blocks start
+    room.setReady(a, false);
+    room.setReady(b, false);
     expect(room.canStart()).toBe(false);
   });
 
   it("canStart() is false when only one of two humans is ready", () => {
     const room = new GameRoom("Test", BOARD, 0);
-    const a = room.addHuman("Alice");
-    room.addHuman("Bob");
-    room.setReady(a, true);
+    room.addHuman("Alice");
+    const b = room.addHuman("Bob");
+    room.setReady(b, false);
     expect(room.canStart()).toBe(false);
   });
 
@@ -335,9 +338,9 @@ describe("Feature 10 — ready-up", () => {
 
   it("toView() exposes ready state per player and canStart", () => {
     const room = new GameRoom("Test", BOARD, 0);
-    const a = room.addHuman("Alice");
-    room.addHuman("Bob");
-    room.setReady(a, true);
+    room.addHuman("Alice");
+    const b = room.addHuman("Bob");
+    room.setReady(b, false);
     const view = room.toView();
     const alice = view.players.find((p) => p.nickname === "Alice")!;
     const bob = view.players.find((p) => p.nickname === "Bob")!;

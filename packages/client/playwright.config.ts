@@ -8,16 +8,17 @@ export default defineConfig({
     {
       command: "npx tsx /Users/philip/Work/Other/laspoly/packages/server/src/index.ts",
       port: 8080,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       cwd: "/Users/philip/Work/Other/laspoly",
       timeout: 30_000,
     },
     {
-      command: "npm run build && npm run preview",
+      // preview runs on :4173 but the game server is on :8080, so bake the ws target.
+      command: "VITE_WS_URL=ws://localhost:8080 npm run build && npm run preview",
       port: 4173,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       cwd: "/Users/philip/Work/Other/laspoly/packages/client",
-      timeout: 60_000,
+      timeout: 90_000,
     },
   ],
 });

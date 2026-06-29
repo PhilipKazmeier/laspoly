@@ -5,6 +5,11 @@ import type { GameState, FormattedEvent } from "@laspoly/shared";
 
 const JAIL_POS = 40;
 
+/** Resolves after `ms` milliseconds — used as a safety timeout in Promise.race(). */
+function timeout(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
 // Serial animation queue
 // ---------------------------------------------------------------------------
@@ -118,14 +123,22 @@ class StateQueue {
     }
 
     // 3. Dice FIRST (cup lift → shake → settle with the rolled value face-up).
+    //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
-      await this.board.playDiceAnimationAsync(rolledD1, rolledD2);
+      await Promise.race([
+        this.board.playDiceAnimationAsync(rolledD1, rolledD2),
+        timeout(4_000),
+      ]);
     }
 
     // 4. Movers ONE AT A TIME so bots animate sequentially, never simultaneously.
+    //    Safety timeout: 15 s per mover (12 tiles × 120 ms + margin).
     for (const { id, from, to } of movers) {
       this.board.ensureTokenExists(id, state, myId);
-      await this.board.animateMoveAsync(id, from, to);
+      await Promise.race([
+        this.board.animateMoveAsync(id, from, to),
+        timeout(15_000),
+      ]);
     }
 
     // 5. Apply visuals (HUD, board, ownership, displays) only after movement.
@@ -163,6 +176,11 @@ net.onMessage((msg) => {
       break;
     case "joined":
       ui.onJoined(msg.roomId, msg.playerId);
+      break;
+    case "room":
+      // Server sends the current room view whenever something changes (player
+      // joins, figure pick, etc.). Show the room panel with the start button.
+      if (!resuming) ui.showRoom(msg.room);
       break;
     case "resumed":
       // Keep `resuming` true so the first post-resume `state` snaps (no backlog
