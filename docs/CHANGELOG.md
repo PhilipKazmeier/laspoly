@@ -104,6 +104,25 @@ per-task plans in [superpowers/plans](superpowers/plans/).
   server formatting) + persisted; "?" help dialog closable (X + Esc); lobby figure/colour picker;
   clean return-to-lobby after game-over/leave (no "already in a room").
 
+### Animation, balance-2, and live-bug round — done
+- **Engine bugs:** travel-into-bankruptcy deadlock; broadcast card double-bankruptcy; swap re-verify
+  mortgage/buildings; hotel-sell deadlock; localized all 26 action-card names; travel once per turn.
+- **Balance v2:** single-street hotels rushed by ~round 3 caused ~70% of eliminations. Fix:
+  **one building per turn** (classic rule, stops the rush) + ban only single-street **hotels** (houses
+  still allowed). Result: 4p termination 56%→**98.5%**, no round-1–3 KOs, early-KO 3.5%. Softened
+  `helicopterFlight`/`youGotPromoted`.
+- **QoL foundation (server/engine):** net-worth, surrender, lobby game settings (starting-capital /
+  building-cost multipliers, bot difficulty), rematch/restart, ready-up, turn-timer + AFK auto-action.
+- **Animation queue deadlock:** move/dice/subway animations resolved only via the render loop; in
+  headless / throttled rAF they never resolved → serial queue froze (and could freeze the live game).
+  Fix: every animation now has a **force-complete safety timer** (snap to destination + resolve), so
+  the game can never deadlock. Removed the dice number overlay — the pip faces show the value.
+- **Start blocker:** humans now default `ready=true` (ready-up no longer stalls "Warte auf Spielstart").
+- **WebSocket port:** client connects to the page's own origin host:port (`wss:` on https), so
+  `docker -p 8081:8080` works; `VITE_WS_URL` overrides for split-port dev/e2e.
+- **Street labels:** read from OUTSIDE every edge (removed the upside-down top/left flip); doubled
+  texture resolution + fonts for crispness; zeroed specular (no top-down glare).
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the
