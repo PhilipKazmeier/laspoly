@@ -1536,6 +1536,10 @@ export class Board3D {
   // -------------------------------------------------------------------------
   private showCup() {
     if (this.diceCupMesh) this.diceCupMesh.setEnabled(true);
+    // Hide the previous roll's dice below the felt so a turn awaiting a roll shows
+    // the CUP, not leftover dice.
+    if (this.dieMesh1) this.dieMesh1.position.y = -2;
+    if (this.dieMesh2) this.dieMesh2.position.y = -2;
     this.cupVisible = true;
   }
 
@@ -1758,30 +1762,18 @@ export class Board3D {
     });
   }
 
-  /** Plays the dice animation and resolves when the dice have fully settled. */
+  /**
+   * Plays the dice animation and resolves only AFTER the full visual sequence so
+   * the caller (the serial state queue) never starts the token move while the cup
+   * or dice are still animating. Total ≈ lift 300 + shake 500 + descend 300 +
+   * settle 400 ≈ 1500 ms. Resolution is time-based (not the diceAnimating flag) to
+   * avoid the early-resolve race that let figures move during the cup phase.
+   */
   playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
-    if (this.diceAnimating) return Promise.resolve();
-    // Total animation time: lift(300) + shake(400) + descend(300) + settle(400) = 1400 ms.
-    // We use a timer-based resolve that mirrors the animation phases so the promise
-    // resolves even when the render loop is throttled (e.g. in headless tests).
-    const ANIM_TOTAL_MS = 1450;
+    // Force any stale animation to end so we always start a fresh, full sequence.
+    this.diceAnimating = false;
     this.playDiceAnimation(d1, d2);
-    return new Promise<void>((resolve) => {
-      // Also watch the render loop (real browser): resolves as soon as the flag clears.
-      const check = this.scene.onBeforeRenderObservable.add(() => {
-        if (!this.diceAnimating) {
-          this.scene.onBeforeRenderObservable.remove(check);
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-      // Safety timer: resolves even if rAF is throttled (headless/background tabs).
-      const timer = setTimeout(() => {
-        this.scene.onBeforeRenderObservable.remove(check);
-        this.diceAnimating = false;
-        resolve();
-      }, ANIM_TOTAL_MS + 200);
-    });
+    return new Promise<void>((resolve) => setTimeout(resolve, 1550));
   }
 
   private showDiceResultLabel(d1: number, d2: number, cx: number, cz: number) {
