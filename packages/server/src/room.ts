@@ -11,9 +11,8 @@ import {
   type Command,
   type Locale,
 } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
 import type { FormattedEvent, RoomView, RoomSummary } from "@laspoly/shared";
-
-const COLORS = ["red", "blue", "green", "yellow", "purple", "orange"];
 
 export interface LobbyPlayer {
   id: string;
@@ -21,6 +20,8 @@ export interface LobbyPlayer {
   isBot: boolean;
   connected: boolean;
   token: string; // session resume token
+  color: string;
+  figureIndex: number;
 }
 
 let _nextRoomId = 1;
@@ -43,15 +44,57 @@ export class GameRoom {
     this.botCount = botCount;
   }
 
+  /** Returns the first color not already taken by a human player. */
+  private _nextFreeColor(): string {
+    const taken = new Set(this.players.filter((p) => !p.isBot).map((p) => p.color));
+    for (const c of FIGURE_COLORS) {
+      if (!taken.has(c)) return c;
+    }
+    return FIGURE_COLORS[this.players.length % FIGURE_COLORS.length]!;
+  }
+
+  /** Returns the first figureIndex not already taken by a human player. */
+  private _nextFreeFigureIndex(): number {
+    const taken = new Set(this.players.filter((p) => !p.isBot).map((p) => p.figureIndex));
+    for (let i = 0; i < FIGURE_COUNT; i++) {
+      if (!taken.has(i)) return i;
+    }
+    return this.players.length % FIGURE_COUNT;
+  }
+
   addHuman(nickname: string): string {
     const id = `h${_nextPlayerId++}`;
     const token = randomBytes(16).toString("hex");
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token };
+    const color = this._nextFreeColor();
+    const figureIndex = this._nextFreeFigureIndex();
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
     }
     return id;
+  }
+
+  /**
+   * Allows a human player to choose their colour and figure.
+   * Returns an error string if validation fails, or null on success.
+   */
+  chooseFigure(playerId: string, color: string, figureIndex: number): string | null {
+    if (this.started) return "Game already started";
+    if (!FIGURE_COLORS.includes(color as typeof FIGURE_COLORS[number])) {
+      return `Invalid colour. Choose from: ${FIGURE_COLORS.join(", ")}`;
+    }
+    if (!Number.isInteger(figureIndex) || figureIndex < 0 || figureIndex >= FIGURE_COUNT) {
+      return `Invalid figureIndex. Must be 0–${FIGURE_COUNT - 1}`;
+    }
+    const others = this.players.filter((p) => !p.isBot && p.id !== playerId);
+    if (others.some((p) => p.color === color)) return "Colour already taken";
+    if (others.some((p) => p.figureIndex === figureIndex)) return "Figure already taken";
+    const p = this.players.find((p) => p.id === playerId);
+    if (!p) return "Player not found";
+    p.color = color;
+    p.figureIndex = figureIndex;
+    return null;
   }
 
   /** Returns the token for the given human playerId, or null if not found. */
@@ -94,17 +137,19 @@ export class GameRoom {
     const total = Math.min(6, totalNeeded);
     const botsNeeded = total - humanPlayers.length;
 
-    // Add bot lobby entries
+    // Add bot lobby entries (assign remaining colors/figures)
     for (let i = 0; i < botsNeeded; i++) {
       const id = `b${_nextPlayerId++}`;
-      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "" });
+      const color = this._nextFreeColor();
+      const figureIndex = this._nextFreeFigureIndex();
+      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex });
     }
 
-    const allPlayers = this.players.map((p, idx) => ({
+    const allPlayers = this.players.map((p) => ({
       id: p.id,
       name: p.nickname,
       isBot: p.isBot,
-      color: COLORS[idx % COLORS.length]!,
+      color: p.color,
     }));
 
     this.state = createGame({ boardId: this.boardId, seed, players: allPlayers });
@@ -226,6 +271,8 @@ export class GameRoom {
         id: p.id,
         nickname: p.nickname,
         isBot: p.isBot,
+        color: p.color,
+        figureIndex: p.figureIndex,
       })),
       started: this.started,
     };

@@ -154,6 +154,7 @@ export function createGame(opts: NewGameOptions): GameState {
     pendingSwap: null,
     round: 1,
     activeEvent: firstEvent,
+    builtThisTurn: false,
   };
 }
 
@@ -200,9 +201,6 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses >= 4) return false;
-  // Balance: single-street colour groups may not be built on (the even-build rule
-  // is vacuous with one street, letting a lone street reach a hotel by ~round 3).
-  if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   // Even build: this street can't have more houses than any other (build in order)
   for (const m of members) {
@@ -222,7 +220,10 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 4) return false;
-  // Balance: no building on single-street colour groups (see canConstructHouse).
+  // Balance: single-street colour groups may build houses but NOT a hotel. A lone
+  // street reaches its 4th house in only a few one-per-turn builds, and its hotel
+  // rent (e.g. 2210 on Edison Walker) is a guaranteed early one-shot KO. Capping it
+  // at 4 houses keeps the street relevant to termination without the lethal hotel.
   if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
@@ -238,8 +239,6 @@ function canConstructFactory(state: GameState, board: BoardDefinition, pos: numb
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 0) return false;
-  // Balance: no building on single-street colour groups (see canConstructHouse).
-  if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // mortgaged blocks factory
@@ -302,7 +301,8 @@ export function legalCommands(state: GameState): Command["type"][] {
     const hasBuildings = b.houses > 0 || b.hotel || b.factory;
 
     if (tile.type === "street") {
-      if (ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
+      // BUILD only if the player hasn't already built once this turn (one-build-per-turn).
+      if (!state.builtThisTurn && ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
         if (canConstructHouse(state, board, pos)) cmds.push("BUILD");
         if (canConstructHotel(state, board, pos)) cmds.push("BUILD");
         if (canConstructFactory(state, board, pos)) cmds.push("BUILD");
@@ -789,6 +789,7 @@ function continueOrAdvance(state: GameState, events: GameEvent[]): void {
   const oldIdx = state.currentPlayerIndex;
   state.doublesCount = 0;
   state.extraRoll = false;
+  state.builtThisTurn = false;
   state.currentPlayerIndex = nextAliveIndex(state);
   state.turn += 1;
   state.phase = "awaiting-roll";
@@ -914,6 +915,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Property is mortgaged");
       if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) throw new Error("Must own entire group to build");
+      if (state.builtThisTurn) throw new Error("one building per turn");
 
       const st = tile as StreetTile;
       if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
@@ -951,6 +953,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         b.factory = true;
         events.push({ key: 'built', params: { player: p.name, building: 'factory', tile: st.name, amount: cost }, playerId: p.id });
       }
+      state.builtThisTurn = true;
       // BUILD does not advance the turn
       break;
     }
@@ -1248,6 +1251,7 @@ export function ownedPropsOf(state: GameState, playerId: string): number[] {
 }
 
 export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory"): boolean {
+  if (state.builtThisTurn) return false; // one-build-per-turn
   const board = getBoard(state.boardId);
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;

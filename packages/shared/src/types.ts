@@ -59,6 +59,8 @@ export interface GameState {
   round: number;
   /** the special event active this round, null only before game starts */
   activeEvent: { id: EventId } | null;
+  /** True once the current player has built one building this turn; reset on turn advance. */
+  builtThisTurn: boolean;
 }
 
 export interface SwapLeg {

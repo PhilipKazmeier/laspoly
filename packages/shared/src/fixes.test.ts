@@ -231,25 +231,56 @@ describe("Fix 4: hotel + siblings at 4 houses can be fully sold down", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Balancing: no building on single-street groups; base monopoly still doubles
+// Balancing: single-street groups can build HOUSES (paced by one-build-per-turn)
+// but NOT a hotel; base monopoly still doubles. (The 2026-06 blanket single-street
+// build BAN was reverted in favour of the classic one-building-per-turn rule, which
+// stops the round-3 build rush without removing building as a termination driver.
+// A single-street HOTEL stays banned because its rent — e.g. 2210 on Edison Walker
+// — is a guaranteed one-shot KO; 4 houses is the lethality ceiling for lone streets.)
 // ---------------------------------------------------------------------------
 
-describe("Balance: single-street colour groups cannot be built on", () => {
+describe("Balance: single-street groups build houses but not hotels (one-per-turn paced)", () => {
   // brown=1, violet=11, lightgreen=21, darkviolet=31 are single-street.
   const SINGLE = [1, 11, 21, 31];
 
   for (const pos of SINGLE) {
-    it(`rejects house/hotel/factory on single-street pos ${pos}`, () => {
+    it(`single-street pos ${pos} can build a house (one-per-turn pace)`, () => {
       const s = structuredClone(twoPlayers());
       s.players[0]!.money = 5000;
       s.ownership[pos] = "A";
       s.currentPlayerIndex = 0;
       s.phase = "awaiting-roll";
-      expect(() => applyCommand(s, { type: "BUILD", pos, building: "house" })).toThrow();
-      expect(() => applyCommand(s, { type: "BUILD", pos, building: "factory" })).toThrow();
-      // hotel needs 4 houses first which is also impossible; assert directly.
+      // House build is now allowed (single-street ban reverted)
+      const { state } = applyCommand(s, { type: "BUILD", pos, building: "house" });
+      expect(state.buildings[pos]?.houses).toBe(1);
+      expect(state.builtThisTurn).toBe(true);
+      // legalCommands offered BUILD before the build happened
+      expect(legalCommands(s)).toContain("BUILD");
+    });
+
+    it(`single-street pos ${pos}: second build in same turn is rejected`, () => {
+      const s = structuredClone(twoPlayers());
+      s.players[0]!.money = 5000;
+      s.ownership[pos] = "A";
+      s.currentPlayerIndex = 0;
+      s.phase = "awaiting-roll";
+      const { state: s1 } = applyCommand(s, { type: "BUILD", pos, building: "house" });
+      expect(s1.buildings[pos]?.houses).toBe(1);
+      // One-build-per-turn: a 2nd build this turn is rejected, and BUILD is gone from legalCommands
+      expect(() => applyCommand(s1, { type: "BUILD", pos, building: "house" })).toThrow(/one building per turn/);
+      expect(legalCommands(s1)).not.toContain("BUILD");
+    });
+
+    it(`single-street pos ${pos}: a hotel is rejected even with 4 houses`, () => {
+      const s = structuredClone(twoPlayers());
+      s.players[0]!.money = 5000;
+      s.ownership[pos] = "A";
+      s.buildings[pos] = { houses: 4, hotel: false, factory: false }; // maxed houses
+      s.currentPlayerIndex = 0;
+      s.phase = "awaiting-roll";
+      // Hotels are banned on single-street groups (lethal one-shot rent).
       expect(() => applyCommand(s, { type: "BUILD", pos, building: "hotel" })).toThrow();
-      // legalCommands must not offer BUILD for a single-street owner
+      // ...and legalCommands must not offer BUILD (the only buildable upgrade would be a hotel).
       expect(legalCommands(s)).not.toContain("BUILD");
     });
   }

@@ -3,7 +3,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { applyCommand, botDecide, currentPlayer } from "@laspoly/shared";
+import { applyCommand, botDecide, currentPlayer, formatEvent } from "@laspoly/shared";
+import type { GameEvent, Locale } from "@laspoly/shared";
 import { RoomManager, GameRoom } from "./room.js";
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
@@ -112,6 +113,7 @@ interface ConnState {
   msgWindowStart: number;
   roomsCreated: number;
   pendingPing: number | null;
+  locale: "de" | "en";
 }
 
 const connState = new WeakMap<WebSocket, ConnState>();
@@ -129,6 +131,27 @@ function sendError(ws: WebSocket, message: string): void {
 function broadcastToRoom(room: GameRoom, msg: ServerMessage, except?: WebSocket): void {
   for (const [ws] of getRoomConns(room.id)) {
     if (ws !== except) send(ws, msg);
+  }
+}
+
+/** Format raw game events per-connection locale, cache by locale for efficiency. */
+function formatEventsForConn(rawEvents: GameEvent[], locale: Locale) {
+  return rawEvents.map((e) => ({
+    key: e.key,
+    text: formatEvent(e, locale),
+    playerId: e.playerId,
+  }));
+}
+
+/** Broadcast a state+events message, formatting events in each recipient's locale. */
+function broadcastState(room: GameRoom, rawEvents: GameEvent[], except?: WebSocket): void {
+  // Group by locale to format once per distinct locale
+  const cache = new Map<Locale, ReturnType<typeof formatEventsForConn>>();
+  for (const [ws, cs] of getRoomConns(room.id)) {
+    if (ws === except) continue;
+    const locale = cs.locale;
+    if (!cache.has(locale)) cache.set(locale, formatEventsForConn(rawEvents, locale));
+    send(ws, { t: "state", state: room.state!, events: cache.get(locale)! });
   }
 }
 
@@ -152,6 +175,28 @@ function broadcastRoomList(): void {
   }
 }
 
+/**
+ * Disassociate a connection from its current room (auto-leave).
+ * Broadcasts room update and cleans up empty/finished rooms.
+ */
+function autoLeave(cs: ConnState): void {
+  if (!cs.roomId || !cs.playerId) return;
+  const room = rooms.get(cs.roomId);
+  if (room) {
+    room.removeHuman(cs.playerId);
+    // Clean up: delete room if empty of humans or if game finished and no one left
+    const humanCount = room.players.filter((p) => !p.isBot).length;
+    const allDisconnected = room.players.filter((p) => !p.isBot).every((p) => !p.connected);
+    if (humanCount === 0 || (room.started && room.state?.phase === "finished" && allDisconnected)) {
+      rooms.delete(room.id);
+    } else {
+      broadcastToRoom(room, { t: "room", room: room.toView() });
+    }
+  }
+  cs.roomId = null;
+  cs.playerId = null;
+}
+
 /** Drive bots in steps with delay between each, broadcasting state each time. */
 function scheduleBotSteps(room: GameRoom, delayMs = 700): void {
   if (!room.state || room.state.phase === "finished") return;
@@ -168,8 +213,7 @@ function scheduleBotSteps(room: GameRoom, delayMs = 700): void {
 
     log(`room:${room.id} ${cp.name} (bot) → ${cmd.type}`);
 
-    const events = room.formatEvents(result.events);
-    broadcastToRoom(room, { t: "state", state: room.state, events });
+    broadcastState(room, result.events);
 
     if (room.state.phase === "finished" && room.state.winnerId) {
       const winner = room.state.players.find((p) => p.id === room.state!.winnerId);
@@ -177,6 +221,13 @@ function scheduleBotSteps(room: GameRoom, delayMs = 700): void {
         log(`room:${room.id} game over — winner: ${winner.name}`);
         broadcastToRoom(room, { t: "gameOver", winnerId: winner.id, winnerName: winner.name });
       }
+      // Disassociate all connections from the finished room and clean up
+      for (const [, rcs] of getRoomConns(room.id)) {
+        rcs.roomId = null;
+        rcs.playerId = null;
+      }
+      rooms.delete(room.id);
+      broadcastRoomList();
       return;
     }
 
@@ -282,6 +333,7 @@ wss.on("connection", (ws: WebSocket) => {
     msgWindowStart: Date.now(),
     roomsCreated: 0,
     pendingPing: null,
+    locale: "de",
   });
   log("client connected");
 
@@ -346,6 +398,21 @@ wss.on("connection", (ws: WebSocket) => {
     const nickname = player?.nickname ?? cs.playerId;
     log(`room:${room.id} ${nickname} disconnected (seat kept)`);
     room.removeHuman(cs.playerId);
+
+    // If the game is finished, or all humans have disconnected from a started game, clean up
+    const humanPlayers = room.players.filter((p) => !p.isBot);
+    const allGone = humanPlayers.length === 0 || humanPlayers.every((p) => !p.connected);
+    if (room.started && room.state?.phase === "finished" && allGone) {
+      rooms.delete(room.id);
+      broadcastRoomList();
+      return;
+    }
+    if (!room.started && humanPlayers.length === 0) {
+      rooms.delete(room.id);
+      broadcastRoomList();
+      return;
+    }
+
     if (room.started && room.state && room.currentIsBot()) {
       scheduleBotSteps(room);
     }
@@ -362,7 +429,8 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
     }
 
     case "createRoom": {
-      if (cs.roomId) throw new Error("Already in a room");
+      // Auto-leave any previous room so the player is never stuck
+      if (cs.roomId) autoLeave(cs);
       if (!isStr(msg.name) || msg.name.length === 0 || msg.name.length > MAX_ROOM_NAME_LEN)
         throw new Error(`Room name must be 1–${MAX_ROOM_NAME_LEN} characters`);
       if (!isStr(msg.nickname) || msg.nickname.length === 0 || msg.nickname.length > MAX_NICKNAME_LEN)
@@ -390,7 +458,8 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
     }
 
     case "joinRoom": {
-      if (cs.roomId) throw new Error("Already in a room");
+      // Auto-leave any previous room so the player is never stuck
+      if (cs.roomId) autoLeave(cs);
       if (!isStr(msg.roomId) || msg.roomId.length === 0)
         throw new Error("roomId must be a non-empty string");
       if (!isStr(msg.nickname) || msg.nickname.length === 0 || msg.nickname.length > MAX_NICKNAME_LEN)
@@ -413,18 +482,12 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
 
     case "leaveRoom": {
       if (!cs.roomId || !cs.playerId) break;
-      const room = rooms.get(cs.roomId);
-      if (room) {
-        const player = room.players.find((p) => p.id === cs.playerId);
-        log(`room:${room.id} ${player?.nickname ?? cs.playerId} left`);
-        room.removeHuman(cs.playerId);
-        broadcastToRoom(room, { t: "room", room: room.toView() });
-        if (!room.started && room.players.filter((p) => !p.isBot).length === 0) {
-          rooms.delete(room.id);
-        }
+      const leaveRoom = rooms.get(cs.roomId);
+      if (leaveRoom) {
+        const player = leaveRoom.players.find((p) => p.id === cs.playerId);
+        log(`room:${leaveRoom.id} ${player?.nickname ?? cs.playerId} left`);
       }
-      cs.roomId = null;
-      cs.playerId = null;
+      autoLeave(cs);
       broadcastRoomList();
       send(ws, { t: "rooms", rooms: rooms.list().map((r) => r.toSummary()) });
       break;
@@ -442,7 +505,7 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       const seed = Date.now();
       room.start(seed);
       log(`room:${room.id} game started (${room.state!.players.length} players, seed:${seed})`);
-      broadcastToRoom(room, { t: "state", state: room.state!, events: [] });
+      broadcastState(room, []);
       broadcastRoomList();
       if (room.currentIsBot()) scheduleBotSteps(room);
       break;
@@ -468,14 +531,20 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         if (ev.key === "bankrupt") log(`room:${room.id} ${player?.nickname ?? cs.playerId} went bankrupt`);
       }
 
-      const events = room.formatEvents(rawEvents);
-      broadcastToRoom(room, { t: "state", state: room.state!, events });
+      broadcastState(room, rawEvents);
       if (room.state!.phase === "finished" && room.state!.winnerId) {
         const winner = room.state!.players.find((p) => p.id === room.state!.winnerId);
         if (winner) {
           log(`room:${room.id} game over — winner: ${winner.name}`);
           broadcastToRoom(room, { t: "gameOver", winnerId: winner.id, winnerName: winner.name });
         }
+        // Disassociate all connections from the finished room
+        for (const [, rcs] of getRoomConns(room.id)) {
+          rcs.roomId = null;
+          rcs.playerId = null;
+        }
+        rooms.delete(room.id);
+        broadcastRoomList();
       } else if (room.currentIsBot()) {
         scheduleBotSteps(room);
       }
@@ -520,8 +589,35 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       } else {
         send(ws, { t: "room", room: room.toView() });
       }
+      broadcastToRoom(room, { t: "room", room: room.toView() }, ws);
       // If it was this player's "bot-driven" turn, check and stop bot loop
       // (next bot step will see currentIsBot() = false and stop)
+      break;
+    }
+
+    case "setLocale": {
+      const locale = msg.locale;
+      if (locale !== "de" && locale !== "en") throw new Error("Invalid locale");
+      cs.locale = locale;
+      // Re-send current state in the new locale if in a game
+      if (cs.roomId) {
+        const room = rooms.get(cs.roomId);
+        if (room?.started && room.state) {
+          send(ws, { t: "state", state: room.state, events: [] });
+        }
+      }
+      break;
+    }
+
+    case "chooseFigure": {
+      if (!cs.roomId || !cs.playerId) throw new Error("Not in a room");
+      const room = rooms.get(cs.roomId);
+      if (!room) throw new Error("Room not found");
+      if (!isStr(msg.color)) throw new Error("color must be a string");
+      if (!isFiniteInt(msg.figureIndex)) throw new Error("figureIndex must be an integer");
+      const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex);
+      if (err) throw new Error(err);
+      broadcastToRoom(room, { t: "room", room: room.toView() });
       break;
     }
 

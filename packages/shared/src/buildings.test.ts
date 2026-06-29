@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createGame, applyCommand, currentPlayer, legalCommands } from "./engine.js";
+import { createGame, applyCommand, currentPlayer, legalCommands, canBuild } from "./engine.js";
 import { getBoard, JAIL_POS } from "./board.js";
 import { makeRng, rollDie, nextInt } from "./rng.js";
 import type { GameState, Command } from "./types.js";
@@ -50,6 +50,30 @@ function stateWithDeeppink(seed = 0): GameState {
   return s;
 }
 
+/**
+ * Reset the one-build-per-turn flag so a test can issue another BUILD without
+ * cycling a full turn. The engine sets builtThisTurn=true after each BUILD and
+ * clears it on turn advance; these unit tests exercise building mechanics in
+ * isolation, so we simulate "a fresh turn" by clearing the flag directly.
+ */
+function resetBuildFlag(s: GameState): GameState {
+  const cloned = structuredClone(s);
+  cloned.builtThisTurn = false;
+  return cloned;
+}
+
+/** Build `count` houses on each of `positions` in even-build order, resetting the per-turn flag between builds. */
+function buildHousesEvenly(s: GameState, positions: number[], count: number): GameState {
+  let cur = s;
+  for (let i = 0; i < count; i++) {
+    for (const pos of positions) {
+      cur = resetBuildFlag(cur);
+      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos, building: "house" }));
+    }
+  }
+  return cur;
+}
+
 // ---------------------------------------------------------------------------
 // BUILD - houses
 // ---------------------------------------------------------------------------
@@ -91,30 +115,28 @@ describe("BUILD - houses", () => {
     const s = stateWithMonopoly();
     // First build 1 house on pos 13 (legal since both start at 0)
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    // Reset per-turn flag so the even-build rule (not one-per-turn) is what blocks this.
+    const s1r = resetBuildFlag(s1);
     // Now try to build another on 13 when 14 still has 0 - should fail (even rule: 14 has 0, 13 has 1)
-    expect(() => applyCommand(s1, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+    expect(() => applyCommand(s1r, { type: "BUILD", pos: 13, building: "house" })).toThrow();
   });
 
   it("even-build: can build 2nd house on A after B gets 1", () => {
     const s = stateWithMonopoly();
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }); // A: 1 house
-    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" }); // B: 1 house
-    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" }); // A: 2 houses
+    const { state: s2 } = applyCommand(resetBuildFlag(s1), { type: "BUILD", pos: 14, building: "house" }); // B: 1 house
+    const { state: s3 } = applyCommand(resetBuildFlag(s2), { type: "BUILD", pos: 13, building: "house" }); // A: 2 houses
     expect(s3.buildings[13]?.houses).toBe(2);
     expect(s3.buildings[14]?.houses).toBe(1);
   });
 
   it("cannot build a 5th house (max is 4 before hotel)", () => {
     const s = stateWithMonopoly();
-    let cur = s;
-    // Build 4 houses on each street
-    for (let i = 0; i < 4; i++) {
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
-    }
+    // Build 4 houses on each street (one-per-turn paced via helper)
+    const cur = buildHousesEvenly(s, [13, 14], 4);
     expect(cur.buildings[13]?.houses).toBe(4);
-    // Should not be able to add a 5th house
-    expect(() => applyCommand(cur, { type: "BUILD", pos: 13, building: "house" })).toThrow();
+    // Should not be able to add a 5th house (even after a fresh turn)
+    expect(() => applyCommand(resetBuildFlag(cur), { type: "BUILD", pos: 13, building: "house" })).toThrow();
   });
 });
 
@@ -125,12 +147,8 @@ describe("BUILD - houses", () => {
 describe("BUILD - hotel", () => {
   it("can build a hotel when all streets in group have 4 houses", () => {
     const s = stateWithMonopoly();
-    let cur = s;
-    // Build 4 houses on each street
-    for (let i = 0; i < 4; i++) {
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
-    }
+    // Build 4 houses on each street, then a hotel on a fresh turn.
+    const cur = resetBuildFlag(buildHousesEvenly(s, [13, 14], 4));
     const { state, events } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
     expect(state.buildings[13]?.hotel).toBe(true);
     expect(state.buildings[13]?.houses).toBe(0);
@@ -143,11 +161,7 @@ describe("BUILD - hotel", () => {
     if (tile.type !== "street") throw new Error("not a street");
 
     const s = stateWithMonopoly();
-    let cur = s;
-    for (let i = 0; i < 4; i++) {
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
-    }
+    const cur = resetBuildFlag(buildHousesEvenly(s, [13, 14], 4));
     const moneyBefore = cur.players[0]!.money;
     const { state } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
     expect(state.players[0]!.money).toBe(moneyBefore - tile.hotelCost);
@@ -155,12 +169,8 @@ describe("BUILD - hotel", () => {
 
   it("cannot build hotel without 4 houses on this street", () => {
     const s = stateWithMonopoly();
-    let cur = s;
     // Only 3 houses each
-    for (let i = 0; i < 3; i++) {
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
-    }
+    const cur = resetBuildFlag(buildHousesEvenly(s, [13, 14], 3));
     expect(() => applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" })).toThrow();
   });
 });
@@ -190,11 +200,11 @@ describe("BUILD - factory", () => {
 
   it("cannot build factory if another member has houses", () => {
     const s = stateWithMonopoly();
-    // Build 1 house on pos 13
+    // Build 1 house on pos 13 then 1 on pos 14 (one-per-turn paced)
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
-    // Now try factory on 13 (has 1 house) - should fail
-    expect(() => applyCommand(s2, { type: "BUILD", pos: 13, building: "factory" })).toThrow();
+    const { state: s2 } = applyCommand(resetBuildFlag(s1), { type: "BUILD", pos: 14, building: "house" });
+    // Now try factory on 13 (has 1 house) - should fail (fresh turn so one-per-turn isn't the blocker)
+    expect(() => applyCommand(resetBuildFlag(s2), { type: "BUILD", pos: 13, building: "factory" })).toThrow();
   });
 });
 
@@ -286,10 +296,11 @@ describe("SELL_BUILDING", () => {
     if (tile.type !== "street") throw new Error("not a street");
 
     // Build 2 houses on 13, 1 on 14 so even-sell rule allows selling from 13
+    // (one-build-per-turn: reset the flag between each BUILD to simulate fresh turns)
     const s = stateWithMonopoly();
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
-    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" });
+    const { state: s2 } = applyCommand(resetBuildFlag(s1), { type: "BUILD", pos: 14, building: "house" });
+    const { state: s3 } = applyCommand(resetBuildFlag(s2), { type: "BUILD", pos: 13, building: "house" });
     // s3: 13=2 houses, 14=1 house. Can sell from 13 (after sell: 13=1, 14=1, diff=0 OK)
     const moneyBefore = s3.players[0]!.money;
     const { state: s4, events } = applyCommand(s3, { type: "SELL_BUILDING", pos: 13 });
@@ -304,11 +315,7 @@ describe("SELL_BUILDING", () => {
     if (tile.type !== "street") throw new Error("not a street");
 
     const s = stateWithMonopoly();
-    let cur = s;
-    for (let i = 0; i < 4; i++) {
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 13, building: "house" }));
-      ({ state: cur } = applyCommand(cur, { type: "BUILD", pos: 14, building: "house" }));
-    }
+    const cur = resetBuildFlag(buildHousesEvenly(s, [13, 14], 4));
     const { state: withHotel } = applyCommand(cur, { type: "BUILD", pos: 13, building: "hotel" });
     const moneyBefore = withHotel.players[0]!.money;
 
@@ -338,10 +345,11 @@ describe("SELL_BUILDING", () => {
 
   it("cannot sell house if another street in group has strictly more (even-sell rule)", () => {
     // 13 has 2 houses, 14 has 1 house. Selling from 13 -> 1 (matches 14): allowed.
+    // (one-build-per-turn: reset the flag between each BUILD to simulate fresh turns)
     const s = stateWithMonopoly();
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
-    const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" });
+    const { state: s2 } = applyCommand(resetBuildFlag(s1), { type: "BUILD", pos: 14, building: "house" });
+    const { state: s3 } = applyCommand(resetBuildFlag(s2), { type: "BUILD", pos: 13, building: "house" });
     // s3: 13 has 2 houses, 14 has 1 house
     const { state: s4 } = applyCommand(s3, { type: "SELL_BUILDING", pos: 13 });
     expect(s4.buildings[13]?.houses).toBe(1);
@@ -388,7 +396,7 @@ describe("MORTGAGE and UNMORTGAGE", () => {
   it("cannot mortgage property with buildings on it", () => {
     const s = stateWithMonopoly();
     const { state: withHouse } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    const { state: withHouse14 } = applyCommand(withHouse, { type: "BUILD", pos: 14, building: "house" });
+    const { state: withHouse14 } = applyCommand(resetBuildFlag(withHouse), { type: "BUILD", pos: 14, building: "house" });
     // Now try to mortgage 13 (has a house)
     expect(() => applyCommand(withHouse14, { type: "MORTGAGE", pos: 13 })).toThrow();
   });
@@ -467,7 +475,7 @@ describe("SELL_PROPERTY", () => {
   it("cannot sell property with buildings", () => {
     const s = stateWithMonopoly();
     const { state: withHouse } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    const { state: withHouse14 } = applyCommand(withHouse, { type: "BUILD", pos: 14, building: "house" });
+    const { state: withHouse14 } = applyCommand(resetBuildFlag(withHouse), { type: "BUILD", pos: 14, building: "house" });
     expect(() => applyCommand(withHouse14, { type: "SELL_PROPERTY", pos: 13 })).toThrow();
   });
 
@@ -745,5 +753,68 @@ describe("legalCommands - management", () => {
     const cmds = legalCommands(s);
     expect(cmds).not.toContain("BUILD");
     expect(cmds).not.toContain("MORTGAGE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One-build-per-turn limit (classic Monopoly rule)
+// ---------------------------------------------------------------------------
+
+describe("one-build-per-turn limit", () => {
+  it("builtThisTurn starts false on a fresh game", () => {
+    const s = twoPlayers();
+    expect(s.builtThisTurn).toBe(false);
+  });
+
+  it("a single BUILD sets builtThisTurn true", () => {
+    const s = stateWithMonopoly();
+    const { state } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(state.builtThisTurn).toBe(true);
+  });
+
+  it("a second BUILD in the same turn is rejected (even on a different street)", () => {
+    const s = stateWithMonopoly();
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    // 14 is the other mistyrose street; building there would be the 2nd build this turn
+    expect(() => applyCommand(s1, { type: "BUILD", pos: 14, building: "house" })).toThrow(/one building per turn/);
+  });
+
+  it("legalCommands omits BUILD once builtThisTurn is true", () => {
+    const s = stateWithMonopoly();
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(legalCommands(s1)).not.toContain("BUILD");
+  });
+
+  it("BUILD is allowed again after the turn advances (flag reset)", () => {
+    // Two players each owning a monopoly so a full turn cycle returns to A with a build available.
+    const s = stateWithMonopoly();
+    s.players[1]!.money = 5000;
+    s.ownership[3] = "B";
+    s.ownership[4] = "B"; // Bob owns deeppink
+    // A builds once, then BUILD is blocked this turn
+    const { state: a1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(a1.builtThisTurn).toBe(true);
+    // A rolls to end the turn; play continues until it is A's turn again.
+    let cur = a1;
+    let guard = 0;
+    while (guard++ < 200) {
+      if (cur.phase === "awaiting-buy") {
+        ({ state: cur } = applyCommand(cur, { type: "DECLINE_PROPERTY" }));
+        continue;
+      }
+      ({ state: cur } = applyCommand(cur, { type: "ROLL_DICE" }));
+      if (cur.phase === "finished") break;
+      // Stop as soon as control returns to player A (index 0) at the start of a fresh turn.
+      if (cur.currentPlayerIndex === 0 && !cur.builtThisTurn && cur.players[0]!.alive) break;
+    }
+    // builtThisTurn must have been reset for the new turn
+    expect(cur.builtThisTurn).toBe(false);
+  });
+
+  it("canBuild predicate returns false after builtThisTurn", () => {
+    const s = stateWithMonopoly();
+    expect(canBuild(s, 13, "house")).toBe(true);
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(canBuild(s1, 13, "house")).toBe(false);
   });
 });

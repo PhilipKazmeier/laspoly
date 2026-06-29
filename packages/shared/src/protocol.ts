@@ -17,7 +17,15 @@ export interface RoomPlayer {
   id: string;
   nickname: string;
   isBot: boolean;
+  color?: string;
+  figureIndex?: number;
 }
+
+// Available palette — client + server both import these to stay in sync.
+export const FIGURE_COLORS = ["red", "blue", "green", "yellow", "purple", "orange"] as const;
+export type FigureColor = typeof FIGURE_COLORS[number];
+// figureIndex 0-5 → car1..car5, police
+export const FIGURE_COUNT = 6;
 
 export interface RoomView {
   id: string;
@@ -39,7 +47,9 @@ export type ClientMessage =
   | { t: "command"; command: Command }
   | { t: "chat"; text: string }
   | { t: "listRooms" }
-  | { t: "resume"; roomId: string; playerId: string; token: string };
+  | { t: "resume"; roomId: string; playerId: string; token: string }
+  | { t: "setLocale"; locale: "de" | "en" }
+  | { t: "chooseFigure"; color: string; figureIndex: number };
 
 export interface FormattedEvent {
   key: string;
