@@ -6,6 +6,16 @@ const net = new Net();
 const board3d = new Board3D(document.getElementById("renderCanvas") as HTMLCanvasElement);
 const ui = new UI(document.getElementById("ui") as HTMLDivElement, net, board3d);
 
+// Clicking the 3D dice cup sends a roll, exactly like the Roll button does.
+// The server rejects it if it isn't this player's turn, so no client guard needed.
+board3d.setRollHandler(() => {
+  net.send({ t: "command", command: { type: "ROLL_DICE" } });
+});
+// Tile clicks are exposed for the HTML property-card popup (owned by the UI agent).
+board3d.setTileClickHandler((pos) => {
+  console.log("[board3d] tile clicked:", pos);
+});
+
 // Track whether we are attempting a session resume (suppress initial lobby flash)
 let resuming = false;
 

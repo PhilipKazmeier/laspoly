@@ -4,6 +4,7 @@ import {
   ArcRotateCamera,
   HemisphericLight,
   PointLight,
+  DirectionalLight,
   Vector3,
   MeshBuilder,
   StandardMaterial,
@@ -196,6 +197,25 @@ export class Board3D {
   private diceResultLabel: AbstractMesh | null = null;
   private camera!: ArcRotateCamera;
   private tokenRings: Map<string, AbstractMesh> = new Map();
+  // Interaction hooks
+  private rollHandler: (() => void) | null = null;
+  private tileClickHandler: ((pos: number) => void) | null = null;
+  // Dice cup visibility + dice value labels
+  private cupVisible = true;
+  private diePipLabel1: AbstractMesh | null = null;
+  private diePipLabel2: AbstractMesh | null = null;
+  // Token moves deferred until the dice animation settles
+  private movePending: Map<string, { from: number; to: number }> = new Map();
+  // Ownership markers (tilePos -> stripe mesh) and per-player deed/money displays
+  private ownershipMarkers: Map<number, AbstractMesh> = new Map();
+  private playerDisplayMeshes: Map<string, AbstractMesh> = new Map();
+  // World seat positions for up to 4 players' on-board deed/money displays
+  private readonly SEAT_POSITIONS: Array<[number, number, number]> = [
+    [-12, 0.5, -12],
+    [12, 0.5, -12],
+    [12, 0.5, 12],
+    [-12, 0.5, 12],
+  ];
 
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true);
@@ -214,13 +234,35 @@ export class Board3D {
     this.camera.lowerRadiusLimit = 15;
     this.camera.upperRadiusLimit = 80;
     this.camera.upperBetaLimit = Math.PI / 2.2;
-    this.camera.lowerBetaLimit = 0.1;
+    this.camera.lowerBetaLimit = 0.15; // prevent fully-vertical "mirror" glare
 
     // ---- Lighting ----------------------------------------------------------
+    // Specular is suppressed across lights/materials so the felt + board read
+    // flat and legible from a top-down view (no white blowout).
     const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
-    ambient.intensity = 0.65;
+    ambient.intensity = 0.8;
+    ambient.specular = new Color3(0, 0, 0);
     const key = new PointLight("key", new Vector3(0, 20, -5), this.scene);
-    key.intensity = 0.55;
+    key.intensity = 0.3;
+    key.specular = new Color3(0.1, 0.1, 0.1);
+    // Soft fill from straight above so the board is evenly lit when viewed top-down.
+    const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
+    fill.intensity = 0.25;
+    fill.specular = new Color3(0, 0, 0);
+
+    // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
+    this.scene.onPointerObservable.add((pointerInfo) => {
+      if (pointerInfo.type !== 1) return; // POINTERDOWN
+      const picked = pointerInfo.pickInfo;
+      if (!picked?.hit || !picked.pickedMesh) return;
+      const meshName = picked.pickedMesh.name;
+      if (meshName.startsWith("tile_")) {
+        const pos = parseInt(meshName.slice(5), 10);
+        if (!isNaN(pos) && this.tileClickHandler) this.tileClickHandler(pos);
+      } else if (meshName === "diceCup") {
+        if (this.rollHandler) this.rollHandler();
+      }
+    });
 
     // ---- Wooden table -------------------------------------------------------
     const table = MeshBuilder.CreateBox(
@@ -269,10 +311,11 @@ export class Board3D {
             : Mesh.MergeMeshes(realMeshes, true, true, undefined, false, false);
         if (!merged) continue;
 
-        // Raw car spans ~0.3 units; normalise to a ~1.3-unit token.
+        // Raw car spans ~0.3 units; normalise to a ~0.7-unit token (fits a tile,
+        // leaves room for up to 4 tokens clustered without overlapping).
         const bounds = merged.getBoundingInfo().boundingBox.extendSize;
         const maxDim = Math.max(bounds.x, bounds.y, bounds.z) * 2 || 1;
-        const target = 1.3;
+        const target = 0.7;
         merged.scaling.setAll(target / maxDim);
         merged.name = `carTemplate_${i}`;
         merged.setEnabled(false);
@@ -308,6 +351,7 @@ export class Board3D {
     boardBase.position.y = -0.04;
     const boardMat = new StandardMaterial("boardMat", this.scene);
     boardMat.diffuseColor = new Color3(0.32, 0.54, 0.28);
+    boardMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     boardBase.material = boardMat;
 
     // ---- Felt centre --------------------------------------------------------
@@ -320,6 +364,7 @@ export class Board3D {
     felt.position.y = 0.01;
     const feltMat = new StandardMaterial("feltMat", this.scene);
     feltMat.diffuseTexture = new Texture("/assets/tex_felt.png", this.scene);
+    feltMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     felt.material = feltMat;
 
     // ---- Card deck ----------------------------------------------------------
@@ -358,6 +403,7 @@ export class Board3D {
       );
       tileMesh.position.set(cx, 0.045, cz);
       tileMesh.rotation.y = (angle * Math.PI) / 180;
+      tileMesh.isPickable = true; // tile-click hook (setTileClickHandler)
 
       const tileMat = new StandardMaterial(`tileMat_${tile.pos}`, this.scene);
       tileMat.diffuseColor = new Color3(0.97, 0.95, 0.88);
@@ -377,7 +423,7 @@ export class Board3D {
     }
   }
 
-  /** Adds the group-coloured bar on the OUTER edge of a property tile. */
+  /** Adds the group-coloured bar on the INNER edge (toward board centre) of a property tile. */
   private addColorBar(
     cx: number,
     cz: number,
@@ -404,30 +450,24 @@ export class Board3D {
       this.scene
     );
 
-    // In local space, the bar sits at z = –(tileD/2 - BAR_DEPTH/2) i.e. the outer (–z) edge.
-    // After parent rotation this maps to the correct world side.
-    // But since Babylon has no parent hierarchy here we compute world position directly.
-    // The tile's local –z edge in world space:
-    const localOffsetZ = -(tileD / 2 - BAR_DEPTH / 2); // in tile-local space
+    // The bar sits at the tile's local +z edge (toward the board centre).
+    // The tile's local +z axis maps to world (sin(rad), cos(rad)); since every
+    // edge's tile is rotated so its +z points inward, +localOffsetZ lands the
+    // bar on the inner edge for all four sides.
+    const localOffsetZ = (tileD / 2 - BAR_DEPTH / 2); // inner edge (toward centre)
     const rad = (angleDeg * Math.PI) / 180;
     const worldOffsetX = localOffsetZ * Math.sin(rad);
     const worldOffsetZ = localOffsetZ * Math.cos(rad);
-
-    // Adjust: outer direction tells us which world side is "outer".
-    // For angle=0 (bottom edge), outerDir=(0,-1), localOffsetZ is –z in tile space,
-    // which maps to –z in world space → matches.
-    // The formula localOffsetZ * sin(rad), cos(rad) gives (0, localOffsetZ) for angle=0 → correct.
-    // For angle=270 (right edge), rad=3π/2: sin=–1, cos≈0 → worldX= localOffsetZ * –1 = +halfD,
-    // worldZ=0.  The outer direction for right edge is +x.  We need worldX = +halfD.  ✓
 
     bar.position.set(cx + worldOffsetX, 0.11, cz + worldOffsetZ);
     bar.rotation.y = rad;
 
     const barMat = new StandardMaterial(`barMat_${pos}`, this.scene);
     barMat.diffuseColor = hexToColor3(colorHex);
+    barMat.specularColor = new Color3(0, 0, 0);
     bar.material = barMat;
 
-    // Suppress unused variable warnings
+    // Suppress unused variable warnings (outer direction kept for reference)
     void odx;
     void odz;
   }
@@ -463,33 +503,22 @@ export class Board3D {
       ctx.font = "bold 40px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
-      // Street / station / attraction: wrapped text, rotated 90° in texture space
-      // so it reads left-to-right when the label plane is on the outer half of the tile.
-      // We draw top→bottom rotated 90° CCW so reading from outside is natural.
-      ctx.save();
-      ctx.translate(TEX_W / 2, TEX_H / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      const FONT_SIZE = 16;
-      const MAX_W = TEX_H - 8; // label uses the short dimension for max-width
-      ctx.font = `bold ${FONT_SIZE}px Arial`;
+      // Street / station / attraction: HORIZONTAL text, word-wrapped onto up to
+      // 3 lines, drawn near the top of the texture (which maps to just inside the
+      // inner colour bar once the plane is positioned).
       ctx.fillStyle = "#111";
-      // Measure and auto-shrink if needed
-      const totalWidth = ctx.measureText(name).width;
-      const finalFont = totalWidth <= MAX_W ? `bold ${FONT_SIZE}px Arial` : `bold 12px Arial`;
-      ctx.font = finalFont;
-
-      // Wrap text
-      const LINE_H = 18;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const FONT_SIZE = 16;
+      const LINE_H = 20;
+      ctx.font = `bold ${FONT_SIZE}px Arial`;
+      const MAX_W = TEX_W - 16;
       const words = name.split(" ");
-      const lineMaxW = TEX_W - 10;
       const lines: string[] = [];
       let current = "";
       for (const w of words) {
         const test = current ? `${current} ${w}` : w;
-        if (ctx.measureText(test).width > lineMaxW && current) {
+        if (ctx.measureText(test).width > MAX_W && current) {
           lines.push(current);
           current = w;
         } else {
@@ -497,28 +526,37 @@ export class Board3D {
         }
       }
       if (current) lines.push(current);
-
-      const startY = -((lines.length - 1) * LINE_H) / 2;
-      for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i]!, 0, startY + i * LINE_H);
+      // Shrink slightly if it spills past 2 lines so 3 lines still fit.
+      ctx.font = lines.length > 2 ? `bold 13px Arial` : `bold ${FONT_SIZE}px Arial`;
+      const startY = 10;
+      for (let i = 0; i < Math.min(lines.length, 3); i++) {
+        ctx.fillText(lines[i]!, TEX_W / 2, startY + i * LINE_H);
       }
-
-      ctx.restore();
     }
 
     tex.update();
 
-    // Plane on top of the tile
-    const planeW = isCorner ? CORNER * 0.9 : TILE_W * 0.88;
-    const planeH = isCorner ? CORNER * 0.9 : TILE_D * 0.88;
+    // Plane on top of the tile, occupying the inner portion (below the bar).
+    const BAR_DEPTH = 0.4;
+    const labelDepth = tileD - BAR_DEPTH;
+    const planeW = isCorner ? CORNER * 0.88 : TILE_W * 0.88;
+    const planeH = isCorner ? CORNER * 0.88 : labelDepth * 0.85;
     const label = MeshBuilder.CreatePlane(
       `label_${pos}`,
       { width: planeW, height: planeH },
       this.scene
     );
     label.rotation.x = Math.PI / 2; // lie flat
-    label.rotation.y = (angleDeg * Math.PI) / 180;
-    label.position.set(cx, 0.095, cz);
+    // Read upright from the outer edge: top (21–29) & left (31–39) edges need +180°
+    // so the horizontal text isn't upside-down when viewed from outside the ring.
+    const textAngleDeg = (!isCorner && pos >= 21 && pos <= 39) ? angleDeg + 180 : angleDeg;
+    label.rotation.y = (textAngleDeg * Math.PI) / 180;
+    // Shift toward the board centre (opposite the outer edge) so the label sits
+    // below the inner colour bar rather than centred on the tile.
+    const [odx, odz] = outerDirection(pos);
+    const innerShift = isCorner ? 0 : BAR_DEPTH / 2;
+    label.position.set(cx - odx * innerShift, 0.096, cz - odz * innerShift);
+    label.isPickable = false;
 
     const labelMat = new StandardMaterial(`labelMat_${pos}`, this.scene);
     labelMat.diffuseTexture = tex;
@@ -641,7 +679,7 @@ export class Board3D {
   private makeFallbackToken(playerId: string, color: Color3): AbstractMesh {
     const mesh = MeshBuilder.CreateCylinder(
       `token_fb_${playerId}`,
-      { diameter: 0.55, height: 0.65, tessellation: 8 },
+      { diameter: 0.35, height: 0.45, tessellation: 8 },
       this.scene
     );
     const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
@@ -713,8 +751,10 @@ export class Board3D {
       const [x, z] = tileXZ(player.position);
       const group = byPos.get(player.position) ?? [];
       const i = group.indexOf(player.id);
-      const offsetX = (i % 2) * 0.5 - 0.25;
-      const offsetZ = Math.floor(i / 2) * 0.5 - 0.25;
+      // 2×2 cluster grid: clear non-overlapping offsets for up to 4 tokens/tile.
+      const GRID_STEP = 0.45;
+      const offsetX = (i % 2) * GRID_STEP - GRID_STEP / 2;
+      const offsetZ = Math.floor(i / 2) * GRID_STEP - GRID_STEP / 2;
 
       // Upgrade a fallback cylinder to a car model once models load
       const existing = this.tokenMeshes.get(player.id);
@@ -755,7 +795,7 @@ export class Board3D {
           const ringColor = brighten(playerColor3(player.color));
           ring = MeshBuilder.CreateTorus(
             `ring_${player.id}`,
-            { diameter: 1.05, thickness: 0.22, tessellation: 20 },
+            { diameter: 0.55, thickness: 0.12, tessellation: 16 },
             this.scene
           );
           const ringMat = new StandardMaterial(`ringMat_${player.id}`, this.scene);
@@ -827,6 +867,140 @@ export class Board3D {
   }
 
   // -------------------------------------------------------------------------
+  // Ownership markers (on-board, owner-coloured stripe per property tile)
+  // -------------------------------------------------------------------------
+  private updateOwnershipMarkers(state: GameState) {
+    // Dispose markers for tiles that are no longer owned.
+    for (const [pos, mesh] of this.ownershipMarkers) {
+      if (!state.ownership[pos]) {
+        mesh.dispose();
+        this.ownershipMarkers.delete(pos);
+      }
+    }
+
+    for (const [posStr, playerId] of Object.entries(state.ownership)) {
+      const pos = Number(posStr);
+      const player = state.players.find((p) => p.id === playerId);
+      if (!player) continue;
+
+      const isCorner = pos === 0 || pos === 10 || pos === 20 || pos === 30;
+      if (isCorner) continue; // corners aren't ownable properties
+
+      // Recreate each update so owner colour + mortgage state always match.
+      const existing = this.ownershipMarkers.get(pos);
+      if (existing) { existing.dispose(); this.ownershipMarkers.delete(pos); }
+
+      const [cx, cz] = tileXZ(pos);
+      const [odx, odz] = outerDirection(pos);
+      const isMortgaged = !!state.mortgaged[pos];
+
+      // A raised owner-coloured stripe at the OUTER edge of the tile (the inner
+      // edge now carries the group colour bar, so the owner marker lives outside
+      // it to stay distinct). Raised a little so it reads as a "deed flag".
+      const marker = MeshBuilder.CreateBox(
+        `own_${pos}`,
+        { width: TILE_W * 0.7, height: 0.18, depth: 0.16 },
+        this.scene
+      );
+      const outerEdgeX = cx + odx * (TILE_D / 2 - 0.12);
+      const outerEdgeZ = cz + odz * (TILE_D / 2 - 0.12);
+      marker.position.set(outerEdgeX, 0.13, outerEdgeZ);
+      marker.rotation.y = (getFieldAngle(pos) * Math.PI) / 180;
+
+      const mat = new StandardMaterial(`ownMat_${pos}`, this.scene);
+      const baseColor = playerColor3(player.color);
+      // Mortgaged → dull grey so it reads distinctly from an active deed.
+      mat.diffuseColor = isMortgaged ? new Color3(0.3, 0.3, 0.3) : baseColor;
+      mat.emissiveColor = isMortgaged ? new Color3(0.1, 0.1, 0.1) : baseColor.scale(0.5);
+      mat.specularColor = new Color3(0, 0, 0);
+      marker.material = mat;
+      marker.isPickable = false;
+      this.ownershipMarkers.set(pos, marker);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-player on-board deed + money displays (up to 4 players)
+  // -------------------------------------------------------------------------
+  private updatePlayerDisplays(state: GameState) {
+    const board = getBoard(state.boardId);
+    const alivePlayers = state.players.filter((p) => p.alive);
+
+    // Remove displays for players who left/died.
+    for (const [id, mesh] of this.playerDisplayMeshes) {
+      if (!alivePlayers.find((p) => p.id === id)) {
+        mesh.dispose();
+        this.playerDisplayMeshes.delete(id);
+      }
+    }
+
+    alivePlayers.slice(0, 4).forEach((player, seatIdx) => {
+      // Cheap to recreate for ≤4 players each state change.
+      const existing = this.playerDisplayMeshes.get(player.id);
+      if (existing) existing.dispose();
+
+      const ownedPositions = Object.entries(state.ownership)
+        .filter(([, pid]) => pid === player.id)
+        .map(([pos]) => Number(pos));
+
+      const groupSet: Set<string> = new Set();
+      for (const pos of ownedPositions) {
+        const tile = board.tiles.find((t) => t.pos === pos);
+        if (tile && "group" in tile && tile.group) groupSet.add(tile.group as string);
+      }
+
+      const TEX_W = 192, TEX_H = 80;
+      const tex = new DynamicTexture(`pdTex_${player.id}`, { width: TEX_W, height: TEX_H }, this.scene, false);
+      const ctx = tex.getContext() as CanvasRenderingContext2D;
+      ctx.fillStyle = "rgba(20,20,30,0.85)";
+      ctx.fillRect(0, 0, TEX_W, TEX_H);
+
+      // Name + colour swatch
+      const pColorHex = PLAYER_COLOR_HEX[player.color.toLowerCase()] ?? player.color;
+      ctx.fillStyle = pColorHex;
+      ctx.fillRect(4, 4, 10, 10);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 13px Arial";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(player.name.slice(0, 14), 18, 4);
+
+      // Money
+      ctx.fillStyle = "#facc15";
+      ctx.font = "12px Arial";
+      ctx.fillText(`€${player.money.toLocaleString()}`, 18, 20);
+
+      // Owned property group colour chips
+      let dotX = 4;
+      for (const grp of Array.from(groupSet).slice(0, 12)) {
+        ctx.fillStyle = GROUP_COLORS[grp] ?? "#888";
+        ctx.fillRect(dotX, 40, 12, 12);
+        dotX += 14;
+      }
+
+      // Deed count
+      ctx.fillStyle = "#ddd";
+      ctx.font = "11px Arial";
+      ctx.fillText(`${ownedPositions.length} props`, 4, 56);
+
+      tex.update();
+
+      const plane = MeshBuilder.CreatePlane(`playerDisplay_${player.id}`, { width: 2.4, height: 1.0 }, this.scene);
+      const seat = this.SEAT_POSITIONS[seatIdx] ?? ([-12, 0.5, -12] as [number, number, number]);
+      plane.position.set(seat[0], seat[1], seat[2]);
+      plane.billboardMode = 7;
+      const mat = new StandardMaterial(`pdMat_${player.id}`, this.scene);
+      mat.diffuseTexture = tex;
+      mat.backFaceCulling = false;
+      mat.emissiveColor = new Color3(0.8, 0.8, 0.8);
+      mat.specularColor = new Color3(0, 0, 0);
+      plane.material = mat;
+      plane.isPickable = false;
+      this.playerDisplayMeshes.set(player.id, plane);
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Public update (called on every GameState message)
   // -------------------------------------------------------------------------
   update(state: GameState, _myId: string | null) {
@@ -839,6 +1013,18 @@ export class Board3D {
     this.drawBoard(state.boardId);
     this.rebuildTokens(state, _myId);
     this.updateBuildings(state);
+    this.updateOwnershipMarkers(state);
+    this.updatePlayerDisplays(state);
+  }
+
+  /** Register a callback invoked when the player clicks the dice cup to roll. */
+  setRollHandler(cb: () => void): void {
+    this.rollHandler = cb;
+  }
+
+  /** Register a callback called with the tile position (0–39) when a tile is clicked. */
+  setTileClickHandler(cb: (pos: number) => void): void {
+    this.tileClickHandler = cb;
   }
 
   /**
@@ -857,8 +1043,8 @@ export class Board3D {
   setView(v: 'standard' | 'top'): void {
     if (v === 'top') {
       this.camera.alpha = -Math.PI / 2;
-      this.camera.beta = 0.12; // just above lowerBetaLimit (0.1) → near top-down
-      this.camera.radius = 40;
+      this.camera.beta = 0.25; // ~14° from vertical — readable top-down without mirror glare
+      this.camera.radius = 38;
     } else {
       this.camera.alpha = -Math.PI / 2;
       this.camera.beta = Math.PI / 3.2;
@@ -868,6 +1054,21 @@ export class Board3D {
 
   /** Detect per-player position changes and enqueue movement / jail animations. */
   private applyStateDiffs(state: GameState) {
+    // When the turn advances to a new player awaiting a roll, bring the cup back
+    // (it was hidden after the previous roll) and clear the resting dice labels.
+    if (this.lastState) {
+      const prevPhase = this.lastState.phase;
+      const prevCurrentIdx = this.lastState.currentPlayerIndex;
+      if (
+        state.phase === "awaiting-roll" &&
+        (prevPhase !== "awaiting-roll" || prevCurrentIdx !== state.currentPlayerIndex)
+      ) {
+        this.showCup();
+        if (this.diePipLabel1) { this.diePipLabel1.dispose(); this.diePipLabel1 = null; }
+        if (this.diePipLabel2) { this.diePipLabel2.dispose(); this.diePipLabel2 = null; }
+      }
+    }
+
     // Dice: trigger on any player's lastRoll changing (covers bots too).
     if (this.lastState) {
       for (const p of state.players) {
@@ -894,7 +1095,13 @@ export class Board3D {
         this.moveQueues.set(p.id, [...(this.moveQueues.get(p.id) ?? []), tileXZ(newPos)]);
         if (!this.moveAnimating.has(p.id)) this.driveAnimation(p.id);
       } else {
-        this.enqueueMove(p.id, prevPos, newPos);
+        // Defer the token walk until the dice animation finishes so the figure
+        // only starts moving after the dice have settled (no overlap).
+        if (this.diceAnimating) {
+          this.movePending.set(p.id, { from: prevPos, to: newPos });
+        } else {
+          this.enqueueMove(p.id, prevPos, newPos);
+        }
       }
       this.prevPositions.set(p.id, newPos);
     }
@@ -902,6 +1109,20 @@ export class Board3D {
 
   private enqueueMove(playerId: string, from: number, to: number) {
     const RING = 40;
+    const forwardDist = (((to - from) % RING) + RING) % RING;
+
+    // A forward distance > 12 can't be a dice roll (max 6+6). It's an action-card
+    // jump (often a backward move expressed as a large forward wrap). Don't walk
+    // the long way clockwise — jump straight to the destination tile.
+    if (forwardDist > 12) {
+      const dest = tileXZ(to);
+      const existing = this.moveQueues.get(playerId) ?? [];
+      this.moveQueues.set(playerId, [...existing, dest]);
+      if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+      return;
+    }
+
+    // Normal forward dice move: walk tile-by-tile clockwise.
     const path: Array<[number, number]> = [];
     let cur = from;
     let guard = 0;
@@ -971,6 +1192,50 @@ export class Board3D {
   // -------------------------------------------------------------------------
   // Dice cup
   // -------------------------------------------------------------------------
+  private showCup() {
+    if (this.diceCupMesh) this.diceCupMesh.setEnabled(true);
+    this.cupVisible = true;
+  }
+
+  private hideCup() {
+    if (this.diceCupMesh) this.diceCupMesh.setEnabled(false);
+    this.cupVisible = false;
+  }
+
+  /**
+   * Show a guaranteed-correct pip value as a billboard above a resting die.
+   * Drawing the number on a DynamicTexture sidesteps any uncertainty about the
+   * rounded-dice.obj face layout — the shown value always matches the roll.
+   */
+  private showDiceValue(labelRef: "die1" | "die2", value: number, x: number, z: number) {
+    const existing = labelRef === "die1" ? this.diePipLabel1 : this.diePipLabel2;
+    if (existing) existing.dispose();
+
+    const tex = new DynamicTexture(`pipTex_${labelRef}`, { width: 64, height: 64 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = "#111111";
+    ctx.font = "bold 36px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(value), 32, 32);
+    tex.update();
+
+    const plane = MeshBuilder.CreatePlane(`pipLabel_${labelRef}`, { width: 0.45, height: 0.45 }, this.scene);
+    plane.position.set(x, 0.55, z);
+    plane.billboardMode = 7;
+    const mat = new StandardMaterial(`pipMat_${labelRef}`, this.scene);
+    mat.diffuseTexture = tex;
+    mat.backFaceCulling = false;
+    mat.emissiveColor = new Color3(1, 1, 1);
+    plane.material = mat;
+    plane.isPickable = false;
+
+    if (labelRef === "die1") this.diePipLabel1 = plane;
+    else this.diePipLabel2 = plane;
+  }
+
   private async initDice(): Promise<void> {
     // Felt centre is empty except the jail cage (origin) and deck (+4,+4).
     // Place the dice area in the opposite felt corner so it stays on-screen.
@@ -994,7 +1259,8 @@ export class Board3D {
         const ext = cup.getBoundingInfo().boundingBox.extendSize;
         const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
         cup.scaling.setAll(1.3 / maxDim);
-        cup.isPickable = false;
+        cup.name = "diceCup";
+        cup.isPickable = true; // click-to-roll
         cup.position.set(CX, 0.6, CZ);
         this.diceCupMesh = cup;
       } else {
@@ -1002,11 +1268,12 @@ export class Board3D {
       }
     } catch {
       const fallbackCup = MeshBuilder.CreateCylinder(
-        "cupFallback",
+        "diceCup",
         { diameterTop: 1.0, diameterBottom: 0.7, height: 1.2, tessellation: 14 },
         this.scene
       );
       fallbackCup.position.set(CX, 0.6, CZ);
+      fallbackCup.isPickable = true; // click-to-roll
       const cupMat = new StandardMaterial("cupMatFb", this.scene);
       cupMat.diffuseColor = new Color3(0.2, 0.12, 0.05);
       fallbackCup.material = cupMat;
@@ -1106,7 +1373,15 @@ export class Board3D {
         const t = Math.min(elapsed / 300, 1);
         cup.position.y = baseY + LIFT * (1 - t);
         cup.rotation.z = 0;
-        if (t >= 1) { elapsed = 0; phase = "settle"; }
+        if (t >= 1) {
+          elapsed = 0;
+          phase = "settle";
+          // Cup vanishes; the two dice are revealed lying on the felt showing
+          // the actual rolled values (guaranteed-correct DynamicTexture faces).
+          this.hideCup();
+          this.showDiceValue("die1", d1, cup.position.x - 0.3, cup.position.z - 0.12);
+          this.showDiceValue("die2", d2, cup.position.x + 0.3, cup.position.z + 0.12);
+        }
       } else {
         const cx = cup.position.x;
         const cz = cup.position.z;
@@ -1121,6 +1396,12 @@ export class Board3D {
           this.showDiceResultLabel(d1, d2, cup.position.x, cup.position.z);
           this.scene.onBeforeRenderObservable.remove(obs);
           this.diceAnimating = false;
+          // Dice have settled — now release any token moves that were waiting,
+          // so figures only walk AFTER the dice animation completes.
+          for (const [pid, move] of this.movePending) {
+            this.enqueueMove(pid, move.from, move.to);
+          }
+          this.movePending.clear();
         }
       }
     });
