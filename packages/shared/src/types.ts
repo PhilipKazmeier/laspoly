@@ -17,6 +17,7 @@ export interface PlayerState {
   alive: boolean;
   lastRoll: [number, number];
   color: string;
+  figureIndex: number; // 0-5 → car1..car5, police (chosen vehicle model)
 }
 
 export type GamePhase =
@@ -124,6 +125,6 @@ export interface GameSettings {
 export interface NewGameOptions {
   boardId: string;
   seed: number;
-  players: { id: string; name: string; isBot: boolean; color: string }[];
+  players: { id: string; name: string; isBot: boolean; color: string; figureIndex?: number }[];
   settings?: GameSettings;
 }

@@ -67,34 +67,19 @@ test.describe("Fix-3: Figure picker, Mein Eigentum, i18n, Leave-to-lobby", () =>
     // Figure picker must be rendered
     await expect(page.locator("#figurePicker")).toBeVisible();
 
-    // Should have figure swatches (6 colours × 6 figures = 36)
-    const swatches = await page.locator(".fp-swatch").count();
-    console.log(`Figure swatches count: ${swatches}`);
-    expect(swatches).toBe(36);
-
-    // Should have figure thumbnails (img tags in swatches)
-    const thumbs = await page.locator(".fp-swatch img").count();
-    console.log(`Figure thumbnails in swatches: ${thumbs}`);
-    expect(thumbs).toBeGreaterThan(0);
+    // New picker (bug 2): colour is server-assigned; the player chooses a vehicle
+    // shown as a live 3D model. Expect a preview canvas + 6 vehicle buttons.
+    await expect(page.locator("#figurePicker canvas")).toBeVisible({ timeout: 5_000 });
+    const vehBtns = page.locator("#figurePicker button");
+    expect(await vehBtns.count()).toBe(6);
+    await expect(page.locator("#figurePicker")).toContainText("Deine Farbe");
 
     // Screenshot the figure picker
     await shot(page, "figure-picker");
 
-    // Click the first non-taken swatch
-    const firstAvailable = page.locator(".fp-swatch:not(.taken)").first();
-    await firstAvailable.click();
-    await page.waitForTimeout(300);
-
-    // One swatch should now be selected
-    const selectedCount = await page.locator(".fp-swatch.selected").count();
-    console.log(`Selected swatches: ${selectedCount}`);
-    expect(selectedCount).toBeGreaterThanOrEqual(1);
-
-    // After click, selecting a colour should disable ALL swatches of the same colour for others
-    // (server handles this; we verify the colour-row border/visual is present)
-    const colourRows = await page.locator("#figurePicker > div").count();
-    console.log(`Colour rows in picker: ${colourRows}`);
-    expect(colourRows).toBeGreaterThanOrEqual(6); // 6 colour rows + title
+    // Pick a different vehicle; the selection moves (no crash, preview updates).
+    await vehBtns.nth(2).click();
+    await page.waitForTimeout(500);
 
     await shot(page, "figure-picker-selected");
 

@@ -371,7 +371,7 @@ describe("C1: action card names are localized", () => {
 // ---------------------------------------------------------------------------
 
 describe("Fix 3: PAY_RANSOM then ROLL_DICE does NOT give GO bonus", () => {
-  it("pays ransom, sets position=0, then ROLL gives no goPassed event", () => {
+  it("pays ransom, restarts from the P field (pos 10), then ROLL gives no goPassed event", () => {
     const s = structuredClone(twoPlayers());
     const p = s.players[0]!;
     p.inJail = true;
@@ -383,10 +383,10 @@ describe("Fix 3: PAY_RANSOM then ROLL_DICE does NOT give GO bonus", () => {
 
     const { state: afterRansom } = applyCommand(s, { type: "PAY_RANSOM" });
     expect(afterRansom.players[0]!.inJail).toBe(false);
-    // Position must be 0 (not 40) after ransom, to prevent exploit
-    expect(afterRansom.players[0]!.position).toBe(0);
+    // Freed player restarts from the P field (pos 10), not 40 — prevents GO exploit (bug 8b)
+    expect(afterRansom.players[0]!.position).toBe(10);
 
-    // Now roll — must NOT trigger goPassed (no fake GO crossing from 40)
+    // Now roll — must NOT trigger goPassed (a roll from pos 10 never wraps GO)
     const { events } = applyCommand(afterRansom, { type: "ROLL_DICE" });
     const goEvents = events.filter((e) => e.key === "goPassed" || e.key === "goLanded");
     // Only a goLanded event is valid here (if the roll lands exactly on 0),

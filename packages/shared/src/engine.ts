@@ -132,6 +132,7 @@ export function createGame(opts: NewGameOptions): GameState {
     alive: true,
     lastRoll: [0, 0],
     color: p.color,
+    figureIndex: p.figureIndex ?? 0,
   }));
   const rng = makeRng(opts.seed);
   // Draw the first round's event before building state so it consumes the RNG in order
@@ -974,10 +975,10 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       p.money -= board.rules.ransomCost;
       p.inJail = false;
       p.jailTurns = 0;
-      // Reset position to 0 (Just Visiting) so the subsequent ROLL_DICE moveBy
-      // starts from a normal position, not JAIL_POS=40, which would falsely trigger
-      // the GO-pass bonus (to < from whenever the roll didn't wrap past 40).
-      p.position = 0;
+      // Place the freed player on the "P" field (pos 10, jail-visiting corner) so
+      // the subsequent ROLL_DICE moveBy starts from there — not JAIL_POS=40, which
+      // would falsely trigger the GO-pass bonus. From pos 10 a roll never wraps GO.
+      p.position = 10;
       events.push({ key: "paidRansom", params: { player: p.name, amount: board.rules.ransomCost }, playerId: p.id });
       // player still rolls this turn (now a normal roll)
       break;

@@ -286,9 +286,11 @@ export class Board3D {
     });
 
     // ---- Wooden table -------------------------------------------------------
+    // Large enough that the wood fills the view in both camera angles (bug 8a:
+    // the table edge previously revealed the dark scene background).
     const table = MeshBuilder.CreateBox(
       "table",
-      { width: 30, height: 0.5, depth: 30 },
+      { width: 48, height: 0.5, depth: 48 },
       this.scene
     );
     table.position.y = -0.45;
@@ -377,8 +379,8 @@ export class Board3D {
 
     tex.update();
     // Tile the texture across the large table surface (scale factor on UV)
-    tex.uScale = 3;
-    tex.vScale = 3;
+    tex.uScale = 5;
+    tex.vScale = 5;
     return tex;
   }
 
@@ -386,9 +388,11 @@ export class Board3D {
   // Asset preloading
   // -------------------------------------------------------------------------
   private async preloadCarModels(): Promise<void> {
-    for (let i = 1; i <= 5; i++) {
+    // figureIndex 0-4 → car1..car5, 5 → police. Keyed by figureIndex.
+    const files = ["car1.obj", "car2.obj", "car3.obj", "car4.obj", "car5.obj", "police.obj"];
+    for (let i = 0; i < files.length; i++) {
       try {
-        const result = await SceneLoader.ImportMeshAsync("", "/assets/", `car${i}.obj`, this.scene);
+        const result = await SceneLoader.ImportMeshAsync("", "/assets/", files[i]!, this.scene);
         // OBJ loads as one or more real meshes; merge geometry into a single template.
         const realMeshes = result.meshes.filter(
           (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
@@ -406,7 +410,7 @@ export class Board3D {
         const maxDim = Math.max(bounds.x, bounds.y, bounds.z) * 2 || 1;
         const target = 0.7;
         merged.scaling.setAll(target / maxDim);
-        merged.name = `carTemplate_${i}`;
+        merged.name = `carTemplate_${i}`; // i = figureIndex 0-5
         merged.setEnabled(false);
         merged.isPickable = false;
         this.carModels.set(i, merged);
@@ -813,7 +817,8 @@ export class Board3D {
     ctx.fillText(name, 64, 16);
     tex.update();
 
-    const plane = MeshBuilder.CreatePlane(`lbl_${playerId}`, { width: 0.9, height: 0.22 }, this.scene);
+    // Half-size billboard so names read small and uniform across all tokens (bug 1).
+    const plane = MeshBuilder.CreatePlane(`lbl_${playerId}`, { width: 0.45, height: 0.11 }, this.scene);
     plane.billboardMode = 7;
     const mat = new StandardMaterial(`lblMat_${playerId}`, this.scene);
     mat.diffuseTexture = tex;
@@ -876,7 +881,7 @@ export class Board3D {
       let mesh = this.tokenMeshes.get(player.id);
       if (!mesh) {
         const color = playerColor3(player.color);
-        const carIdx = (state.players.indexOf(player) % 5) + 1;
+        const carIdx = player.figureIndex ?? 0;
         mesh = this.carsLoaded
           ? (this.cloneCarToken(carIdx, color, player.id) ?? this.makeFallbackToken(player.id, color))
           : this.makeFallbackToken(player.id, color);
@@ -935,7 +940,7 @@ export class Board3D {
     const player = state.players.find((p) => p.id === playerId);
     if (!player) return;
     const color = playerColor3(player.color);
-    const carIdx = (state.players.indexOf(player) % 5) + 1;
+    const carIdx = player.figureIndex ?? 0;
     const mesh = this.carsLoaded
       ? (this.cloneCarToken(carIdx, color, playerId) ?? this.makeFallbackToken(playerId, color))
       : this.makeFallbackToken(playerId, color);
@@ -964,6 +969,17 @@ export class Board3D {
       this.tokenRings.set(playerId, ring);
     }
     ring.position.set(x, 0.12, z);
+  }
+
+  /**
+   * Snap a player's token straight to a tile with no walk animation. Used when a
+   * player buys out of jail: they reappear on the P field rather than walking
+   * there (bug 8b). Ensures the token exists first.
+   */
+  snapPlayerToTile(playerId: string, pos: number, state: GameState, myId: string | null): void {
+    this.ensureTokenExists(playerId, state, myId);
+    this.prevPositions.set(playerId, pos);
+    this.snapTokenToTile(playerId, pos);
   }
 
   // -------------------------------------------------------------------------
@@ -1617,9 +1633,10 @@ export class Board3D {
    * BabylonJS CreateBox with faceUV maps each of the 6 cube faces to a 1/6-width
    * strip of the atlas texture — this is the reliable multi-face approach.
    *
-   * Atlas column layout (left→right): +X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5.
-   * We assign pip values: +X→2, -X→5, +Y→1, -Y→6, +Z→3, -Z→4  (opposites sum to 7).
-   * orientDie() then rotates the die so the rolled value faces up.
+   * Babylon faceUV index → geometric face: 0=front(−Z), 1=back(+Z), 2=right(+X),
+   * 3=left(−X), 4=top(+Y), 5=bottom(−Y). We assign values so opposites sum to 7:
+   * top=1, bottom=6, front=2, back=5, right=3, left=4. orientDie() then rotates the
+   * die so the rolled value faces up. (Face index i shows value faceValues[i].)
    */
   private createPipDie(name: string, size: number): Mesh {
     const COLS = 6;
@@ -1627,8 +1644,8 @@ export class Board3D {
     const ATLAS_W = COLS * CELL;
     const ATLAS_H = CELL;
 
-    // pip value per atlas column: columns 0..5 → values for faces +X,-X,+Y,-Y,+Z,-Z
-    const faceValues = [2, 5, 1, 6, 3, 4];
+    // pip value per faceUV index [front,back,right,left,top,bottom]
+    const faceValues = [2, 5, 3, 4, 1, 6];
 
     // Draw the atlas (6 pip faces side by side)
     const atlas = new DynamicTexture(`dieAtlas_${name}`, { width: ATLAS_W, height: ATLAS_H }, this.scene, false);
@@ -1662,24 +1679,30 @@ export class Board3D {
     return box;
   }
 
-  /** Rotate a die so `value` pips face up. Base pose: +Y=1, +X=2, +Z=3, -Z=4, -X=5, -Y=6. */
+  /**
+   * Rotate a die so `value` pips face up. Base pose (faceValues above):
+   * +Y=1, -Y=6, -Z=2, +Z=5, +X=3, -X=4. Bring the value's face to +Y.
+   */
   private orientDie(mesh: AbstractMesh, value: number) {
     const H = Math.PI / 2;
     switch (value) {
+      // Babylon is left-handed: X-axis rotations are inverted vs the right-handed
+      // derivation, so the -Z/+Z (values 2/5) signs are flipped (verified on board).
       case 1: mesh.rotation.set(0, 0, 0); break;        // +Y=1 already up
-      case 6: mesh.rotation.set(Math.PI, 0, 0); break;  // flip → -Y=6 up
-      case 2: mesh.rotation.set(0, 0, -H); break;       // +X=2 → up
-      case 5: mesh.rotation.set(0, 0, H); break;        // -X=5 → up
-      case 3: mesh.rotation.set(-H, 0, 0); break;       // +Z=3 → up
-      case 4: mesh.rotation.set(H, 0, 0); break;        // -Z=4 → up
+      case 6: mesh.rotation.set(Math.PI, 0, 0); break;  // -Y=6 → up
+      case 2: mesh.rotation.set(-H, 0, 0); break;       // -Z=2 → up
+      case 5: mesh.rotation.set(H, 0, 0); break;        // +Z=5 → up
+      case 3: mesh.rotation.set(0, 0, H); break;        // +X=3 → up
+      case 4: mesh.rotation.set(0, 0, -H); break;       // -X=4 → up
     }
   }
 
-  /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation). */
-  private playDiceAnimation(d1: number, d2: number) {
+  /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation).
+   *  `onDone` fires the instant the dice have settled and are visible on the felt. */
+  private playDiceAnimation(d1: number, d2: number, onDone?: () => void) {
     if (this.diceAnimating) return;
     const cup = this.diceCupMesh;
-    if (!cup) return;
+    if (!cup) { onDone?.(); return; }
     this.diceAnimating = true;
 
     const die1 = this.dieMesh1;
@@ -1719,7 +1742,7 @@ export class Board3D {
         const t = elapsed / (100 * SHAKE_CYCLES);
         cup.position.set(fixedCupX, baseY + LIFT, fixedCupZ); // stay at peak Y, no drift
         cup.rotation.z = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_AMP;
-        if (elapsed >= 100 * SHAKE_CYCLES * 4) { elapsed = 0; phase = "descend"; }
+        if (elapsed >= 100 * SHAKE_CYCLES) { elapsed = 0; phase = "descend"; }
       } else if (phase === "descend") {
         elapsed += dt;
         const t = Math.min(elapsed / 300, 1);
@@ -1752,23 +1775,27 @@ export class Board3D {
             this.enqueueMove(pid, move.from, move.to);
           }
           this.movePending.clear();
+          onDone?.();
         }
       }
     });
   }
 
   /**
-   * Plays the dice animation and resolves only AFTER the full visual sequence so
-   * the caller (the serial state queue) never starts the token move while the cup
-   * or dice are still animating. Total ≈ lift 300 + shake 500 + descend 300 +
-   * settle 400 ≈ 1500 ms. Resolution is time-based (not the diceAnimating flag) to
-   * avoid the early-resolve race that let figures move during the cup phase.
+   * Plays the dice animation and resolves EXACTLY when the dice have settled and
+   * are visible on the felt — so the caller (the serial state queue) starts the
+   * token move only after the cup animation finished AND the dice are shown. A
+   * safety timeout guarantees the queue never deadlocks if rAF is throttled.
    */
   playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
     // Force any stale animation to end so we always start a fresh, full sequence.
     this.diceAnimating = false;
-    this.playDiceAnimation(d1, d2);
-    return new Promise<void>((resolve) => setTimeout(resolve, 1550));
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      this.playDiceAnimation(d1, d2, finish);
+      setTimeout(finish, 4000); // safety net only
+    });
   }
 
   private showDiceResultLabel(d1: number, d2: number, cx: number, cz: number) {

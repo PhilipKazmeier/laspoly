@@ -5,6 +5,7 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/packages/client/tests/**",
+      "**/.claude/**", // stale agent worktrees must not pollute the test run
     ],
   },
 });

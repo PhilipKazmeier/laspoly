@@ -178,6 +178,35 @@ per-task plans in [superpowers/plans](superpowers/plans/).
   excluded from the Docker image); deployed builds fall back to the synth loop.
 - Verified: 526 unit tests, sim 93 % finish / median first-elim turn 90.
 
+### Live-test round 5 (14-bug pass) — done
+- **Names (1):** floating token name billboards halved (0.9→0.45 plane), uniform across all tokens.
+- **Colour/figure (2):** colour is now server-assigned and shown read-only; the player only picks a
+  **vehicle**, rendered as a live auto-rotating **3D model** (new `figurePreview.ts`, own Babylon
+  engine) tinted in their colour. `figureIndex` threaded through `PlayerState`/`createGame`/`room` so
+  the chosen model is the in-game token (police model now loaded; token = `player.figureIndex`).
+- **HUD row (3):** cash `LPD …` moved to its own line under the net-worth badge (was glued to "NW").
+- **Dice/cup/move (4/5/6):** `playDiceAnimationAsync` now resolves EXACTLY when the dice settle (was a
+  fixed 1.55 s timeout that fired mid-shake — shake itself ran 2 s, so the token moved while the cup
+  was still up and dice hidden). Shake shortened to ~0.5 s; order is now cup → reveal dice → move.
+- **Header (7):** `height:48px` → `min-height` + vertical padding so a 4-line centre grows downward
+  instead of clipping the top line.
+- **Wood (8a):** table enlarged 30→48 and tiling 3→5 so the wood fills the view (no dark backdrop gap).
+- **Jail (8b):** `PAY_RANSOM` restarts the freed player on the **P field (pos 10)**, not GO; the client
+  snaps the token there (no phantom walk) and rolls from there. Test updated.
+- **Action card (9):** popup is now card **title** + **what to do** + Bestätigen (built from the effect
+  event "Card: effect", falling back to the draw event for the name).
+- **Station travel (10):** only offered in `turn-end` (after rolling and landing), not at turn start.
+- **Deed card (11):** refreshes live while open (e.g. after buying a house on it).
+- **Deed card (12):** "Tauschen" button on another player's deed opens the trade dialog pre-targeted at
+  that owner.
+- **Trade dialog (13):** no longer closed on turn change (kept open, selections preserved).
+- **Dice faces (14):** face/atlas mapping rebuilt to Babylon's real box-face order; corrected the
+  left-handed X-rotation (values 2/5 were inverted). Verified live: rolled "1 und 4" → dice show 1 + 4.
+- Tooling: excluded `**/.claude/**` from vitest (a stale agent worktree was double-running the suite).
+- Verified: 308 unit tests green; visuals confirmed by Playwright/WebGL screenshots (dice, picker,
+  header, wood, HUD). Pre-existing `fix3-4` e2e still fails (clicks Leave once but never confirms the
+  leave dialog — predates the confirm flow, unrelated to this pass).
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the

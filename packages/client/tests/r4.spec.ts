@@ -60,16 +60,13 @@ test("r4-figure-picker", async ({ page }) => {
   await expect(page.locator("#roomPanel")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#figurePicker")).toBeVisible();
 
-  // The figure picker should contain img elements (actual model previews)
-  const imgs = page.locator("#figurePicker img");
-  await expect(imgs.first()).toBeVisible({ timeout: 5_000 });
-  const imgCount = await imgs.count();
-  // 6 figures × 6 colours = 36 images total
-  expect(imgCount).toBeGreaterThanOrEqual(6);
-
-  // Each colour row should have a label (colour name text)
-  const colorNames = page.locator("#figurePicker span[style*='capitalize']");
-  expect(await colorNames.count()).toBeGreaterThanOrEqual(1);
+  // New picker (bug 2): a 3D vehicle preview canvas + 6 vehicle buttons, colour
+  // is assigned by the server (no colour grid).
+  await expect(page.locator("#figurePicker canvas")).toBeVisible({ timeout: 5_000 });
+  const vehBtns = page.locator("#figurePicker button");
+  expect(await vehBtns.count()).toBe(6);
+  // The assigned-colour line is shown read-only.
+  await expect(page.locator("#figurePicker")).toContainText("Deine Farbe");
 
   // Room panel should also be within viewport
   const rp = page.locator("#roomPanel");

@@ -19,6 +19,7 @@ import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
+import { FigurePreview } from "./figurePreview.js";
 
 const css = `
   .panel {
@@ -216,11 +217,11 @@ const css = `
   .swap-label { font-size: 12px; color: #aaa; margin-bottom: 4px; }
   .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
   #gameHeader {
-    position: absolute; top: 0; left: 0; width: 100%; height: 48px;
+    position: absolute; top: 0; left: 0; width: 100%; min-height: 48px;
     background: linear-gradient(to bottom, #c2410c, #ea580c);
     border-bottom: 2px solid #f97316;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 12px;
+    padding: 4px 12px;
     box-sizing: border-box;
     z-index: 50;
     pointer-events: none;
@@ -463,7 +464,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "room.players": "Spieler",
     "room.copyLink": "Link kopieren",
     "room.linkCopied": "Kopiert!",
-    "room.figureTitle": "Farbe & Figur wählen:",
+    "room.figureTitle": "Fahrzeug wählen:",
+    "room.colorAssigned": "Deine Farbe:",
     "room.startGame": "Spiel starten",
     "room.leaveRoom": "Raum verlassen",
     "room.others": "",
@@ -653,7 +655,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "room.players": "Players",
     "room.copyLink": "Copy link",
     "room.linkCopied": "Copied!",
-    "room.figureTitle": "Choose colour & figure:",
+    "room.figureTitle": "Choose your vehicle:",
+    "room.colorAssigned": "Your colour:",
     "room.startGame": "Start Game",
     "room.leaveRoom": "Leave Room",
     "room.others": "",
@@ -893,12 +896,14 @@ export class UI {
   private turnToastTimer: ReturnType<typeof setTimeout> | null = null;
   private lastState: GameState | null = null;
   private deedCardPopup!: HTMLDivElement;
+  private deedCardPos: number | null = null; // tile pos shown in the open deed card (bug 11)
   private helpOverlay!: HTMLDivElement;
   private settingsOverlay!: HTMLDivElement;
   private specialEventToast!: HTMLDivElement;
   private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
   private myColor: string = "red";
   private myFigureIndex: number = 0;
+  private figurePreview: FigurePreview | null = null;
   private currentLocale: Locale = _locale;
   // Payment toast (feature #4)
   private paymentToast!: HTMLDivElement;
@@ -1592,18 +1597,15 @@ export class UI {
     confirmBtn.addEventListener("click", () => this.dismissActionCard());
   }
 
-  showActionCard(text: string) {
+  showActionCard(title: string, effect = "") {
     const textEl = document.getElementById("actionCardText");
     if (textEl) {
-      // Split "CardName: effect description" into title + body on first ": "
-      const colonIdx = text.indexOf(": ");
-      if (colonIdx !== -1) {
-        const cardTitle = text.slice(0, colonIdx).trim();
-        const cardEffect = text.slice(colonIdx + 2).trim();
-        textEl.innerHTML = `<div style="font-weight:bold;font-size:15px;color:#facc15;margin-bottom:8px;">${cardTitle}</div><div style="font-size:13px;color:#eee;line-height:1.5;">${cardEffect}</div>`;
-      } else {
-        textEl.textContent = text;
-      }
+      // Layout (bug 9): card title, then what must be done, then Confirm (in footer).
+      const titleHtml = `<div style="font-weight:bold;font-size:16px;color:#facc15;margin-bottom:8px;">${title}</div>`;
+      const effectHtml = effect
+        ? `<div style="font-size:13px;color:#eee;line-height:1.5;">${effect}</div>`
+        : "";
+      textEl.innerHTML = titleHtml + effectHtml;
     }
     show(this.actionCardPopup, "block");
     // No auto-dismiss: the local player must click Confirm (✓) to dismiss.
@@ -1656,11 +1658,12 @@ export class UI {
     const panel = this.deedCardPopup;
     panel.innerHTML = "";
 
-    if (!state) { hide(panel); return; }
+    if (!state) { hide(panel); this.deedCardPos = null; return; }
 
     const board = getBoard(state.boardId);
     const tile = board.tiles[pos];
-    if (!tile) { hide(panel); return; }
+    if (!tile) { hide(panel); this.deedCardPos = null; return; }
+    this.deedCardPos = pos;
 
     // Colour bar
     const group = (tile as { group?: string }).group;
@@ -1678,7 +1681,7 @@ export class UI {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dc-close";
     closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => hide(panel));
+    closeBtn.addEventListener("click", () => { hide(panel); this.deedCardPos = null; });
     hdr.appendChild(nameSpan);
     hdr.appendChild(closeBtn);
     panel.appendChild(hdr);
@@ -1778,6 +1781,22 @@ export class UI {
       ownerDiv.className = "dc-owner";
       ownerDiv.textContent = `${t("deed.owner")} ${owner?.name ?? "?"}`;
       body.appendChild(ownerDiv);
+
+      // Bug 12: if this property belongs to ANOTHER player, offer a trade from here.
+      const myId = this.net.playerId;
+      if (myId && ownerId !== myId && (state.players.find(p => p.id === myId)?.alive ?? false)) {
+        const tradeBtn = document.createElement("button");
+        tradeBtn.className = "prop-btn";
+        tradeBtn.style.cssText = "margin-top:8px;background:#7c3aed;";
+        tradeBtn.textContent = t("props.trade");
+        tradeBtn.addEventListener("click", () => {
+          hide(panel);
+          this.deedCardPos = null;
+          this.refreshTradePanel(state, myId, ownerId);
+          show(this.tradePanel, "block");
+        });
+        body.appendChild(tradeBtn);
+      }
 
       let buildStr = "";
       if (bld.hotel) buildStr = t("deed.hotel");
@@ -2139,160 +2158,79 @@ export class UI {
 
   private buildFigurePicker(container: HTMLElement, room: RoomView) {
     container.innerHTML = "";
-    const title = document.createElement("div");
-    title.className = "fp-title";
-    title.textContent = t("room.figureTitle");
-    container.appendChild(title);
-
-    // Which colours are already taken by OTHER players (colour is unique per player)
-    const takenColors = new Map<string, string>(); // color -> nickname
-    const takenCombos = new Map<string, string>(); // color:figureIndex -> nickname
-    for (const p of room.players) {
-      if (p.id !== this.net.playerId && p.color !== undefined) {
-        takenColors.set(p.color, p.nickname);
-        if (p.figureIndex !== undefined) {
-          takenCombos.set(`${p.color}:${p.figureIndex}`, p.nickname);
-        }
-      }
-    }
 
     const colorHex: Record<string, string> = {
       red: "#ef4444", blue: "#3b82f6", green: "#22c55e",
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
-
-    // Figure names for display (distinct labels so players know what each model is)
     const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police"];
 
-    // Each figure has a unique model PNG (these are the actual car texture images that
-    // show the real vehicle shape clearly against the model's own background).
-    // Shown at 64×64px so the shape is clearly visible and distinguishable.
-    const figureThumbs = [
-      "/assets/car1_color.png",
-      "/assets/car2_color.png",
-      "/assets/car3_color.png",
-      "/assets/car4_color.png",
-      "/assets/car5_color.png",
-      "/assets/police_color.png",
-    ];
+    // Colour is assigned by the server (bug 2): read it from this player's seat.
+    const me = room.players.find((p) => p.id === this.net.playerId);
+    if (me?.color) this.myColor = me.color;
+    if (me?.figureIndex !== undefined) this.myFigureIndex = me.figureIndex;
+    const myHex = colorHex[this.myColor] ?? this.myColor;
 
-    // Layout: one row per colour. Within each row, show a coloured dot + the 6 figure
-    // cells side-by-side. Each cell: large preview image (the actual model) + colour
-    // tint overlay + selected/taken indicator.
-    for (const color of FIGURE_COLORS) {
-      const isColorTaken = takenColors.has(color);
-      const takerName = takenColors.get(color) ?? "";
+    const title = document.createElement("div");
+    title.className = "fp-title";
+    title.textContent = t("room.figureTitle");
+    container.appendChild(title);
 
-      const colorRow = document.createElement("div");
-      colorRow.style.cssText = [
-        "display:flex", "align-items:center", "gap:6px", "margin-bottom:6px",
-        "padding:5px 6px", "border-radius:6px",
-        `border:1px solid ${isColorTaken ? "#555" : "rgba(255,255,255,0.12)"}`,
-        isColorTaken ? "opacity:0.5;" : "",
-      ].join(";");
+    // Assigned-colour row (read-only).
+    const colorRow = document.createElement("div");
+    colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;";
+    const dot = document.createElement("span");
+    dot.style.cssText = `display:inline-block;width:18px;height:18px;border-radius:50%;background:${myHex};border:2px solid rgba(255,255,255,0.3);`;
+    const colorTxt = document.createElement("span");
+    colorTxt.style.cssText = "font-size:11px;color:#ccc;";
+    colorTxt.textContent = `${t("room.colorAssigned")} ${this.myColor}`;
+    colorRow.appendChild(dot);
+    colorRow.appendChild(colorTxt);
+    container.appendChild(colorRow);
 
-      // Left: colour label dot + name
-      const colorLabel = document.createElement("div");
-      colorLabel.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;min-width:38px;flex-shrink:0;";
-      const dot = document.createElement("span");
-      dot.style.cssText = `display:inline-block;width:18px;height:18px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;border:2px solid rgba(255,255,255,0.3);`;
-      const colorName = document.createElement("span");
-      colorName.style.cssText = "font-size:9px;color:#bbb;text-transform:capitalize;";
-      colorName.textContent = color;
-      colorLabel.appendChild(dot);
-      colorLabel.appendChild(colorName);
-      if (isColorTaken) colorLabel.title = `${takerName} ${t("figurePicker.colorTaken")}`;
-      colorRow.appendChild(colorLabel);
+    // 3D vehicle preview canvas (bug 2): the selected model, tinted, auto-rotating.
+    const canvas = document.createElement("canvas");
+    canvas.width = 220; canvas.height = 150;
+    canvas.style.cssText = "width:100%;max-width:220px;height:150px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);display:block;margin-bottom:8px;background:#12121e;";
+    container.appendChild(canvas);
 
-      // Figure cells
-      const grid = document.createElement("div");
-      grid.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;";
-      for (let fi = 0; fi < FIGURE_COUNT; fi++) {
-        const key = `${color}:${fi}`;
-        const isTaken = isColorTaken || takenCombos.has(key);
-        const isSelected = this.myColor === color && this.myFigureIndex === fi;
+    if (this.figurePreview) this.figurePreview.dispose();
+    this.figurePreview = new FigurePreview(canvas);
+    void this.figurePreview.show(this.myFigureIndex, myHex);
 
-        const cell = document.createElement("div");
-        cell.style.cssText = [
-          "position:relative", "width:48px", "height:52px",
-          "border-radius:5px",
-          `border:2px solid ${isSelected ? "#facc15" : isTaken ? "#444" : "rgba(255,255,255,0.15)"}`,
-          `background:${colorHex[color] ?? color}22`,  // light tint of the player colour
-          "cursor:" + (isTaken ? "default" : "pointer"),
-          "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
-          "overflow:hidden",
-          "transition:border-color 0.15s",
-        ].join(";");
-
-        // Actual model preview image — large enough to see the vehicle shape clearly
-        const img = document.createElement("img");
-        img.src = figureThumbs[fi] ?? "";
-        img.alt = figureNames[fi] ?? String(fi + 1);
-        img.style.cssText = [
-          "width:40px", "height:36px", "object-fit:contain",
-          "image-rendering:auto", "pointer-events:none",
-          // Apply colour tint via CSS mix-blend-mode so each colour row shows
-          // the same model in the player's colour while keeping the shape visible
-          `filter:hue-rotate(${fi * 60}deg) brightness(1.05)`,
-        ].join(";");
-        cell.appendChild(img);
-
-        // Figure name label below the image
-        const nameLabel = document.createElement("div");
-        nameLabel.style.cssText = "font-size:8px;color:#ccc;text-align:center;line-height:1;padding:1px 0;";
-        nameLabel.textContent = figureNames[fi] ?? String(fi + 1);
-        cell.appendChild(nameLabel);
-
-        // Selected indicator overlay
-        if (isSelected) {
-          const selBadge = document.createElement("div");
-          selBadge.style.cssText = "position:absolute;top:1px;right:2px;font-size:9px;color:#facc15;font-weight:bold;line-height:1;";
-          selBadge.textContent = "✓";
-          cell.appendChild(selBadge);
-        }
-        // Taken overlay
-        if (isTaken) {
-          const takenOverlay = document.createElement("div");
-          takenOverlay.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.55);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#888;";
-          takenOverlay.textContent = "✕";
-          cell.appendChild(takenOverlay);
-        }
-
-        if (isColorTaken) {
-          cell.title = `${takerName} ${t("figurePicker.colorTaken")}`;
-        } else if (isTaken) {
-          cell.title = `${t("figurePicker.colorTaken")}`;
-        } else {
-          cell.title = `${color} – ${figureNames[fi] ?? String(fi + 1)}`;
-        }
-
-        if (!isTaken) {
-          cell.addEventListener("mouseenter", () => {
-            if (!isSelected) cell.style.borderColor = "rgba(255,255,255,0.5)";
-          });
-          cell.addEventListener("mouseleave", () => {
-            if (!isSelected) cell.style.borderColor = "rgba(255,255,255,0.15)";
-          });
-          cell.addEventListener("click", () => {
-            this.myColor = color;
-            this.myFigureIndex = fi;
-            this.net.send({ t: "chooseFigure", color, figureIndex: fi });
-            this.buildFigurePicker(container, room);
-          });
-        }
-        grid.appendChild(cell);
-      }
-      colorRow.appendChild(grid);
-      container.appendChild(colorRow);
+    // Vehicle buttons. Selecting one updates the live 3D preview + highlight in
+    // place — no engine teardown (which would churn WebGL contexts).
+    const grid = document.createElement("div");
+    grid.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+    const btns: HTMLButtonElement[] = [];
+    const restyle = () => {
+      btns.forEach((b, fi) => {
+        const sel = this.myFigureIndex === fi;
+        b.style.borderColor = sel ? "#facc15" : "rgba(255,255,255,0.15)";
+        b.style.background = sel ? myHex + "33" : "rgba(255,255,255,0.05)";
+      });
+    };
+    for (let fi = 0; fi < FIGURE_COUNT; fi++) {
+      const btn = document.createElement("button");
+      btn.textContent = figureNames[fi] ?? String(fi + 1);
+      btn.style.cssText = "padding:6px 10px;font-size:12px;border-radius:6px;cursor:pointer;border:2px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#eee;";
+      btn.addEventListener("click", () => {
+        if (this.myFigureIndex === fi) return;
+        this.myFigureIndex = fi;
+        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: fi });
+        void this.figurePreview?.show(fi, myHex);
+        restyle();
+      });
+      btns.push(btn);
+      grid.appendChild(btn);
     }
+    restyle();
+    container.appendChild(grid);
+  }
 
-    const others = room.players.filter(p => p.id !== this.net.playerId && !p.isBot && p.color !== undefined);
-    if (others.length > 0) {
-      const othDiv = document.createElement("div");
-      othDiv.style.cssText = "font-size:11px;color:#888;margin-top:4px;";
-      othDiv.textContent = others.map(p => `${p.nickname}: ${p.color ?? "?"} #${(p.figureIndex ?? 0) + 1}`).join(", ");
-      container.appendChild(othDiv);
-    }
+  /** Dispose the lobby 3D vehicle preview engine (when leaving the room / game starts). */
+  private disposeFigurePreview() {
+    if (this.figurePreview) { this.figurePreview.dispose(); this.figurePreview = null; }
   }
 
   private renderChipStack(money: number): string {
@@ -2357,6 +2295,7 @@ export class UI {
   }
 
   private showLobbyPanel() {
+    this.disposeFigurePreview();
     show(this.lobby);
     hide(this.roomPanel);
     hide(this.gameHud);
@@ -2593,6 +2532,7 @@ export class UI {
 
   updateGame(state: GameState, events: FormattedEvent[], myId: string | null) {
     this.lastState = state;
+    this.disposeFigurePreview(); // free the lobby 3D vehicle preview once in-game
     hide(this.lobby);
     hide(this.roomPanel);
     show(this.gameHud, "block");
@@ -2652,7 +2592,9 @@ export class UI {
       const worthStr = worth !== undefined ? `<span class="nw-worth">${worth} NW</span>` : "";
       // Note: chip-stack icons deliberately omitted here (sidebar is cleaner
       // without them). LPD amount + net-worth badge remain.
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money}</span>`;
+      // Cash on its own line below (bug 3): "LPD <money>" sits next to the amount,
+      // not glued to the "NW" net-worth badge above it.
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span style="display:block;color:#aaa;font-size:11px;margin-top:2px;">LPD ${p.money}</span>`;
 
       // Feature 1: clicking row opens inspector
       row.addEventListener("click", () => {
@@ -2669,6 +2611,11 @@ export class UI {
     // Refresh inspector if open
     if (this.inspectedPlayerId && this.playerInspector.style.display !== "none") {
       this.refreshInspector();
+    }
+
+    // Bug 11: keep the open deed card in sync (e.g. after buying a house on it).
+    if (this.deedCardPos !== null && this.deedCardPopup.style.display !== "none") {
+      this.showDeedCard(this.deedCardPos);
     }
 
     // Append new events to log
@@ -2769,8 +2716,9 @@ export class UI {
       hide(this.myPropsPanel);
     }
 
-    // Travel panel: show if player is at a station AND it's their turn
-    const showMgmt = isMyTurn && amAlive && (state.phase === "awaiting-roll" || state.phase === "turn-end") && !(me?.inJail ?? false);
+    // Travel panel: only AFTER rolling and landing on a station (turn-end phase),
+    // not at the start of the turn before the roll (bug 10).
+    const showMgmt = isMyTurn && amAlive && state.phase === "turn-end" && !(me?.inJail ?? false);
     if (showMgmt && myId) {
       const travelDests = canTravelFrom(state, myId);
       if (travelDests.length > 0) {
@@ -2781,8 +2729,9 @@ export class UI {
       }
     } else {
       hide(this.travelPanel);
-      if (!isMyTurn) hide(this.tradePanel);
     }
+    // Bug 13: the trade dialog stays open across turn changes — it is NOT hidden
+    // here (and deliberately not rebuilt, so in-progress selections are kept).
   }
 
   addChat(from: string, text: string) {
@@ -3047,7 +2996,7 @@ export class UI {
     panel.appendChild(closeBtn);
   }
 
-  private refreshTradePanel(state: GameState, myId: string) {
+  private refreshTradePanel(state: GameState, myId: string, preselectTarget?: string) {
     const panel = this.tradePanel;
     panel.innerHTML = "";
 
@@ -3070,6 +3019,9 @@ export class UI {
       opt.value = p.id;
       opt.textContent = p.name;
       targetSelect.appendChild(opt);
+    }
+    if (preselectTarget && alivePlayers.some((p) => p.id === preselectTarget)) {
+      targetSelect.value = preselectTarget;
     }
     panel.appendChild(targetSelect);
 

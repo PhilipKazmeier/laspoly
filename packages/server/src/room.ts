@@ -199,6 +199,7 @@ export class GameRoom {
       name: p.nickname,
       isBot: p.isBot,
       color: p.color,
+      figureIndex: p.figureIndex,
     }));
 
     this.state = createGame({ boardId: this.boardId, seed, players: allPlayers, settings: this.settings });

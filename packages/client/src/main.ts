@@ -106,6 +106,16 @@ class StateQueue {
     // Bring the cup back when it's a fresh turn awaiting a roll.
     this.board.prepareCupForTurn(state, prev);
 
+    // Buy-out-of-jail: the freed player reappears on the P field (pos 10) with no
+    // walk animation — snap, and don't treat it as a mover (bug 8b).
+    const ransomPlayers = new Set(
+      events.filter((e) => e.key === "paidRansom" && e.playerId).map((e) => e.playerId),
+    );
+    for (const pid of ransomPlayers) {
+      const p = state.players.find((pl) => pl.id === pid);
+      if (p) this.board.snapPlayerToTile(p.id, p.position, state, myId);
+    }
+
     // 2. Diff against the last-rendered state: detect the roll and the movers.
     let rolledD1 = 0, rolledD2 = 0;
     const movers: Array<{ id: string; from: number; to: number }> = [];
@@ -114,6 +124,7 @@ class StateQueue {
       for (const p of state.players) {
         const pp = prev.players.find((pl) => pl.id === p.id);
         if (!pp) continue;
+        if (ransomPlayers.has(p.id)) continue;
         // Detect a new roll: either die changed AND at least one die is > 0.
         if (
           p.lastRoll[0] > 0 &&
@@ -176,13 +187,23 @@ class StateQueue {
 
     // Action-card popup: only for the LOCAL player's card, shown HERE (after animation).
     // Other players' cards go to the log only (via ui.updateGame below).
+    // The draw event ("… zieht Aktionskarte: <name>.") gives the card title; the
+    // follow-up effect event (actionCardPay/Collect/Move/…) gives what must be done.
+    let cardTitle: string | null = null;
+    let cardEffect = "";
     for (const ev of events) {
-      if (ev.key.startsWith("actionCard")) {
-        if (ev.playerId && myId && ev.playerId === myId) {
-          this.ui.showActionCard(ev.text);
-        }
-        break;
+      if (!ev.playerId || ev.playerId !== myId) continue;
+      if (ev.key === "actionCard") {
+        // "… zieht Aktionskarte: Zaubershow." → "Zaubershow"
+        cardTitle = ev.text.split(": ").slice(1).join(": ").replace(/\.\s*$/, "") || ev.text;
+      } else if (ev.key.startsWith("actionCard")) {
+        cardEffect = ev.text;
       }
+    }
+    if (cardTitle) {
+      // Effect events read "<card>: <player> …"; strip the duplicate card prefix.
+      if (cardEffect.startsWith(`${cardTitle}: `)) cardEffect = cardEffect.slice(cardTitle.length + 2);
+      this.ui.showActionCard(cardTitle, cardEffect);
     }
 
     // ui.updateGame: surfaces buy panel (phase=awaiting-buy), "Zug beenden" button
