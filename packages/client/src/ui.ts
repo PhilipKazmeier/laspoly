@@ -17,6 +17,7 @@ import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile } fro
 import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
+import { audio } from "./audio.js";
 
 const css = `
   .panel {
@@ -313,6 +314,25 @@ const css = `
     cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0;
   }
   #specialEventToast .set-close:hover { color: #fff; }
+  #paymentToast {
+    position: absolute; bottom: 185px; right: 16px;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #fff;
+    max-width: 280px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 65;
+    line-height: 1.4;
+  }
+  #paymentToast.visible { opacity: 1; }
+  #paymentToast.paying { background: rgba(153,27,27,0.92); border: 1px solid #ef4444; }
+  #paymentToast.receiving { background: rgba(20,83,45,0.92); border: 1px solid #22c55e; }
+  #roomLinkRow { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
+  #roomLinkRow input { flex:1; font-size:12px; color:#aaa; background:#111; border:1px solid #444; border-radius:4px; padding:4px 8px; }
   #figurePicker { margin-top: 12px; }
   #figurePicker .fp-title { font-size: 12px; color: #aaa; margin-bottom: 6px; }
   .fp-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
@@ -390,6 +410,13 @@ export class UI {
   private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
   private myColor: string = "red";
   private myFigureIndex: number = 0;
+  // Payment toast (feature #4)
+  private paymentToast!: HTMLDivElement;
+  private paymentToastTimer: ReturnType<typeof setTimeout> | null = null;
+  // Mute button ref (feature #1)
+  private muteBtn!: HTMLButtonElement;
+  // Current room id for share link (feature #6)
+  private currentRoomId: string | null = null;
 
   constructor(root: HTMLDivElement, net: Net, board3d: Board3D) {
     this.root = root;
@@ -410,6 +437,9 @@ export class UI {
     this.buildBuyOfferPanel();
     this.buildDeedCardPopup();
     this.buildSpecialEventToast();
+    this.buildPaymentToast();
+    this.setupKeyboardShortcuts();
+    this.checkRoomFromUrl();
   }
 
   private injectStyles() {
@@ -481,6 +511,10 @@ export class UI {
     panel.innerHTML = `
       <h2 style="margin-bottom:12px;color:#facc15;">Room</h2>
       <div id="roomInfo" style="margin-bottom:12px;font-size:13px;color:#ccc;"></div>
+      <div id="roomLinkRow">
+        <input id="roomLinkInput" type="text" readonly placeholder="Raum-Link…" />
+        <button id="roomLinkCopyBtn" style="flex-shrink:0;white-space:nowrap;">Link kopieren</button>
+      </div>
       <div id="figurePicker"></div>
       <button id="startGame" style="width:100%;margin-top:8px;">Start Game</button>
       <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">Leave Room</button>
@@ -499,6 +533,20 @@ export class UI {
       clearSession();
       this.net.send({ t: "leaveRoom" });
       this.showLobbyPanel();
+    });
+
+    // Room link copy button (feature #6)
+    const copyBtn = document.getElementById("roomLinkCopyBtn") as HTMLButtonElement;
+    copyBtn.addEventListener("click", () => {
+      const input = document.getElementById("roomLinkInput") as HTMLInputElement;
+      if (input.value) {
+        navigator.clipboard.writeText(input.value).then(() => {
+          copyBtn.textContent = "Kopiert!";
+          setTimeout(() => { copyBtn.textContent = "Link kopieren"; }, 2000);
+        }).catch(() => {
+          input.select();
+        });
+      }
     });
   }
 
@@ -628,6 +676,19 @@ export class UI {
     });
     this.headerViewBtn = viewBtn;
     right.appendChild(viewBtn);
+
+    // Mute toggle button (feature #1)
+    const muteBtn = document.createElement("button");
+    muteBtn.className = "hdr-btn";
+    muteBtn.id = "muteBtn";
+    muteBtn.title = "Ton an/aus (S)";
+    muteBtn.textContent = audio.isMuted ? "🔇" : "🔊";
+    muteBtn.addEventListener("click", () => {
+      const nowMuted = audio.toggleMute();
+      muteBtn.textContent = nowMuted ? "🔇" : "🔊";
+    });
+    right.appendChild(muteBtn);
+    this.muteBtn = muteBtn;
 
     const settingsBtn = document.createElement("button");
     settingsBtn.className = "hdr-btn";
@@ -1026,6 +1087,94 @@ export class UI {
     }, 6000);
   }
 
+  // -------------------------------------------------------------------------
+  // Feature #4: Payment toast
+  // -------------------------------------------------------------------------
+  private buildPaymentToast() {
+    const el = document.createElement("div");
+    el.id = "paymentToast";
+    hide(el);
+    this.gameHud.appendChild(el);
+    this.paymentToast = el;
+  }
+
+  showPaymentToast(text: string, type: "paying" | "receiving") {
+    const el = this.paymentToast;
+    el.textContent = type === "paying" ? `↑ ${text}` : `↓ ${text}`;
+    el.className = `visible ${type}`;
+    el.style.display = "block";
+    if (this.paymentToastTimer) clearTimeout(this.paymentToastTimer);
+    this.paymentToastTimer = setTimeout(() => {
+      el.classList.remove("visible");
+      this.paymentToastTimer = null;
+    }, 3500);
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature #2: Keyboard shortcuts
+  // -------------------------------------------------------------------------
+  private setupKeyboardShortcuts() {
+    document.addEventListener("keydown", (e) => {
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName?.toLowerCase() ?? "";
+      const isTyping = tag === "input" || tag === "textarea" || tag === "select";
+
+      // Escape: close topmost open overlay
+      if (e.key === "Escape") {
+        if (this.deedCardPopup.style.display !== "none") { hide(this.deedCardPopup); return; }
+        if (this.helpOverlay.style.display !== "none") { hide(this.helpOverlay); return; }
+        if (this.settingsOverlay.style.display !== "none") { hide(this.settingsOverlay); return; }
+        if (this.actionCardPopup.style.display !== "none") { this.dismissActionCard(); return; }
+        return;
+      }
+
+      if (isTyping) return;
+
+      // Space: roll dice (when roll button visible/enabled)
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        if (this.rollBtn && this.rollBtn.style.display !== "none" && !this.rollBtn.disabled) {
+          this.rollBtn.click();
+        }
+        return;
+      }
+
+      // Enter: confirm primary action (buy offer)
+      if (e.key === "Enter") {
+        if (this.buyOfferPanel.style.display !== "none") {
+          const buyBtn = document.getElementById("buyOfferBuyBtn") as HTMLButtonElement | null;
+          if (buyBtn && !buyBtn.disabled) { buyBtn.click(); return; }
+        }
+        if (this.actionCardPopup.style.display !== "none") {
+          const confirmBtn = document.getElementById("actionCardConfirmBtn") as HTMLButtonElement | null;
+          if (confirmBtn) { confirmBtn.click(); return; }
+        }
+        return;
+      }
+
+      // S: toggle mute
+      if (e.key === "s" || e.key === "S") {
+        if (this.muteBtn) this.muteBtn.click();
+        return;
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature #6: Auto-join from URL ?room=<id>
+  // -------------------------------------------------------------------------
+  private checkRoomFromUrl() {
+    const params = new URLSearchParams(location.search);
+    const roomId = params.get("room");
+    if (!roomId) return;
+    // Defer until WebSocket is connected
+    const tryJoin = () => {
+      const nickname = (document.getElementById("nickname") as HTMLInputElement | null)?.value.trim() || "Player";
+      this.net.send({ t: "joinRoom", roomId, nickname });
+    };
+    setTimeout(tryJoin, 800);
+  }
+
   private buildFigurePicker(container: HTMLElement, room: RoomView) {
     container.innerHTML = "";
     const title = document.createElement("div");
@@ -1188,16 +1337,27 @@ export class UI {
     }
   }
 
-  onJoined(_roomId: string, _playerId: string) {
+  onJoined(roomId: string, _playerId: string) {
+    this.currentRoomId = roomId;
     hide(this.lobby);
     show(this.roomPanel);
     this.roomInfo.textContent = "Warte auf Spielstart...";
     hide(this.startGameBtn);
+    // Update room link (feature #6)
+    this.updateRoomLink(roomId);
+  }
+
+  private updateRoomLink(roomId: string) {
+    const input = document.getElementById("roomLinkInput") as HTMLInputElement | null;
+    if (input) {
+      input.value = `${location.origin}/?room=${roomId}`;
+    }
   }
 
   showRoom(room: RoomView) {
     this.currentHostId = room.host;
     this.currentRoom = { name: room.name, boardId: room.boardId };
+    if (this.currentRoomId) this.updateRoomLink(this.currentRoomId);
     hide(this.lobby);
     show(this.roomPanel);
     hide(this.gameHud);
@@ -1289,6 +1449,20 @@ export class UI {
     // Append new events to log
     for (const ev of events) {
       this.appendEventLine(ev.text);
+    }
+
+    // Feature #4: Payment toast
+    if (myId) {
+      for (const ev of events) {
+        if (ev.key === "rentPaid" && ev.playerId === myId) {
+          this.showPaymentToast(ev.text, "paying");
+          break;
+        }
+        if (ev.key === "factoryRevenue" && ev.playerId === myId) {
+          this.showPaymentToast(ev.text, "receiving");
+          break;
+        }
+      }
     }
 
     // Emit a local "ist an der Reihe" notification when our turn begins
@@ -1403,6 +1577,7 @@ export class UI {
     const panel = this.myPropsPanel;
     panel.innerHTML = "";
 
+    const me = state.players.find(p => p.id === myId);
     const board = getBoard(state.boardId);
     const props = ownedPropsOf(state, myId).sort((a, b) => a - b);
 
@@ -1462,64 +1637,74 @@ export class UI {
       // Buttons
       const btnRow = document.createElement("div");
       btnRow.style.marginTop = "4px";
+      const myMoney = me?.money ?? 0;
+
+      // Feature #5: grey out buttons the player cannot afford
+      const makeBtn = (label: string, cost: number | null, cls: string, onClick: () => void): HTMLButtonElement => {
+        const btn = document.createElement("button");
+        btn.className = cls;
+        btn.textContent = label;
+        const unaffordable = cost !== null && cost > myMoney;
+        if (unaffordable) {
+          btn.disabled = true;
+          btn.style.opacity = "0.45";
+          btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
+        } else {
+          btn.addEventListener("click", onClick);
+        }
+        return btn;
+      };
 
       // BUILD buttons (only for streets with whole-group ownership)
       if (tile.type === "street") {
         const st = tile as StreetTile;
         if (canBuild(state, pos, "house")) {
-          const btn = document.createElement("button");
-          btn.className = "prop-btn";
-          btn.textContent = `Haus (${st.houseCost} LPD)`;
-          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } }));
-          btnRow.appendChild(btn);
+          btnRow.appendChild(makeBtn(
+            `Haus (${st.houseCost} LPD)`, st.houseCost, "prop-btn",
+            () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } })
+          ));
         }
         if (canBuild(state, pos, "hotel")) {
-          const btn = document.createElement("button");
-          btn.className = "prop-btn";
-          btn.textContent = `Hotel (${st.hotelCost} LPD)`;
-          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } }));
-          btnRow.appendChild(btn);
+          btnRow.appendChild(makeBtn(
+            `Hotel (${st.hotelCost} LPD)`, st.hotelCost, "prop-btn",
+            () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } })
+          ));
         }
         if (canBuild(state, pos, "factory")) {
-          const btn = document.createElement("button");
-          btn.className = "prop-btn";
-          btn.textContent = `Fabrik (${st.factoryCost} LPD)`;
-          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } }));
-          btnRow.appendChild(btn);
+          btnRow.appendChild(makeBtn(
+            `Fabrik (${st.factoryCost} LPD)`, st.factoryCost, "prop-btn",
+            () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } })
+          ));
         }
         if (canSellBuilding(state, pos)) {
-          const btn = document.createElement("button");
-          btn.className = "prop-btn danger";
-          btn.textContent = "Gebäude verk.";
-          btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "SELL_BUILDING", pos } }));
-          btnRow.appendChild(btn);
+          btnRow.appendChild(makeBtn(
+            "Gebäude verk.", null, "prop-btn danger",
+            () => this.net.send({ t: "command", command: { type: "SELL_BUILDING", pos } })
+          ));
         }
       }
 
       if (canMortgage(state, pos)) {
         const mv = mortgageValue(board, tile);
-        const btn = document.createElement("button");
-        btn.className = "prop-btn";
-        btn.textContent = `Hypothek (+${mv})`;
-        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "MORTGAGE", pos } }));
-        btnRow.appendChild(btn);
+        btnRow.appendChild(makeBtn(
+          `Hypothek (+${mv})`, null, "prop-btn",
+          () => this.net.send({ t: "command", command: { type: "MORTGAGE", pos } })
+        ));
       }
       if (canUnmortgage(state, pos)) {
         const mv = mortgageValue(board, tile);
         const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
-        const btn = document.createElement("button");
-        btn.className = "prop-btn";
-        btn.textContent = `Ablösen (-${cost})`;
-        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "UNMORTGAGE", pos } }));
-        btnRow.appendChild(btn);
+        btnRow.appendChild(makeBtn(
+          `Ablösen (-${cost})`, cost, "prop-btn",
+          () => this.net.send({ t: "command", command: { type: "UNMORTGAGE", pos } })
+        ));
       }
       if (canSellProperty(state, pos)) {
         const refund = Math.floor(tilePrice(board, tile) / 2);
-        const btn = document.createElement("button");
-        btn.className = "prop-btn danger";
-        btn.textContent = `Verkaufen (+${refund})`;
-        btn.addEventListener("click", () => this.net.send({ t: "command", command: { type: "SELL_PROPERTY", pos } }));
-        btnRow.appendChild(btn);
+        btnRow.appendChild(makeBtn(
+          `Verkaufen (+${refund})`, null, "prop-btn danger",
+          () => this.net.send({ t: "command", command: { type: "SELL_PROPERTY", pos } })
+        ));
       }
 
       if (btnRow.children.length > 0) row.appendChild(btnRow);

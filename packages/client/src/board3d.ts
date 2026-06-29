@@ -205,6 +205,10 @@ export class Board3D {
   // Interaction hooks
   private rollHandler: (() => void) | null = null;
   private tileClickHandler: ((pos: number) => void) | null = null;
+  // Active-player highlight ring (feature #3)
+  private activeHighlightMesh: AbstractMesh | null = null;
+  private activeHighlightPlayerId: string | null = null;
+  private activeHighlightObs: ReturnType<typeof this.scene.onBeforeRenderObservable.add> | null = null;
   // Dice cup visibility
   private cupVisible = true;
   // Token moves deferred until the dice animation settles
@@ -1706,6 +1710,81 @@ export class Board3D {
         this.scene.onBeforeRenderObservable.remove(obs);
       }
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Active-player highlight (feature #3)
+  // A pulsing outer ring placed BELOW the active token to make the current
+  // player unmistakable. This is purely additive — it never touches existing
+  // token/label/ring/animation code.
+  // -------------------------------------------------------------------------
+  setActivePlayer(playerId: string | null): void {
+    // No-op if already tracking this player (avoids recreating each state tick)
+    if (playerId === this.activeHighlightPlayerId) {
+      // Still update position in case the token moved
+      this._updateActiveHighlightPosition();
+      return;
+    }
+
+    // Tear down any previous highlight
+    if (this.activeHighlightObs) {
+      this.scene.onBeforeRenderObservable.remove(this.activeHighlightObs);
+      this.activeHighlightObs = null;
+    }
+    if (this.activeHighlightMesh) {
+      this.activeHighlightMesh.dispose();
+      this.activeHighlightMesh = null;
+    }
+
+    this.activeHighlightPlayerId = playerId;
+    if (!playerId) return;
+
+    // Create a large pulsing disc under the active token
+    const disc = MeshBuilder.CreateDisc(
+      "activeHighlight",
+      { radius: 0.55, tessellation: 32 },
+      this.scene
+    );
+    disc.rotation.x = Math.PI / 2; // lay flat
+    disc.isPickable = false;
+
+    const mat = new StandardMaterial("activeHighlightMat", this.scene);
+    mat.diffuseColor = new Color3(1, 1, 0.2);
+    mat.emissiveColor = new Color3(0.9, 0.9, 0.1);
+    mat.specularColor = new Color3(0, 0, 0);
+    mat.alpha = 0.55;
+    mat.backFaceCulling = false;
+    disc.material = mat;
+    this.activeHighlightMesh = disc;
+
+    // Position it immediately
+    this._updateActiveHighlightPosition();
+
+    // Pulse: vary alpha & scale over time
+    let elapsed = 0;
+    let lastTime = performance.now();
+    this.activeHighlightObs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      if (!this.activeHighlightMesh) return;
+      const pulse = 0.5 + 0.5 * Math.sin((elapsed / 600) * Math.PI);
+      (this.activeHighlightMesh.material as StandardMaterial).alpha = 0.25 + 0.45 * pulse;
+      const s = 1.0 + 0.15 * pulse;
+      this.activeHighlightMesh.scaling.setAll(s);
+      // Keep position in sync with moving token
+      this._updateActiveHighlightPosition();
+    });
+  }
+
+  private _updateActiveHighlightPosition(): void {
+    const mesh = this.activeHighlightMesh;
+    const pid = this.activeHighlightPlayerId;
+    if (!mesh || !pid) return;
+    const token = this.tokenMeshes.get(pid);
+    if (token) {
+      mesh.position.set(token.position.x, 0.05, token.position.z);
+    }
   }
 }
 

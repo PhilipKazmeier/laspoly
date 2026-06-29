@@ -1,6 +1,7 @@
 import { Net, loadSession, clearSession } from "./net.js";
 import { Board3D } from "./board3d.js";
 import { UI } from "./ui.js";
+import { audio } from "./audio.js";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 
 const JAIL_POS = 40;
@@ -125,6 +126,7 @@ class StateQueue {
     // 3. Dice FIRST (cup lift → shake → settle with the rolled value face-up).
     //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
+      audio.play("dice");
       await Promise.race([
         this.board.playDiceAnimationAsync(rolledD1, rolledD2),
         timeout(4_000),
@@ -143,6 +145,24 @@ class StateQueue {
 
     // 5. Apply visuals (HUD, board, ownership, displays) only after movement.
     this.board.applyVisuals(state, myId);
+
+    // 5a. Active-player highlight (feature #3)
+    const activePlayer = state.players[state.currentPlayerIndex];
+    this.board.setActivePlayer(activePlayer?.id ?? null);
+
+    // 5b. Sound effects for events
+    for (const ev of events) {
+      if (ev.key === "bought") { audio.play("buy"); break; }
+    }
+    for (const ev of events) {
+      if (ev.key === "rentPaid" || ev.key === "factoryRevenue") { audio.play("rent"); break; }
+    }
+    for (const ev of events) {
+      if (ev.key === "wentToJail" || ev.key === "tripleDoubles") { audio.play("jail"); break; }
+    }
+    for (const ev of events) {
+      if (ev.key === "built") { audio.play("build"); break; }
+    }
 
     // 6. Buy prompt is gated here: ui.updateGame surfaces the buy panel when
     //    phase === "awaiting-buy", which now happens AFTER the token landed.
@@ -211,6 +231,7 @@ net.onMessage((msg) => {
       break;
     case "gameOver":
       clearSession();
+      audio.play("gameover");
       ui.showGameOver(msg.winnerName);
       break;
   }
