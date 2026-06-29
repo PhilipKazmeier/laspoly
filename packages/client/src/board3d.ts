@@ -577,10 +577,12 @@ export class Board3D {
     // short (across the label region). 512×256 gives generous pixel density at
     // the plane size used — bigger than this doesn't help since the plane itself
     // is only ~1.5 × 1.8 Babylon units wide.
-    const TEX_W = isCorner ? 512 : 512;
-    const TEX_H = isCorner ? 512 : 256;
+    const TEX_W = 1024;
+    const TEX_H = isCorner ? 1024 : 512;
 
-    const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, false);
+    // generateMipMaps:true is essential — without mipmaps the minified label
+    // aliases into jagged "pixelated" glyphs at board distance/angle.
+    const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, true);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
 
     // Background fill
@@ -593,7 +595,7 @@ export class Board3D {
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "bold 160px Arial";
+      ctx.font = "bold 300px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
       // Street / station / attraction: large text centred, word-wrapped if needed.
@@ -602,13 +604,13 @@ export class Board3D {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
-      const FONT_SIZE = 96;       // px — generous so text is sharp & readable
-      const SMALL_SIZE = 72;      // fallback for long names needing 2 lines
-      const TINY_SIZE = 56;       // fallback for very long names needing 3 lines
-      const LINE_H_LARGE = 108;
-      const LINE_H_SMALL = 82;
-      const LINE_H_TINY = 64;
-      const MAX_W = TEX_W - 16;
+      const FONT_SIZE = 184;      // px (texture is 1024 wide) — sharp & readable
+      const SMALL_SIZE = 140;     // fallback for long names needing 2 lines
+      const TINY_SIZE = 108;      // fallback for very long names needing 3 lines
+      const LINE_H_LARGE = 208;
+      const LINE_H_SMALL = 160;
+      const LINE_H_TINY = 124;
+      const MAX_W = TEX_W - 32;
 
       ctx.font = `bold ${FONT_SIZE}px Arial`;
       const words = name.split(" ");
@@ -641,8 +643,9 @@ export class Board3D {
     }
 
     tex.update();
-    // Anisotropic filtering reduces mip-map blurring when the label is viewed
-    // at a shallow angle (standard view). 8× is well-supported and keeps labels sharp.
+    // Mipmaps + trilinear + anisotropic = crisp text at any board distance/angle
+    // (fixes the jagged "pixelated" glyph aliasing).
+    tex.updateSamplingMode(Texture.TRILINEAR_SAMPLINGMODE);
     tex.anisotropicFilteringLevel = 16;
 
     // Plane covers the full label region of the tile (excluding the colour bar).
