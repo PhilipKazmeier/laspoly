@@ -155,6 +155,7 @@ export function createGame(opts: NewGameOptions): GameState {
     round: 1,
     activeEvent: firstEvent,
     builtThisTurn: false,
+    traveledThisTurn: false,
   };
 }
 
@@ -328,8 +329,8 @@ export function legalCommands(state: GameState): Command["type"][] {
     }
   }
 
-  // TRAVEL: player is on a station
-  if (STATION_POSITIONS.includes(p.position)) {
+  // TRAVEL: player is on a station and hasn't traveled this turn yet
+  if (STATION_POSITIONS.includes(p.position) && !state.traveledThisTurn) {
     cmds.push("TRAVEL");
   }
 
@@ -790,6 +791,7 @@ function continueOrAdvance(state: GameState, events: GameEvent[]): void {
   state.doublesCount = 0;
   state.extraRoll = false;
   state.builtThisTurn = false;
+  state.traveledThisTurn = false;
   state.currentPlayerIndex = nextAliveIndex(state);
   state.turn += 1;
   state.phase = "awaiting-roll";
@@ -1050,6 +1052,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
       const p = currentPlayer(state);
       if (!STATION_POSITIONS.includes(p.position)) throw new Error("Player is not at a station");
+      if (state.traveledThisTurn) throw new Error("Already traveled this turn");
       const toPos = command.toPos;
       if (!STATION_POSITIONS.includes(toPos)) throw new Error("Destination is not a station");
       if (toPos === p.position) throw new Error("Cannot travel to current station");
@@ -1083,6 +1086,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         }
       }
 
+      state.traveledThisTurn = true;
       // TRAVEL is a management command: does not advance the turn
       // Travel ticket covers the cost of using the station; no additional rent landing resolution
       break;
@@ -1307,6 +1311,7 @@ export function canSellProperty(state: GameState, pos: number): boolean {
 export function canTravelFrom(state: GameState, playerId: string): number[] {
   const player = state.players.find((p) => p.id === playerId);
   if (!player || !STATION_POSITIONS_SET.has(player.position)) return [];
+  if (state.traveledThisTurn) return [];
   return STATION_POSITIONS.filter((s) => s !== player.position);
 }
 

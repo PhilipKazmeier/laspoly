@@ -61,6 +61,8 @@ export interface GameState {
   activeEvent: { id: EventId } | null;
   /** True once the current player has built one building this turn; reset on turn advance. */
   builtThisTurn: boolean;
+  /** True once the current player has traveled via a station this turn; reset on turn advance. */
+  traveledThisTurn: boolean;
 }
 
 export interface SwapLeg {

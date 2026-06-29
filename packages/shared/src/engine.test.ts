@@ -1081,4 +1081,48 @@ describe("canTravelFrom", () => {
     const s: GameState = structuredClone(twoPlayers());
     expect(canTravelFrom(s, "UNKNOWN")).toEqual([]);
   });
+
+  it("returns empty once traveledThisTurn is true", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    s.traveledThisTurn = true;
+    expect(canTravelFrom(s, "A")).toEqual([]);
+  });
+});
+
+describe("TRAVEL – once per turn", () => {
+  it("rejects a second TRAVEL in the same turn", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5; // at a station
+    // First travel succeeds
+    const { state: s1 } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    expect(s1.traveledThisTurn).toBe(true);
+    expect(s1.players[0]!.position).toBe(15);
+    // Second travel in the same turn is rejected
+    expect(() => applyCommand(s1, { type: "TRAVEL", toPos: 25 })).toThrow("Already traveled this turn");
+  });
+
+  it("legalCommands excludes TRAVEL after traveling", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    const { state: s1 } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    // Position 15 is also a station, but TRAVEL should be absent from legal commands
+    expect(legalCommands(s1)).not.toContain("TRAVEL");
+  });
+
+  it("allows travel again after the turn passes", () => {
+    const s: GameState = structuredClone(twoPlayers());
+    s.players[0]!.position = 5;
+    // Player A travels
+    const { state: s1 } = applyCommand(s, { type: "TRAVEL", toPos: 15 });
+    expect(s1.traveledThisTurn).toBe(true);
+    // Simulate turn advance by rolling dice for A then B's turn comes
+    // We reset traveledThisTurn directly to simulate the continueOrAdvance reset
+    // (in a real game the turn ends via ROLL_DICE → continueOrAdvance)
+    const s2: GameState = structuredClone(s1);
+    s2.traveledThisTurn = false; // as continueOrAdvance would do
+    s2.players[0]!.position = 5; // back at a station
+    expect(canTravelFrom(s2, "A")).toEqual([15, 25, 35]);
+    expect(legalCommands(s2)).toContain("TRAVEL");
+  });
 });
