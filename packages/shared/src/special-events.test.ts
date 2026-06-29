@@ -27,20 +27,23 @@ function withEvent(state: GameState, id: import('./types.js').EventId): GameStat
 }
 
 /**
- * Apply ROLL_DICE (and DECLINE_PROPERTY if needed) until the turn has
- * advanced n times from the starting player. Returns the final state.
+ * Apply ROLL_DICE / END_TURN (and DECLINE_PROPERTY if needed) until the turn
+ * has advanced n times from the starting player. Returns the final state.
  */
 function advanceTurns(initial: GameState, n: number): GameState {
   let s = initial;
   let advanced = 0;
-  while (advanced < n) {
+  let guard = 0;
+  while (advanced < n && guard++ < 2000) {
     if (s.phase === 'finished') break;
     if (s.phase === 'awaiting-buy') {
       ({ state: s } = applyCommand(s, { type: 'DECLINE_PROPERTY' }));
-    } else {
+    } else if (s.phase === 'turn-end') {
       const prevTurn = s.turn;
-      ({ state: s } = applyCommand(s, { type: 'ROLL_DICE' }));
+      ({ state: s } = applyCommand(s, { type: 'END_TURN' }));
       if (s.turn > prevTurn) advanced++;
+    } else {
+      ({ state: s } = applyCommand(s, { type: 'ROLL_DICE' }));
     }
   }
   return s;
@@ -96,27 +99,30 @@ describe('specialEvents: round boundary', () => {
   });
 
   it('round event announcement is emitted at boundary', () => {
-    // Advance exactly 2 turns and collect events from the 2nd ROLL_DICE
+    // Advance exactly 2 turns and collect events from the END_TURN that wraps the round
     let s = twoPlayers(0);
     let roundEvents: string[] = [];
     let turnCount = 0;
-    while (turnCount < 2) {
+    let guard = 0;
+    while (turnCount < 2 && guard++ < 2000) {
       if (s.phase === 'finished') break;
       if (s.phase === 'awaiting-buy') {
         ({ state: s } = applyCommand(s, { type: 'DECLINE_PROPERTY' }));
-      } else {
+      } else if (s.phase === 'turn-end') {
         const prevTurn = s.turn;
         let evs: { key: string }[];
-        ({ state: s, events: evs } = applyCommand(s, { type: 'ROLL_DICE' }));
+        ({ state: s, events: evs } = applyCommand(s, { type: 'END_TURN' }));
         if (s.turn > prevTurn) {
           turnCount++;
           if (turnCount === 2) {
             roundEvents = evs.map(e => e.key);
           }
         }
+      } else {
+        ({ state: s } = applyCommand(s, { type: 'ROLL_DICE' }));
       }
     }
-    // The event log from the 2nd turn-advance should contain a specialEvent_* key
+    // The event log from the 2nd turn-advance (END_TURN) should contain a specialEvent_* key
     const hasSpecialEvent = roundEvents.some(k => k.startsWith('specialEvent_'));
     expect(hasSpecialEvent).toBe(true);
   });

@@ -22,6 +22,7 @@ export interface PlayerState {
 export type GamePhase =
   | "awaiting-roll"
   | "awaiting-buy"
+  | "turn-end"
   | "finished";
 
 export type EventId =
@@ -94,7 +95,8 @@ export type Command =
   | { type: "TRAVEL"; toPos: number }
   | { type: "PROPOSE_SWAP"; toId: string; give: SwapLeg; receive: SwapLeg }
   | { type: "RESPOND_SWAP"; accept: boolean }
-  | { type: "SURRENDER" };
+  | { type: "SURRENDER" }
+  | { type: "END_TURN" };
 
 /**
  * A complete, localizable game event. `key` selects an i18n template; `params`

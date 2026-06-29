@@ -690,10 +690,12 @@ describe("action cards", () => {
     function runGame(seed: number): GameState {
       let s = twoPlayers(seed);
       s.players[0]!.position = 5;
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 20; i++) {
         if (s.phase === "finished") break;
         if (s.phase === "awaiting-buy") {
           ({ state: s } = applyCommand(s, { type: "DECLINE_PROPERTY" }));
+        } else if (s.phase === "turn-end") {
+          ({ state: s } = applyCommand(s, { type: "END_TURN" }));
         } else {
           ({ state: s } = applyCommand(s, { type: "ROLL_DICE" }));
         }
@@ -794,18 +796,23 @@ describe("one-build-per-turn limit", () => {
     // A builds once, then BUILD is blocked this turn
     const { state: a1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
     expect(a1.builtThisTurn).toBe(true);
-    // A rolls to end the turn; play continues until it is A's turn again.
+    // A confirms turn-end; play continues until it is A's turn again.
     let cur = a1;
     let guard = 0;
-    while (guard++ < 200) {
+    while (guard++ < 400) {
       if (cur.phase === "awaiting-buy") {
         ({ state: cur } = applyCommand(cur, { type: "DECLINE_PROPERTY" }));
         continue;
       }
+      if (cur.phase === "turn-end") {
+        ({ state: cur } = applyCommand(cur, { type: "END_TURN" }));
+        if (cur.phase === "finished") break;
+        // Stop as soon as control returns to player A (index 0) at the start of a fresh turn.
+        if (cur.currentPlayerIndex === 0 && !cur.builtThisTurn && cur.players[0]!.alive) break;
+        continue;
+      }
       ({ state: cur } = applyCommand(cur, { type: "ROLL_DICE" }));
       if (cur.phase === "finished") break;
-      // Stop as soon as control returns to player A (index 0) at the start of a fresh turn.
-      if (cur.currentPlayerIndex === 0 && !cur.builtThisTurn && cur.players[0]!.alive) break;
     }
     // builtThisTurn must have been reset for the new turn
     expect(cur.builtThisTurn).toBe(false);

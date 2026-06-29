@@ -124,13 +124,15 @@ describe("createGame", () => {
 describe("determinism", () => {
   it("same seed + same commands produce identical state", () => {
     // Use a command sequence that navigates phase transitions correctly:
-    // ROLL_DICE -> may produce awaiting-buy -> DECLINE -> next player ROLL_DICE -> etc.
+    // ROLL_DICE -> may produce awaiting-buy -> DECLINE -> turn-end -> END_TURN -> next player
     function playTurns(seed: number): GameState {
       let s = twoPlayers(seed);
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 10; i++) {
         if (s.phase === "finished") break;
         if (s.phase === "awaiting-buy") {
           ({ state: s } = applyCommand(s, { type: "DECLINE_PROPERTY" }));
+        } else if (s.phase === "turn-end") {
+          ({ state: s } = applyCommand(s, { type: "END_TURN" }));
         } else {
           ({ state: s } = applyCommand(s, { type: "ROLL_DICE" }));
         }
@@ -321,7 +323,8 @@ describe("buying", () => {
     const { state } = applyCommand(s, { type: "DECLINE_PROPERTY" });
     expect(state.ownership[1]).toBeUndefined();
     expect(state.pendingPurchase).toBeNull();
-    expect(state.phase).toBe("awaiting-roll");
+    // After declining, phase is turn-end (player must confirm before passing)
+    expect(state.phase).toBe("turn-end");
   });
 
   it("BUY_PROPERTY throws if player cannot afford", () => {

@@ -30,6 +30,8 @@ export function pickAutoAction(state: GameState, playerId: string): Command | nu
   if (legal.length === 0) return null;
   // Awaiting-buy: decline so turn advances
   if (legal.includes("DECLINE_PROPERTY")) return { type: "DECLINE_PROPERTY" };
+  // Turn-end: confirm to pass turn
+  if (legal.includes("END_TURN")) return { type: "END_TURN" };
   // Awaiting-roll or in jail: just roll
   if (legal.includes("ROLL_DICE")) return { type: "ROLL_DICE" };
   return null;

@@ -92,6 +92,33 @@ export function botDecide(state: GameState): Command {
   const threshold = cfg.dangerThreshold;
   const buyBuffer = cfg.buyBuffer;
 
+  // In turn-end, try to build if possible, then confirm END_TURN.
+  if (state.phase === "turn-end") {
+    // Optionally build (reuse the BUILD logic below by falling through? No — just check here)
+    if (legal.includes("BUILD") && !state.builtThisTurn) {
+      for (const [posStr, ownerId] of Object.entries(state.ownership)) {
+        if (ownerId !== p.id) continue;
+        const pos = Number(posStr);
+        const tile = board.tiles[pos];
+        if (!tile || tile.type !== "street") continue;
+        if (!groupMembers(board, tile.group).every((m) => state.ownership[m] === p.id)) continue;
+        const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+        if (b.hotel || b.factory) continue;
+        if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {
+          if (p.money - tile.hotelCost >= threshold) {
+            return { type: "BUILD", pos, building: "hotel" };
+          }
+        }
+        if (b.houses < 4 && canBuildHouseAt(state, board, pos)) {
+          if (p.money - tile.houseCost >= threshold) {
+            return { type: "BUILD", pos, building: "house" };
+          }
+        }
+      }
+    }
+    return { type: "END_TURN" };
+  }
+
   if (state.phase === "awaiting-buy") {
     const pos = state.pendingPurchase!;
     const tile = board.tiles[pos]!;

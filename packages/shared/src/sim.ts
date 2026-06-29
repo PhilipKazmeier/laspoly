@@ -54,7 +54,9 @@ export function simulateGame(
   let firstEliminationTurn: number | null = null;
 
   while (state.phase !== "finished" && state.turn <= maxTurns && commandCount < maxCommands) {
-    const cmd = botDecide(state);
+    const cmd = state.phase === "turn-end"
+      ? { type: "END_TURN" as const }
+      : botDecide(state);
     const result = applyCommand(state, cmd);
     state = result.state;
     commandCount++;

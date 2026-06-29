@@ -281,6 +281,15 @@ export function legalCommands(state: GameState): Command["type"][] {
   if (state.phase === "finished") return [];
   if (state.phase === "awaiting-buy") return ["BUY_PROPERTY", "DECLINE_PROPERTY"];
 
+  // turn-end: END_TURN + management commands (no ROLL_DICE, no buy phase)
+  if (state.phase === "turn-end") {
+    const p = currentPlayer(state);
+    const cmds: Command["type"][] = ["END_TURN"];
+    const board = getBoard(state.boardId);
+    _addManagementCommands(state, board, p, cmds);
+    return [...new Set(cmds)];
+  }
+
   // awaiting-roll
   const p = currentPlayer(state);
   const cmds: Command["type"][] = [];
@@ -295,8 +304,23 @@ export function legalCommands(state: GameState): Command["type"][] {
   cmds.push("ROLL_DICE");
 
   const board = getBoard(state.boardId);
+  _addManagementCommands(state, board, p, cmds);
 
-  // Management commands (only when not in jail)
+  // Deduplicate
+  return [...new Set(cmds)];
+}
+
+/**
+ * Appends management commands (BUILD, SELL_BUILDING, MORTGAGE, UNMORTGAGE,
+ * SELL_PROPERTY, TRAVEL, PROPOSE_SWAP) for the current player. Used by both
+ * awaiting-roll and turn-end.
+ */
+function _addManagementCommands(
+  state: GameState,
+  board: BoardDefinition,
+  p: PlayerState,
+  cmds: Command["type"][],
+): void {
   for (const [posStr, ownerId] of Object.entries(state.ownership)) {
     if (ownerId !== p.id) continue;
     const pos = Number(posStr);
@@ -340,13 +364,10 @@ export function legalCommands(state: GameState): Command["type"][] {
     cmds.push("TRAVEL");
   }
 
-  // Swap proposal: available in awaiting-roll when no swap is already pending
+  // Swap proposal: available when no swap is already pending
   if (!state.pendingSwap) {
     cmds.push("PROPOSE_SWAP");
   }
-
-  // Deduplicate
-  return [...new Set(cmds)];
 }
 
 /**
@@ -467,10 +488,12 @@ function applyActionCard(
   events: GameEvent[],
 ): void {
   const spec = ACTION_CARD_SPECS[cardIdx]!;
-  events.push({ key: "actionCard", params: { player: player.name, card: cardId(spec) }, playerId: player.id });
+  const cid = cardId(spec);
 
   switch (spec.kind) {
     case "move-random": {
+      // Emit explanatory actionCard event before we know the destination (random)
+      events.push({ key: "actionCard", params: { player: player.name, card: cid }, playerId: player.id });
       const positions = getNonSpecialPositions(board);
       const idx = nextInt(state.rng, 0, positions.length - 1);
       const targetPos = positions[idx]!;
@@ -481,29 +504,34 @@ function applyActionCard(
     case "move-to": {
       if (spec.pos === 0) {
         // GO: grant goLandMoney
+        events.push({ key: "actionCard", params: { player: player.name, card: cid, amount: board.rules.goLandMoney }, playerId: player.id });
         player.position = 0;
         player.money += board.rules.goLandMoney;
         events.push({ key: "goLanded", params: { player: player.name, amount: board.rules.goLandMoney }, playerId: player.id });
         events.push({ key: "actionCardMove", params: { player: player.name, tile: board.tiles[0]!.name }, playerId: player.id });
-        // landing on GO tile does nothing extra
       } else {
+        const destTile = board.tiles[spec.pos];
+        events.push({ key: "actionCard", params: { player: player.name, card: cid, dest: destTile?.name ?? `pos${spec.pos}` }, playerId: player.id });
         teleportPlayer(state, board, player, spec.pos, events);
         resolveLanding(state, board, player, events);
       }
       break;
     }
     case "move-jail": {
+      events.push({ key: "actionCard", params: { player: player.name, card: cid }, playerId: player.id });
       events.push({ key: "actionCardMoveJail", params: { player: player.name }, playerId: player.id });
       sendToJail(state, board, player, events);
       break;
     }
     case "move-forward": {
+      events.push({ key: "actionCard", params: { player: player.name, card: cid, steps: spec.steps }, playerId: player.id });
       events.push({ key: "actionCardMoveForward", params: { player: player.name, steps: spec.steps }, playerId: player.id });
       moveBy(state, board, player, spec.steps, events);
       resolveLanding(state, board, player, events);
       break;
     }
     case "move-next-station": {
+      events.push({ key: "actionCard", params: { player: player.name, card: cid }, playerId: player.id });
       const curPos = player.position;
       let nextStation: number;
       if (curPos < 5 || curPos >= 35) nextStation = 5;
@@ -517,24 +545,27 @@ function applyActionCard(
     }
     case "single": {
       const amount = nextInt(state.rng, 1, 5) * spec.multiplier;
+      // Emit explanatory actionCard event now that amount is known
+      events.push({ key: "actionCard", params: { player: player.name, card: cid, amount, positive: spec.positive ? 1 : 0 }, playerId: player.id });
       if (spec.positive) {
         player.money += amount;
-        events.push({ key: "actionCardCollect", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+        events.push({ key: "actionCardCollect", params: { player: player.name, amount, card: cid }, playerId: player.id });
       } else {
-        events.push({ key: "actionCardPay", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+        events.push({ key: "actionCardPay", params: { player: player.name, amount, card: cid }, playerId: player.id });
         charge(state, board, player, amount, null, events);
       }
       break;
     }
     case "broadcast": {
       const amount = nextInt(state.rng, 1, 5) * spec.multiplier;
+      events.push({ key: "actionCard", params: { player: player.name, card: cid, amount, positive: spec.positive ? 1 : 0 }, playerId: player.id });
       if (spec.positive) {
         // collect from each other alive player
         for (const other of state.players) {
           if (!other.alive || other.id === player.id) continue;
           charge(state, board, other, amount, player.id, events);
         }
-        events.push({ key: "actionCardBroadcastCollect", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+        events.push({ key: "actionCardBroadcastCollect", params: { player: player.name, amount, card: cid }, playerId: player.id });
       } else {
         // pay each other alive player
         for (const other of state.players) {
@@ -544,7 +575,7 @@ function applyActionCard(
           // charge()/bankrupt() would re-fire for every remaining opponent.
           if (!player.alive) break;
         }
-        events.push({ key: "actionCardBroadcastPay", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
+        events.push({ key: "actionCardBroadcastPay", params: { player: player.name, amount, card: cid }, playerId: player.id });
       }
       break;
     }
@@ -557,7 +588,8 @@ function applyActionCard(
         if (b?.factory) factoryCount++;
       }
       const total = factoryCount * perFactory;
-      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: spec.id }, playerId: player.id });
+      events.push({ key: "actionCard", params: { player: player.name, card: cid, amount: total, perFactory }, playerId: player.id });
+      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: cid }, playerId: player.id });
       if (total > 0) charge(state, board, player, total, null, events);
       break;
     }
@@ -575,7 +607,12 @@ function applyActionCard(
         if (b.factory) factoryCount++;
       }
       const total = houseCount * houseMult + hotelCount * hotelMult + factoryCount * factoryMult;
-      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: spec.id }, playerId: player.id });
+      events.push({
+        key: "actionCard",
+        params: { player: player.name, card: cid, amount: total, perHouse: houseMult, perHotel: hotelMult },
+        playerId: player.id,
+      });
+      events.push({ key: "actionCardRepair", params: { player: player.name, amount: total, card: cid }, playerId: player.id });
       if (total > 0) charge(state, board, player, total, null, events);
       break;
     }
@@ -790,17 +827,28 @@ function checkWin(state: GameState, events: GameEvent[]): boolean {
   return false;
 }
 
-/** Either give the current player another roll (doubles) or pass the turn. */
+/** Either give the current player another roll (doubles) or set turn-end phase. */
 function continueOrAdvance(state: GameState, events: GameEvent[]): void {
   if (checkWin(state, events)) return;
   const p = currentPlayer(state);
-  if (p.alive && state.extraRoll) {
+  if (!p.alive) {
+    // Current player went bankrupt during this turn — skip turn-end and advance immediately.
+    advanceTurn(state, events);
+    return;
+  }
+  if (state.extraRoll) {
     state.extraRoll = false;
     state.phase = "awaiting-roll";
     events.push({ key: "extraRoll", params: { player: p.name }, playerId: p.id });
     return;
   }
-  // pass turn
+  // End of this player's movement: enter turn-end phase so they can confirm
+  // (or manage properties) before the turn actually passes.
+  state.phase = "turn-end";
+}
+
+/** Advance to the next player's turn. Called by END_TURN command. */
+function advanceTurn(state: GameState, events: GameEvent[]): void {
   const oldIdx = state.currentPlayerIndex;
   state.doublesCount = 0;
   state.extraRoll = false;
@@ -906,6 +954,8 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       events.push({ key: "bought", params: { player: p.name, tile: tile.name, price }, playerId: p.id });
       state.pendingPurchase = null;
       state.phase = "awaiting-roll";
+      // If player has an extra roll (from doubles before the buy), give it.
+      // Otherwise enter turn-end so they confirm before passing.
       continueOrAdvance(state, events);
       break;
     }
@@ -922,7 +972,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "BUILD": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       const pos = command.pos;
       const tile = tileAt(board, pos);
@@ -978,7 +1028,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "SELL_BUILDING": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
@@ -1015,7 +1065,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "MORTGAGE": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
@@ -1032,7 +1082,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "UNMORTGAGE": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
@@ -1048,7 +1098,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "SELL_PROPERTY": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
@@ -1066,7 +1116,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "TRAVEL": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       const p = currentPlayer(state);
       if (!STATION_POSITIONS.includes(p.position)) throw new Error("Player is not at a station");
       if (state.traveledThisTurn) throw new Error("Already traveled this turn");
@@ -1098,7 +1148,9 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         // If the ticket bankrupted the payer the turn must still advance/continue
         // (mirror the charge sites in resolveLanding) or the game would hang.
         if (!p.alive) {
-          continueOrAdvance(state, events);
+          if (!checkWin(state, events)) {
+            advanceTurn(state, events);
+          }
           break;
         }
       }
@@ -1110,7 +1162,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
     }
 
     case "PROPOSE_SWAP": {
-      if (state.phase !== "awaiting-roll") throw new Error("Not awaiting a roll");
+      if (state.phase !== "awaiting-roll" && state.phase !== "turn-end") throw new Error("Not awaiting a roll or turn-end");
       if (state.pendingSwap) throw new Error("A swap offer is already pending");
       const proposer = currentPlayer(state);
       const { toId, give, receive } = command;
@@ -1170,7 +1222,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         state.pendingSwap = null;
       }
       if (!checkWin(state, events)) {
-        continueOrAdvance(state, events);
+        advanceTurn(state, events);
       }
       break;
     }
@@ -1271,6 +1323,14 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       // Turn does NOT advance: proposer continues their turn
       break;
     }
+
+    case "END_TURN": {
+      if (state.phase !== "turn-end") throw new Error("END_TURN only allowed in turn-end phase");
+      if (!checkWin(state, events)) {
+        advanceTurn(state, events);
+      }
+      break;
+    }
   }
 
   return { state, events };
@@ -1365,12 +1425,10 @@ export function applySurrender(prev: GameState, playerId: string): ReduceResult 
     state.pendingSwap = null;
   }
   if (!checkWin(state, events)) {
-    // If the surrendered player was the current player, advance turn
-    const isCurrentPlayer = state.players[state.currentPlayerIndex]?.id === playerId || !player.alive;
     // After bankrupt(), player.alive is false. Check if it was the current player.
     const wasCurrentPlayer = prev.players[prev.currentPlayerIndex]?.id === playerId;
     if (wasCurrentPlayer) {
-      continueOrAdvance(state, events);
+      advanceTurn(state, events);
     }
   }
   return { state, events };
