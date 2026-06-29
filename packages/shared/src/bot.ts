@@ -30,7 +30,7 @@ function canSellHouseAt(state: GameState, board: ReturnType<typeof getBoard>, po
     if (m === pos) continue;
     const bm = state.buildings[m] ?? { houses: 0, hotel: false, factory: false };
     const otherCount = bm.hotel ? 5 : bm.houses;
-    if (otherCount >= b.houses) return false;
+    if (otherCount > b.houses) return false; // mirror engine canSellHouse (`>`, not `>=`)
   }
   return true;
 }
@@ -45,6 +45,7 @@ function canBuildHouseAt(state: GameState, board: ReturnType<typeof getBoard>, p
   if (state.mortgaged[pos]) return false;
   const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
   if (b.hotel || b.factory || b.houses >= 4) return false;
+  if (groupMembers(board, tile.group).length < 2) return false; // mirror engine: no build on single-street groups
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // any mortgaged member blocks
@@ -66,6 +67,7 @@ function canBuildHotelAt(state: GameState, board: ReturnType<typeof getBoard>, p
   if (!tile || tile.type !== "street") return false;
   const b = state.buildings[pos];
   if (!b || b.hotel || b.factory || b.houses !== 4) return false;
+  if (groupMembers(board, tile.group).length < 2) return false; // mirror engine: no build on single-street groups
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (m === pos) continue;

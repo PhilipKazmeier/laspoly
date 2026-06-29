@@ -63,7 +63,7 @@ const ACTION_CARD_SPECS: CardSpec[] = [
   { kind: "move-next-station" },                                                 // 5
   { kind: "single", id: "gamblingTax", positive: false, multiplier: 30 },       // 6
   { kind: "single", id: "parkingFine", positive: false, multiplier: 20 },       // 7
-  { kind: "single", id: "helicopterFlight", positive: false, multiplier: 50 },  // 8
+  { kind: "single", id: "helicopterFlight", positive: false, multiplier: 35 },  // 8
   { kind: "single", id: "magicianShow", positive: false, multiplier: 15 },      // 9
   { kind: "single", id: "independenceDay", positive: false, multiplier: 25 },   // 10
   { kind: "single", id: "lookalikeCompetition", positive: true, multiplier: 25 }, // 11
@@ -75,7 +75,7 @@ const ACTION_CARD_SPECS: CardSpec[] = [
   { kind: "single", id: "boxingBet", positive: true, multiplier: 25 },          // 17
   { kind: "single", id: "blackJack", positive: true, multiplier: 15 },          // 18
   { kind: "single", id: "baccaratGame", positive: true, multiplier: 15 },       // 19
-  { kind: "broadcast", id: "youGotPromoted", positive: false, multiplier: 20 }, // 20
+  { kind: "broadcast", id: "youGotPromoted", positive: false, multiplier: 15 }, // 20
   { kind: "broadcast", id: "birthday", positive: true, multiplier: 20 },        // 21
   { kind: "broadcast", id: "pokerTable", positive: true, multiplier: 25 },      // 22
   { kind: "repair-factory", id: "factoryRedevelop", multiplier: 10 },           // 23
@@ -84,6 +84,25 @@ const ACTION_CARD_SPECS: CardSpec[] = [
 ];
 
 const ACTION_CARD_COUNT = ACTION_CARD_SPECS.length; // 26
+
+/**
+ * Stable, human-translatable id for a card. Cards with an explicit id use it;
+ * the movement cards derive a stable id from their kind/target so i18n can map
+ * each to a friendly name instead of surfacing a raw internal identifier.
+ */
+function cardId(spec: CardSpec): string {
+  switch (spec.kind) {
+    case "move-random": return "move-random";
+    case "move-to": return spec.pos === 0 ? "move-to-GO" : "move-to-casino";
+    case "move-jail": return "move-jail";
+    case "move-forward": return "move-forward";
+    case "move-next-station": return "move-next-station";
+    default: return spec.id;
+  }
+}
+
+/** All card ids, for i18n coverage. */
+export const ACTION_CARD_IDS: string[] = ACTION_CARD_SPECS.map(cardId);
 
 // Non-special positions for "move-random": streets, stations, attractions
 // Computed once at module load from the board. We use vegas for now.
@@ -168,12 +187,22 @@ function getBuildingsAt(state: GameState, pos: number): Buildings {
   return state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
 }
 
+/** True if `pos` is part of a currently pending swap (either leg). */
+function isInPendingSwap(state: GameState, pos: number): boolean {
+  const s = state.pendingSwap;
+  if (!s) return false;
+  return s.give.props.includes(pos) || s.receive.props.includes(pos);
+}
+
 // ---- building validation --------------------------------------------------
 
 function canConstructHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses >= 4) return false;
+  // Balance: single-street colour groups may not be built on (the even-build rule
+  // is vacuous with one street, letting a lone street reach a hotel by ~round 3).
+  if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   // Even build: this street can't have more houses than any other (build in order)
   for (const m of members) {
@@ -193,6 +222,8 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 4) return false;
+  // Balance: no building on single-street colour groups (see canConstructHouse).
+  if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (m === pos) continue;
@@ -207,6 +238,8 @@ function canConstructFactory(state: GameState, board: BoardDefinition, pos: numb
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 0) return false;
+  // Balance: no building on single-street colour groups (see canConstructHouse).
+  if (groupMembers(board, tile.group).length < 2) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // mortgaged blocks factory
@@ -223,14 +256,16 @@ function canSellHouse(state: GameState, board: BoardDefinition, pos: number): bo
   const b = getBuildingsAt(state, pos);
   if (b.houses <= 0) return false;
   const members = groupMembers(board, tile.group);
-  // After selling, this street would have b.houses - 1.
-  // Even-sell: no other street can have more than (b.houses - 1), otherwise we'd fall behind.
-  // Equivalently: no other street can have >= b.houses houses (after sell this would be behind).
+  // After selling, this street would have b.houses - 1. Even-sell allows a max
+  // spread of 1 between members, so a sibling at the SAME count may still sell.
+  // Use `>` (not `>=`): only block when a sibling has strictly MORE houses,
+  // otherwise a group sitting at equal counts (e.g. hotel knocked down to 4
+  // houses next to siblings at 4) would freeze forever and never liquidate.
   for (const m of members) {
     if (m === pos) continue;
     const bm = getBuildingsAt(state, m);
     const otherCount = bm.hotel ? 5 : bm.houses;
-    if (otherCount >= b.houses) return false; // would fall behind after sell
+    if (otherCount > b.houses) return false; // would create a >1 spread after sell
   }
   return true;
 }
@@ -259,6 +294,8 @@ export function legalCommands(state: GameState): Command["type"][] {
   for (const [posStr, ownerId] of Object.entries(state.ownership)) {
     if (ownerId !== p.id) continue;
     const pos = Number(posStr);
+    // While a swap is pending, the offered props are locked: no build/mortgage/sell.
+    if (isInPendingSwap(state, pos)) continue;
     const tile = board.tiles[pos];
     if (!tile) continue;
     const b = getBuildingsAt(state, pos);
@@ -415,7 +452,7 @@ function applyActionCard(
   events: GameEvent[],
 ): void {
   const spec = ACTION_CARD_SPECS[cardIdx]!;
-  events.push({ key: "actionCard", params: { player: player.name, card: spec.kind === "single" || spec.kind === "broadcast" || spec.kind === "repair-factory" || spec.kind === "repair-general" ? (spec as { id: string }).id : spec.kind }, playerId: player.id });
+  events.push({ key: "actionCard", params: { player: player.name, card: cardId(spec) }, playerId: player.id });
 
   switch (spec.kind) {
     case "move-random": {
@@ -488,6 +525,9 @@ function applyActionCard(
         for (const other of state.players) {
           if (!other.alive || other.id === player.id) continue;
           charge(state, board, player, amount, other.id, events);
+          // Once the drawing player is bankrupt, stop charging — otherwise
+          // charge()/bankrupt() would re-fire for every remaining opponent.
+          if (!player.alive) break;
         }
         events.push({ key: "actionCardBroadcastPay", params: { player: player.name, amount, card: spec.id }, playerId: player.id });
       }
@@ -871,6 +911,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const tile = tileAt(board, pos);
       if (tile.type !== "street") throw new Error("Can only build on streets");
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Property is mortgaged");
       if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) throw new Error("Must own entire group to build");
 
@@ -919,6 +960,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       const tile = tileAt(board, pos) as StreetTile;
       const b = getBuildingsAt(state, pos);
 
@@ -955,6 +997,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Property is already mortgaged");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
@@ -987,6 +1030,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const p = currentPlayer(state);
       const pos = command.pos;
       if (state.ownership[pos] !== p.id) throw new Error("Player does not own this property");
+      if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Cannot sell mortgaged property directly");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
@@ -1028,6 +1072,12 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
 
       if (ticketCost > 0 && destOwnerId) {
         charge(state, board, p, ticketCost, destOwnerId, events);
+        // If the ticket bankrupted the payer the turn must still advance/continue
+        // (mirror the charge sites in resolveLanding) or the game would hang.
+        if (!p.alive) {
+          continueOrAdvance(state, events);
+          break;
+        }
       }
 
       // TRAVEL is a management command: does not advance the turn
@@ -1135,6 +1185,17 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         if (state.ownership[pos] !== swap.toId) {
           state.pendingSwap = null;
           events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "ownership changed" }, playerId: to.id });
+          return { state, events };
+        }
+      }
+
+      // Re-verify nothing was mortgaged/built on the offered props between
+      // proposal and accept (the proposer can act on their own turn meanwhile).
+      for (const pos of [...swap.give.props, ...swap.receive.props]) {
+        const b = getBuildingsAt(state, pos);
+        if (state.mortgaged[pos] || b.houses > 0 || b.hotel || b.factory) {
+          state.pendingSwap = null;
+          events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "property encumbered" }, playerId: from.id });
           return { state, events };
         }
       }

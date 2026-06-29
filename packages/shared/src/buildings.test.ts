@@ -336,18 +336,21 @@ describe("SELL_BUILDING", () => {
     expect(events.some((e) => e.key === "soldBuilding")).toBe(true);
   });
 
-  it("cannot sell house if another street in group has fewer (even-sell rule)", () => {
-    // A has 2 houses on 13, 1 house on 14. Cannot sell from 13 (it has more).
+  it("cannot sell house if another street in group has strictly more (even-sell rule)", () => {
+    // 13 has 2 houses, 14 has 1 house. Selling from 13 -> 1 (matches 14): allowed.
     const s = stateWithMonopoly();
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
     const { state: s2 } = applyCommand(s1, { type: "BUILD", pos: 14, building: "house" });
     const { state: s3 } = applyCommand(s2, { type: "BUILD", pos: 13, building: "house" });
     // s3: 13 has 2 houses, 14 has 1 house
-    // Selling from 13 would give it 1 house (same as 14) - this should be allowed
     const { state: s4 } = applyCommand(s3, { type: "SELL_BUILDING", pos: 13 });
     expect(s4.buildings[13]?.houses).toBe(1);
-    // Now both have 1 house. Selling from 13 would give 0, but 14 has 1 -> not allowed
-    expect(() => applyCommand(s4, { type: "SELL_BUILDING", pos: 13 })).toThrow();
+    // Now both have 1 house. Selling from 13 -> 0, spread of 1 from 14 is allowed
+    // (even-sell uses `>`, not `>=`, so a group at equal counts can still liquidate).
+    const { state: s5 } = applyCommand(s4, { type: "SELL_BUILDING", pos: 13 });
+    expect(s5.buildings[13]?.houses).toBe(0);
+    // But selling again from 13 (now 0) while 14 still has 1 is blocked: nothing to sell.
+    expect(() => applyCommand(s5, { type: "SELL_BUILDING", pos: 13 })).toThrow();
   });
 });
 

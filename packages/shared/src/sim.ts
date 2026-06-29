@@ -7,6 +7,8 @@ export interface SimResult {
   turns: number;
   finished: boolean;
   bankruptcies: number;
+  /** turn on which the first player was eliminated, or null if none */
+  firstEliminationTurn: number | null;
 }
 
 function assertInvariants(state: GameState, context: string): void {
@@ -49,12 +51,16 @@ export function simulateGame(
   const initialAlive = aliveCount(state);
   const maxCommands = maxTurns * numPlayers * 4; // safety cap
   let commandCount = 0;
+  let firstEliminationTurn: number | null = null;
 
   while (state.phase !== "finished" && state.turn <= maxTurns && commandCount < maxCommands) {
     const cmd = botDecide(state);
     const result = applyCommand(state, cmd);
     state = result.state;
     commandCount++;
+    if (firstEliminationTurn === null && result.events.some((e) => e.key === "bankrupt")) {
+      firstEliminationTurn = state.turn;
+    }
     assertInvariants(state, `turn=${state.turn} cmd=${commandCount} lastCmd=${cmd.type}`);
   }
 
@@ -63,6 +69,7 @@ export function simulateGame(
     turns: state.turn,
     finished: state.phase === "finished",
     bankruptcies: initialAlive - aliveCount(state) - (state.phase === "finished" ? 1 : 0),
+    firstEliminationTurn,
   };
 }
 
@@ -108,6 +115,21 @@ function main(): void {
   }
   console.log(`Bankruptcy distribution (all games):`, bankruptcyDist);
   console.log(`Bankruptcy distribution (finished games):`, finishedBankruptcyDist);
+
+  // Balance: how soon does the first elimination happen? (early = pre-round-7)
+  const firstElims = results
+    .map((r) => r.firstEliminationTurn)
+    .filter((t): t is number => t !== null);
+  const EARLY_TURN = 28; // ~round 7 in a 4p game
+  const earlyKnockouts = firstElims.filter((t) => t <= EARLY_TURN).length;
+  if (firstElims.length > 0) {
+    console.log(
+      `First elimination turn — median: ${median(firstElims)}, avg: ${avg(firstElims).toFixed(1)}, min: ${Math.min(...firstElims)}`,
+    );
+    console.log(
+      `Early knockouts (first elim by turn ${EARLY_TURN}): ${earlyKnockouts}/${results.length} (${((earlyKnockouts / results.length) * 100).toFixed(1)}%)`,
+    );
+  }
 }
 
 // Run main() when invoked directly

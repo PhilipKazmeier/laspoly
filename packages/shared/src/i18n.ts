@@ -114,7 +114,72 @@ const en: Catalogue = {
 
 const catalogues: Record<Locale, Catalogue> = { de, en };
 
+// ---- action card names ----------------------------------------------------
+// Friendly, localized names for every action card id (see engine ACTION_CARD_IDS).
+// formatEvent substitutes these for the raw `card` param so announcements never
+// surface internal ids like "move-random" or "gamblingTax".
+const cardNamesDe: Catalogue = {
+  "move-random": "Reise ins Glück",
+  "move-to-GO": "Gehe auf LOS",
+  "move-to-casino": "Ab ins Casino",
+  "move-jail": "Ab ins Gefängnis",
+  "move-forward": "Rücke vor",
+  "move-next-station": "Zum nächsten Bahnhof",
+  gamblingTax: "Glücksspielsteuer",
+  parkingFine: "Parkstrafe",
+  helicopterFlight: "Hubschrauberrundflug",
+  magicianShow: "Zaubershow",
+  independenceDay: "Unabhängigkeitstag",
+  lookalikeCompetition: "Doppelgänger-Wettbewerb",
+  yardSale: "Flohmarkt",
+  inherit: "Erbschaft",
+  horseRacing: "Pferderennen",
+  slotMachine: "Spielautomat",
+  roulette: "Roulette",
+  boxingBet: "Boxwette",
+  blackJack: "Black Jack",
+  baccaratGame: "Baccarat",
+  youGotPromoted: "Beförderung",
+  birthday: "Geburtstag",
+  pokerTable: "Pokertisch",
+  factoryRedevelop: "Fabrik-Sanierung",
+  generalRepairs: "Generalsanierung",
+  streetRepairs: "Straßensanierung",
+};
+
+const cardNamesEn: Catalogue = {
+  "move-random": "Lucky Trip",
+  "move-to-GO": "Advance to GO",
+  "move-to-casino": "Off to the Casino",
+  "move-jail": "Go to Jail",
+  "move-forward": "Advance",
+  "move-next-station": "To the Next Station",
+  gamblingTax: "Gambling Tax",
+  parkingFine: "Parking Fine",
+  helicopterFlight: "Helicopter Flight",
+  magicianShow: "Magician Show",
+  independenceDay: "Independence Day",
+  lookalikeCompetition: "Lookalike Competition",
+  yardSale: "Yard Sale",
+  inherit: "Inheritance",
+  horseRacing: "Horse Racing",
+  slotMachine: "Slot Machine",
+  roulette: "Roulette",
+  boxingBet: "Boxing Bet",
+  blackJack: "Black Jack",
+  baccaratGame: "Baccarat",
+  youGotPromoted: "Promotion",
+  birthday: "Birthday",
+  pokerTable: "Poker Table",
+  factoryRedevelop: "Factory Redevelopment",
+  generalRepairs: "General Repairs",
+  streetRepairs: "Street Repairs",
+};
+
+const cardNames: Record<Locale, Catalogue> = { de: cardNamesDe, en: cardNamesEn };
+
 export const ALL_EVENT_KEYS = Object.keys(de) as string[];
+export const ALL_CARD_IDS = Object.keys(cardNamesDe) as string[];
 
 function interpolate(template: string, params: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => {
@@ -129,5 +194,12 @@ export function formatEvent(event: GameEvent, locale: Locale = "de"): string {
   if (!template) {
     return `[${event.key}] ${JSON.stringify(event.params)}`;
   }
-  return interpolate(template, event.params);
+  // Translate the raw card id (if any) to its friendly localized name so the
+  // popup/log reads e.g. "Glücksspielsteuer" instead of "gamblingTax".
+  let params = event.params;
+  if (typeof params.card === "string") {
+    const friendly = cardNames[locale][params.card];
+    if (friendly !== undefined) params = { ...params, card: friendly };
+  }
+  return interpolate(template, params);
 }
