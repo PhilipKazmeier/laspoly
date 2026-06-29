@@ -13,7 +13,7 @@ board3d.setRollHandler(() => {
 });
 // Tile clicks are exposed for the HTML property-card popup (owned by the UI agent).
 board3d.setTileClickHandler((pos) => {
-  console.log("[board3d] tile clicked:", pos);
+  ui.showDeedCard(pos);
 });
 
 // Track whether we are attempting a session resume (suppress initial lobby flash)

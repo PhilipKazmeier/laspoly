@@ -263,6 +263,35 @@ const css = `
     z-index: 80;
   }
   #settingsOverlay label { color: #aaa; font-size: 12px; margin-top: 6px; }
+  #deedCardPopup {
+    position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+    width: 300px;
+    background: #1a1a2e; border: 2px solid #facc15; border-radius: 10px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    z-index: 90;
+    overflow: hidden;
+  }
+  #deedCardPopup .dc-color-bar {
+    height: 8px; width: 100%;
+  }
+  #deedCardPopup .dc-header {
+    padding: 10px 16px 6px; font-weight: bold; font-size: 15px; color: #facc15;
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  #deedCardPopup .dc-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 0 0 0 8px; line-height: 1;
+  }
+  #deedCardPopup .dc-close:hover { color: #fff; }
+  #deedCardPopup .dc-body {
+    padding: 8px 16px 14px; color: #eee; font-size: 12px; line-height: 1.6;
+  }
+  #deedCardPopup .dc-row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 2px 0; }
+  #deedCardPopup .dc-row:last-child { border-bottom: none; }
+  #deedCardPopup .dc-label { color: #aaa; }
+  #deedCardPopup .dc-value { color: #fff; text-align: right; }
+  #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: #60a5fa; }
+  #deedCardPopup .dc-status { font-size: 11px; color: #f87171; margin-top: 2px; }
 `;
 
 function show(el: HTMLElement, displayValue = "block") {
@@ -321,6 +350,8 @@ export class UI {
   private headerViewBtn!: HTMLButtonElement;
   private turnToast!: HTMLDivElement;
   private turnToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastState: GameState | null = null;
+  private deedCardPopup!: HTMLDivElement;
   private helpOverlay!: HTMLDivElement;
   private settingsOverlay!: HTMLDivElement;
 
@@ -341,6 +372,7 @@ export class UI {
     this.buildError();
     this.buildActionCardPopup();
     this.buildBuyOfferPanel();
+    this.buildDeedCardPopup();
   }
 
   private injectStyles() {
@@ -798,6 +830,125 @@ export class UI {
     );
   }
 
+  private buildDeedCardPopup() {
+    const el = document.createElement("div");
+    el.id = "deedCardPopup";
+    hide(el);
+    this.root.appendChild(el);
+    this.deedCardPopup = el;
+  }
+
+  showDeedCard(pos: number) {
+    const state = this.lastState;
+    const panel = this.deedCardPopup;
+    panel.innerHTML = "";
+
+    if (!state) { hide(panel); return; }
+
+    const board = getBoard(state.boardId);
+    const tile = board.tiles[pos];
+    if (!tile) { hide(panel); return; }
+
+    // Colour bar
+    const group = (tile as { group?: string }).group;
+    const barColor = group ? this.groupCssColor(group) : "#444";
+    const bar = document.createElement("div");
+    bar.className = "dc-color-bar";
+    bar.style.background = barColor;
+    panel.appendChild(bar);
+
+    // Header row: name + close
+    const hdr = document.createElement("div");
+    hdr.className = "dc-header";
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = tile.name;
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "dc-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => hide(panel));
+    hdr.appendChild(nameSpan);
+    hdr.appendChild(closeBtn);
+    panel.appendChild(hdr);
+
+    // Body
+    const body = document.createElement("div");
+    body.className = "dc-body";
+
+    const row = (label: string, value: string) => {
+      const r = document.createElement("div");
+      r.className = "dc-row";
+      r.innerHTML = `<span class="dc-label">${label}</span><span class="dc-value">${value}</span>`;
+      body.appendChild(r);
+    };
+
+    if (tile.type === "street") {
+      const st = tile as StreetTile;
+      row("Preis", `${st.price} LPD`);
+      row("Hypothek", `${st.mortgage} LPD`);
+      row("Grundmiete", `${st.rent[0]} LPD`);
+      row("1 Haus", `${st.rent[1]} LPD`);
+      row("2 Häuser", `${st.rent[2]} LPD`);
+      row("3 Häuser", `${st.rent[3]} LPD`);
+      row("4 Häuser", `${st.rent[4]} LPD`);
+      row("Hotel", `${st.rent[5]} LPD`);
+      row("Fabrik", `${st.factoryRevenue} LPD`);
+      row("Hauskosten", `${st.houseCost} LPD`);
+      row("Hotelkosten", `${st.hotelCost} LPD`);
+      row("Fabrikkosten", `${st.factoryCost} LPD`);
+    } else if (tile.type === "station") {
+      const r = board.rules.station;
+      row("Preis", `${r.price} LPD`);
+      row("Hypothek", `${r.mortgage} LPD`);
+      row("Miete (1 Bhf)", `${r.rent[0] ?? 0} LPD`);
+      row("Miete (2 Bhf)", `${r.rent[1] ?? 0} LPD`);
+      row("Miete (3 Bhf)", `${r.rent[2] ?? 0} LPD`);
+      row("Miete (4 Bhf)", `${r.rent[3] ?? 0} LPD`);
+    } else if (tile.type === "attraction") {
+      const a = board.rules.attraction;
+      row("Preis", `${a.price} LPD`);
+      row("Hypothek", `${a.mortgage} LPD`);
+      row("Miete (1 Attr.)", `Würfel × ${a.factorOne}`);
+      row("Miete (2 Attr.)", `Würfel × ${a.factorBoth}`);
+    }
+
+    // Owner + buildings
+    const ownerId = state.ownership[pos];
+    if (ownerId) {
+      const owner = state.players.find(p => p.id === ownerId);
+      const ownerDiv = document.createElement("div");
+      ownerDiv.className = "dc-owner";
+      ownerDiv.textContent = `Eigentümer: ${owner?.name ?? "?"}`;
+      body.appendChild(ownerDiv);
+
+      const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+      let buildStr = "";
+      if (b.hotel) buildStr = "Hotel";
+      else if (b.factory) buildStr = "Fabrik";
+      else if (b.houses > 0) buildStr = `${b.houses} Haus${b.houses > 1 ? "häuser" : ""}`;
+      if (buildStr) {
+        const bDiv = document.createElement("div");
+        bDiv.className = "dc-status";
+        bDiv.textContent = `Gebäude: ${buildStr}`;
+        body.appendChild(bDiv);
+      }
+
+      if (state.mortgaged[pos]) {
+        const mDiv = document.createElement("div");
+        mDiv.className = "dc-status";
+        mDiv.textContent = "Hypothek aktiv";
+        body.appendChild(mDiv);
+      }
+    } else {
+      const unownedDiv = document.createElement("div");
+      unownedDiv.className = "dc-owner";
+      unownedDiv.textContent = "Nicht im Besitz";
+      body.appendChild(unownedDiv);
+    }
+
+    panel.appendChild(body);
+    show(panel, "block");
+  }
+
   private renderChipStack(money: number): string {
     const denoms = [100, 10, 1];
     const imgs = ["/assets/laspolydollar100.png", "/assets/laspolydollar10.png", "/assets/laspolydollar1.png"];
@@ -934,6 +1085,7 @@ export class UI {
   }
 
   updateGame(state: GameState, events: FormattedEvent[], myId: string | null) {
+    this.lastState = state;
     hide(this.lobby);
     hide(this.roomPanel);
     show(this.gameHud, "block");
@@ -1158,6 +1310,8 @@ export class UI {
         <div class="prop-name">${groupColor}${tile.name}${mortgageStr}</div>
         <div class="prop-detail">Gebäude: ${buildingStr}</div>
       `;
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => this.showDeedCard(pos));
 
       // Buttons
       const btnRow = document.createElement("div");
