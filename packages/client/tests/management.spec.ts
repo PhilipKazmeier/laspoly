@@ -61,7 +61,7 @@ async function waitForAction(page: Page, timeout = 60_000): Promise<
         if (govEl && govEl.style.display === "flex") return "gameover";
         if (visible("spectatorBanner")) return "spectator";
         if (visible("rollBtn")) return "roll";
-        if (visible("buyBtn")) return "buy";
+        if (visible("buyOfferPanel")) return "buy";
         if (visible("ransomBtn")) return "ransom";
         return null;
       },
@@ -148,9 +148,9 @@ test.describe("Phase 2c Management UI", () => {
             } catch { return false; }
           });
           if (canAfford) {
-            await page.locator("#buyBtn").click();
+            await page.locator("#buyOfferBuyBtn").click();
           } else {
-            await page.locator("#declineBtn").click();
+            await page.locator("#buyOfferDeclineBtn").click();
           }
           await page.waitForTimeout(150);
           continue;
@@ -204,8 +204,8 @@ test.describe("Phase 2c Management UI", () => {
             await page.locator("#rollBtn").click();
             await page.waitForTimeout(300);
             // Decline purchase after roll (we already did the mortgage action)
-            const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
-            if (buyNow) await page.locator("#declineBtn").click();
+            const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
+            if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
             await page.waitForTimeout(150);
             continue;
           }
@@ -216,7 +216,7 @@ test.describe("Phase 2c Management UI", () => {
         await page.waitForTimeout(300);
 
         // After roll: buy if we can afford it (state relay check)
-        const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
+        const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) {
           const canAffordNow = await page.evaluate(() => {
             try {
@@ -231,9 +231,9 @@ test.describe("Phase 2c Management UI", () => {
             } catch { return false; }
           });
           if (canAffordNow) {
-            await page.locator("#buyBtn").click();
+            await page.locator("#buyOfferBuyBtn").click();
           } else {
-            await page.locator("#declineBtn").click();
+            await page.locator("#buyOfferDeclineBtn").click();
           }
         }
         await page.waitForTimeout(150);

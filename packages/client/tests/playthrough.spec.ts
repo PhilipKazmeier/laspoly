@@ -67,7 +67,7 @@ async function waitForActionOrEnd(page: Page, timeout = 60_000): Promise<
         if (govEl && govEl.style.display === "flex") return "gameover";
         if (visible("spectatorBanner")) return "spectator";
         if (visible("rollBtn")) return "roll";
-        if (visible("buyBtn")) return "buy";
+        if (visible("buyOfferPanel")) return "buy";
         if (visible("ransomBtn")) return "ransom";
         return null;
       },
@@ -236,7 +236,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           await chatInput.fill("");
 
           // Decline to keep game moving quickly (less money spent = game ends sooner)
-          await page.locator("#declineBtn").click();
+          await page.locator("#buyOfferDeclineBtn").click();
         } else {
           // arrived === "roll"
           botsAutoPlayedAtLeastOnce = true;
@@ -245,20 +245,18 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           const rollEnabled = await page.locator("#rollBtn").isEnabled();
           expect(rollEnabled).toBe(true);
 
-          // Buy/Decline buttons should NOT be visible in roll phase
-          const buyVisible = await page.locator("#buyBtn").isVisible();
-          const declineVisible = await page.locator("#declineBtn").isVisible();
+          // Buy offer must NOT be visible in roll phase
+          const buyVisible = await page.locator("#buyOfferPanel").isVisible();
           expect(buyVisible).toBe(false);
-          expect(declineVisible).toBe(false);
 
           await page.locator("#rollBtn").click();
 
           // After rolling, if buy offer appears, decline it
           // Wait briefly to let state update
           await page.waitForTimeout(300);
-          const afterBuyVisible = await page.locator("#buyBtn").isVisible().catch(() => false);
+          const afterBuyVisible = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
           if (afterBuyVisible) {
-            await page.locator("#declineBtn").click();
+            await page.locator("#buyOfferDeclineBtn").click();
           }
         }
 
@@ -359,17 +357,16 @@ test.describe("LasPoly Phase-1 playthrough", () => {
       await expect(page.locator("#rollBtn")).toBeVisible();
       await expect(page.locator("#rollBtn")).toBeEnabled();
 
-      // Buy/Decline must NOT be visible (we're in roll phase)
-      await expect(page.locator("#buyBtn")).not.toBeVisible();
-      await expect(page.locator("#declineBtn")).not.toBeVisible();
+      // Buy offer must NOT be visible (we're in roll phase)
+      await expect(page.locator("#buyOfferPanel")).not.toBeVisible();
 
       // Click roll
       await page.locator("#rollBtn").click();
       await page.waitForTimeout(300);
 
       // After roll: if buy appears, decline and then check rollBtn is gone
-      const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
-      if (buyNow) await page.locator("#declineBtn").click();
+      const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
+      if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
 
       // Wait for bot turn — rollBtn should disappear
       await page.waitForTimeout(500);
@@ -381,8 +378,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
       }
     } else if (arrived === "buy") {
       // Also valid: first action is buy offer
-      await expect(page.locator("#buyBtn")).toBeVisible();
-      await expect(page.locator("#declineBtn")).toBeVisible();
+      await expect(page.locator("#buyOfferPanel")).toBeVisible();
       // Roll btn must NOT be visible in buy phase
       await expect(page.locator("#rollBtn")).not.toBeVisible();
     }
@@ -419,13 +415,13 @@ test.describe("LasPoly Phase-1 playthrough", () => {
         expect(await chatInput.inputValue()).toBe("hello from buy phase");
         await chatInput.fill("");
         // Decline
-        await page.locator("#declineBtn").click();
+        await page.locator("#buyOfferDeclineBtn").click();
         break;
       }
       if (arrived === "roll") {
         await page.locator("#rollBtn").click();
         await page.waitForTimeout(300);
-        const buyNow = await page.locator("#buyBtn").isVisible().catch(() => false);
+        const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) {
           buyPhaseReached = true;
           const chatInput = page.locator("#chatInput");
@@ -433,7 +429,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           await chatInput.fill("buy phase open");
           expect(await chatInput.inputValue()).toBe("buy phase open");
           await chatInput.fill("");
-          await page.locator("#declineBtn").click();
+          await page.locator("#buyOfferDeclineBtn").click();
           break;
         }
       }

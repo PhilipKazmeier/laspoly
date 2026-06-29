@@ -83,8 +83,6 @@ test("board pass2 – chip stacks and deed display visible", async ({ page }) =>
     }
     if (await page.locator("#buyOfferBuyBtn").isVisible()) {
       await page.locator("#buyOfferBuyBtn").click();
-    } else if (await page.locator("#buyBtn").isVisible()) {
-      await page.locator("#buyBtn").click();
     }
     await page.waitForTimeout(1_500);
   }

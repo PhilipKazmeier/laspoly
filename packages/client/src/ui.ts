@@ -299,8 +299,6 @@ export class UI {
   private playerList!: HTMLDivElement;
   private eventLog!: HTMLDivElement;
   private rollBtn!: HTMLButtonElement;
-  private buyBtn!: HTMLButtonElement;
-  private declineBtn!: HTMLButtonElement;
   private ransomBtn!: HTMLButtonElement;
   private chatInput!: HTMLInputElement;
   private gameOverBanner!: HTMLDivElement;
@@ -476,31 +474,19 @@ export class UI {
     actionPanel.className = "panel";
     actionPanel.innerHTML = `
       <button id="rollBtn">Würfeln</button>
-      <button id="buyBtn">Kaufen</button>
-      <button id="declineBtn">Ablehnen</button>
       <button id="ransomBtn">Freikaufen</button>
     `;
     hud.appendChild(actionPanel);
 
     this.rollBtn = document.getElementById("rollBtn") as HTMLButtonElement;
-    this.buyBtn = document.getElementById("buyBtn") as HTMLButtonElement;
-    this.declineBtn = document.getElementById("declineBtn") as HTMLButtonElement;
     this.ransomBtn = document.getElementById("ransomBtn") as HTMLButtonElement;
 
     // Hide action buttons initially
     hide(this.rollBtn);
-    hide(this.buyBtn);
-    hide(this.declineBtn);
     hide(this.ransomBtn);
 
     this.rollBtn.addEventListener("click", () =>
       this.net.send({ t: "command", command: { type: "ROLL_DICE" } })
-    );
-    this.buyBtn.addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } })
-    );
-    this.declineBtn.addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } })
     );
     this.ransomBtn.addEventListener("click", () =>
       this.net.send({ t: "command", command: { type: "PAY_RANSOM" } })
@@ -1027,12 +1013,6 @@ export class UI {
 
     if (showRoll) { show(this.rollBtn, "inline-block"); this.rollBtn.disabled = false; }
     else { hide(this.rollBtn); this.rollBtn.disabled = true; }
-
-    if (showBuy) { show(this.buyBtn, "inline-block"); this.buyBtn.disabled = false; }
-    else { hide(this.buyBtn); this.buyBtn.disabled = true; }
-
-    if (showBuy) { show(this.declineBtn, "inline-block"); this.declineBtn.disabled = false; }
-    else { hide(this.declineBtn); this.declineBtn.disabled = true; }
 
     if (showRansom) { show(this.ransomBtn, "inline-block"); this.ransomBtn.disabled = false; }
     else { hide(this.ransomBtn); this.ransomBtn.disabled = true; }
