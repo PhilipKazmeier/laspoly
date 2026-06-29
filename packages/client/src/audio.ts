@@ -37,6 +37,11 @@ class AudioPlayer {
     return this.muted;
   }
 
+  // Maximum playback duration in seconds for sounds that can be too long.
+  private static readonly MAX_DURATION: Partial<Record<SfxName, number>> = {
+    jail: 1.2,
+  };
+
   play(name: SfxName): void {
     if (this.muted) return;
     try {
@@ -50,6 +55,14 @@ class AudioPlayer {
       const clone = el.cloneNode() as HTMLAudioElement;
       clone.volume = el.volume;
       void clone.play().catch(() => {/* autoplay blocked — ignore */});
+      // Cap duration for sounds that would otherwise run too long (e.g. jail siren)
+      const maxDur = AudioPlayer.MAX_DURATION[name];
+      if (maxDur !== undefined) {
+        setTimeout(() => {
+          clone.pause();
+          clone.currentTime = 0;
+        }, maxDur * 1000);
+      }
     } catch {
       // Any failure is silently swallowed
     }

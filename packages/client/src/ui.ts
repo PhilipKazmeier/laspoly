@@ -346,6 +346,286 @@ const css = `
   .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
 `;
 
+// ---------------------------------------------------------------------------
+// i18n — client-side string table (DE + EN)
+// ---------------------------------------------------------------------------
+type Locale = "de" | "en";
+
+const STRINGS: Record<Locale, Record<string, string>> = {
+  de: {
+    // Lobby
+    "lobby.title": "LasPoly",
+    "lobby.nickname": "Nickname",
+    "lobby.board": "Board",
+    "lobby.botCount": "Bot-Anzahl",
+    "lobby.createRoom": "Raum erstellen",
+    "lobby.openRooms": "Offene Räume:",
+    "lobby.players": "Spieler",
+    // Room panel
+    "room.title": "Raum",
+    "room.waiting": "Warte auf Spielstart...",
+    "room.board": "Board",
+    "room.bots": "Bots",
+    "room.players": "Spieler",
+    "room.copyLink": "Link kopieren",
+    "room.linkCopied": "Kopiert!",
+    "room.figureTitle": "Farbe & Figur wählen:",
+    "room.startGame": "Spiel starten",
+    "room.leaveRoom": "Raum verlassen",
+    "room.others": "",
+    // Game HUD
+    "game.events": "Ereignisse",
+    "game.chat": "Chat...",
+    "game.send": "Senden",
+    "game.roll": "Würfeln",
+    "game.ransom": "Freikaufen",
+    "game.endTurn": "✓ Zug beenden",
+    "game.spectator": "Du bist Zuschauer",
+    // Header
+    "header.standardView": "🗺 Standard-Ansicht",
+    "header.topView": "🗺 Vogel-Ansicht",
+    "header.settings": "Einstellungen",
+    "header.settingsTitle": "⚙",
+    "header.help": "?",
+    "header.helpTitle": "Hilfe",
+    "header.leave": "✕ Verlassen",
+    // Help overlay
+    "help.title": "Spielregeln & Steuerung",
+    "help.roll": 'Würfeln: Klick auf "Würfeln"',
+    "help.buy": 'Kaufen: Kaufangebot erscheint rechts - "Kaufen" oder "Ablehnen"',
+    "help.build": "Bauen: Dein Grundstück - Haus/Hotel/Fabrik-Taste",
+    "help.trade": 'Tauschen: "Tauschen" in der Grundstücksliste',
+    "help.travel": 'Reisen: Von einem Bahnhof aus "Reisen nach..."',
+    "help.view": "Ansicht: Schaltfläche oben rechts wechselt zwischen Schräg- und Vogelperspektive",
+    "help.chat": "Chat: Eingabefeld unten links",
+    "help.deed": "Grundstück: Klick auf ein Feld zeigt Grundbuchdaten",
+    // Settings
+    "settings.title": "Einstellungen",
+    "settings.locale": "Sprache / Locale",
+    "settings.localeNote": "Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.",
+    // My properties panel
+    "props.title": "Mein Eigentum",
+    "props.trade": "Tauschen",
+    "props.capital": "Kapital",
+    // Buy offer
+    "buy.header": "Kaufangebot",
+    "buy.price": "Preis:",
+    "buy.balance": "Dein Kapital:",
+    "buy.buy": "Kaufen",
+    "buy.decline": "Ablehnen",
+    // Action card
+    "card.header": "🃏 Aktionskarte",
+    "card.confirm": "Bestätigen",
+    // Game over
+    "gameover.title": "Spiel vorbei!",
+    "gameover.winner": "Gewinner:",
+    "gameover.back": "Zurück zur Lobby",
+    // Travel
+    "travel.title": "Reisen nach…",
+    "travel.free": "kostenlos",
+    "travel.ticket": "Ticket",
+    "travel.close": "Schließen",
+    // Trade
+    "trade.title": "Tauschangebot erstellen",
+    "trade.offerTo": "Anbieten an:",
+    "trade.give": "Ich gebe (Grundstücke):",
+    "trade.giveMoney": "Geld geben:",
+    "trade.receive": "Ich erhalte (Grundstücke von",
+    "trade.receiveMoney": "Ich erhalte (Geld):",
+    "trade.receiveMoneyLabel": "Geld erhalten:",
+    "trade.offer": "Anbieten",
+    "trade.cancel": "Abbrechen",
+    // Incoming swap
+    "swap.from": "Tauschangebot von",
+    "swap.give": "Du gibst:",
+    "swap.receive": "Du erhältst:",
+    "swap.accept": "Annehmen",
+    "swap.decline": "Ablehnen",
+    // Turn/round
+    "turn.mine": "Du bist am Zug",
+    "turn.end": "Zug beenden",
+    "turn.other": "ist am Zug",
+    "turn.round": "Runde",
+    // Property buttons
+    "prop.house": "Haus",
+    "prop.hotel": "Hotel",
+    "prop.factory": "Fabrik",
+    "prop.sellBuilding": "Gebäude verk.",
+    "prop.mortgage": "Hypothek",
+    "prop.unmortgage": "Ablösen",
+    "prop.sell": "Verkaufen",
+    // Deed card
+    "deed.price": "Preis",
+    "deed.mortgage": "Hypothek",
+    "deed.baseRent": "Grundmiete",
+    "deed.house1": "1 Haus",
+    "deed.house2": "2 Häuser",
+    "deed.house3": "3 Häuser",
+    "deed.house4": "4 Häuser",
+    "deed.hotel": "Hotel",
+    "deed.factory": "Fabrik",
+    "deed.houseCost": "Hauskosten",
+    "deed.hotelCost": "Hotelkosten",
+    "deed.factoryCost": "Fabrikkosten",
+    "deed.owner": "Eigentümer:",
+    "deed.building": "Gebäude:",
+    "deed.mortgaged": "Hypothek aktiv",
+    "deed.unowned": "Nicht im Besitz",
+    "deed.rentStation1": "Miete (1 Bhf)",
+    "deed.rentStation2": "Miete (2 Bhf)",
+    "deed.rentStation3": "Miete (3 Bhf)",
+    "deed.rentStation4": "Miete (4 Bhf)",
+    "deed.rentAttr1": "Miete (1 Attr.)",
+    "deed.rentAttr2": "Miete (2 Attr.)",
+    // Special events
+    "event.circus": "🎪 Zirkus in der Stadt",
+    "event.boom": "📈 Wirtschaftsboom",
+    "event.recession": "📉 Rezession",
+    "event.jackpot": "🎰 Casino-Jackpot-Nacht",
+    "event.buildingSale": "🏗️ Bau-Rabatt",
+    "event.quietDay": "😴 Ruhiger Tag",
+  },
+  en: {
+    // Lobby
+    "lobby.title": "LasPoly",
+    "lobby.nickname": "Nickname",
+    "lobby.board": "Board",
+    "lobby.botCount": "Bot count",
+    "lobby.createRoom": "Create Room",
+    "lobby.openRooms": "Open Rooms:",
+    "lobby.players": "players",
+    // Room panel
+    "room.title": "Room",
+    "room.waiting": "Waiting for game start...",
+    "room.board": "Board",
+    "room.bots": "Bots",
+    "room.players": "Players",
+    "room.copyLink": "Copy link",
+    "room.linkCopied": "Copied!",
+    "room.figureTitle": "Choose colour & figure:",
+    "room.startGame": "Start Game",
+    "room.leaveRoom": "Leave Room",
+    "room.others": "",
+    // Game HUD
+    "game.events": "Events",
+    "game.chat": "Chat...",
+    "game.send": "Send",
+    "game.roll": "Roll",
+    "game.ransom": "Pay Bail",
+    "game.endTurn": "✓ End Turn",
+    "game.spectator": "You are a spectator",
+    // Header
+    "header.standardView": "🗺 Standard View",
+    "header.topView": "🗺 Top View",
+    "header.settings": "Settings",
+    "header.settingsTitle": "⚙",
+    "header.help": "?",
+    "header.helpTitle": "Help",
+    "header.leave": "✕ Leave",
+    // Help overlay
+    "help.title": "Rules & Controls",
+    "help.roll": "Roll: Click \"Roll\"",
+    "help.buy": "Buy: Purchase offer appears on the right – \"Buy\" or \"Decline\"",
+    "help.build": "Build: Your property → House/Hotel/Factory button",
+    "help.trade": "Trade: \"Trade\" in the property list",
+    "help.travel": "Travel: From a station \"Travel to…\"",
+    "help.view": "View: Button top-right switches between angled and top-down perspective",
+    "help.chat": "Chat: Input field bottom left",
+    "help.deed": "Property: Click a tile to show deed information",
+    // Settings
+    "settings.title": "Settings",
+    "settings.locale": "Language / Locale",
+    "settings.localeNote": "Note: Local display language – game events come from the server.",
+    // My properties panel
+    "props.title": "My Properties",
+    "props.trade": "Trade",
+    "props.capital": "Capital",
+    // Buy offer
+    "buy.header": "Purchase Offer",
+    "buy.price": "Price:",
+    "buy.balance": "Your capital:",
+    "buy.buy": "Buy",
+    "buy.decline": "Decline",
+    // Action card
+    "card.header": "🃏 Action Card",
+    "card.confirm": "Confirm",
+    // Game over
+    "gameover.title": "Game Over!",
+    "gameover.winner": "Winner:",
+    "gameover.back": "Back to Lobby",
+    // Travel
+    "travel.title": "Travel to…",
+    "travel.free": "free",
+    "travel.ticket": "ticket",
+    "travel.close": "Close",
+    // Trade
+    "trade.title": "Create Trade Offer",
+    "trade.offerTo": "Offer to:",
+    "trade.give": "I give (properties):",
+    "trade.giveMoney": "Give money:",
+    "trade.receive": "I receive (properties from",
+    "trade.receiveMoney": "I receive (money):",
+    "trade.receiveMoneyLabel": "Receive money:",
+    "trade.offer": "Offer",
+    "trade.cancel": "Cancel",
+    // Incoming swap
+    "swap.from": "Trade offer from",
+    "swap.give": "You give:",
+    "swap.receive": "You receive:",
+    "swap.accept": "Accept",
+    "swap.decline": "Decline",
+    // Turn/round
+    "turn.mine": "Your turn",
+    "turn.end": "End Turn",
+    "turn.other": "is playing",
+    "turn.round": "Round",
+    // Property buttons
+    "prop.house": "House",
+    "prop.hotel": "Hotel",
+    "prop.factory": "Factory",
+    "prop.sellBuilding": "Sell building",
+    "prop.mortgage": "Mortgage",
+    "prop.unmortgage": "Unmortgage",
+    "prop.sell": "Sell",
+    // Deed card
+    "deed.price": "Price",
+    "deed.mortgage": "Mortgage",
+    "deed.baseRent": "Base rent",
+    "deed.house1": "1 House",
+    "deed.house2": "2 Houses",
+    "deed.house3": "3 Houses",
+    "deed.house4": "4 Houses",
+    "deed.hotel": "Hotel",
+    "deed.factory": "Factory",
+    "deed.houseCost": "House cost",
+    "deed.hotelCost": "Hotel cost",
+    "deed.factoryCost": "Factory cost",
+    "deed.owner": "Owner:",
+    "deed.building": "Building:",
+    "deed.mortgaged": "Mortgage active",
+    "deed.unowned": "Not owned",
+    "deed.rentStation1": "Rent (1 stn)",
+    "deed.rentStation2": "Rent (2 stn)",
+    "deed.rentStation3": "Rent (3 stn)",
+    "deed.rentStation4": "Rent (4 stn)",
+    "deed.rentAttr1": "Rent (1 attr.)",
+    "deed.rentAttr2": "Rent (2 attr.)",
+    // Special events
+    "event.circus": "🎪 Circus in Town",
+    "event.boom": "📈 Economic Boom",
+    "event.recession": "📉 Recession",
+    "event.jackpot": "🎰 Casino Jackpot Night",
+    "event.buildingSale": "🏗️ Building Sale",
+    "event.quietDay": "😴 Quiet Day",
+  },
+};
+
+let _locale: Locale = (localStorage.getItem("laspoly_locale") as Locale | null) ?? "de";
+
+function t(key: string): string {
+  return STRINGS[_locale][key] ?? STRINGS["de"][key] ?? key;
+}
+
 function show(el: HTMLElement, displayValue = "block") {
   el.style.display = displayValue;
 }
@@ -411,6 +691,7 @@ export class UI {
   private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
   private myColor: string = "red";
   private myFigureIndex: number = 0;
+  private currentLocale: Locale = _locale;
   // Payment toast (feature #4)
   private paymentToast!: HTMLDivElement;
   private paymentToastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -454,12 +735,12 @@ export class UI {
     lobby.id = "lobby";
     lobby.className = "panel";
     lobby.innerHTML = `
-      <h2 style="margin-bottom:12px;color:#facc15;">LasPoly</h2>
-      <label>Nickname</label>
+      <h2 id="lobbyTitle" style="margin-bottom:12px;color:#facc15;">${t("lobby.title")}</h2>
+      <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
       <input id="nickname" type="text" placeholder="Your name" value="Player" />
-      <label>Board</label>
+      <label id="lobbyBoardLabel">${t("lobby.board")}</label>
       <select id="boardId"></select>
-      <label>Bot count</label>
+      <label id="lobbyBotCountLabel">${t("lobby.botCount")}</label>
       <select id="botCount">
         <option value="0">0</option>
         <option value="1">1</option>
@@ -468,7 +749,7 @@ export class UI {
         <option value="4">4</option>
         <option value="5">5</option>
       </select>
-      <button id="createRoom" style="margin-top:16px;width:100%;">Create Room</button>
+      <button id="createRoom" style="margin-top:16px;width:100%;">${t("lobby.createRoom")}</button>
       <div id="roomList"></div>
     `;
     this.root.appendChild(lobby);
@@ -510,15 +791,15 @@ export class UI {
     panel.className = "panel";
     hide(panel);
     panel.innerHTML = `
-      <h2 style="margin-bottom:12px;color:#facc15;">Room</h2>
+      <h2 id="roomPanelTitle" style="margin-bottom:12px;color:#facc15;">${t("room.title")}</h2>
       <div id="roomInfo" style="margin-bottom:12px;font-size:13px;color:#ccc;"></div>
       <div id="roomLinkRow">
         <input id="roomLinkInput" type="text" readonly placeholder="Raum-Link…" />
-        <button id="roomLinkCopyBtn" style="flex-shrink:0;white-space:nowrap;">Link kopieren</button>
+        <button id="roomLinkCopyBtn" style="flex-shrink:0;white-space:nowrap;">${t("room.copyLink")}</button>
       </div>
       <div id="figurePicker"></div>
-      <button id="startGame" style="width:100%;margin-top:8px;">Start Game</button>
-      <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">Leave Room</button>
+      <button id="startGame" style="width:100%;margin-top:8px;">${t("room.startGame")}</button>
+      <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">${t("room.leaveRoom")}</button>
     `;
     this.root.appendChild(panel);
     this.roomPanel = panel;
@@ -542,8 +823,8 @@ export class UI {
       const input = document.getElementById("roomLinkInput") as HTMLInputElement;
       if (input.value) {
         navigator.clipboard.writeText(input.value).then(() => {
-          copyBtn.textContent = "Kopiert!";
-          setTimeout(() => { copyBtn.textContent = "Link kopieren"; }, 2000);
+          copyBtn.textContent = t("room.linkCopied");
+          setTimeout(() => { copyBtn.textContent = t("room.copyLink"); }, 2000);
         }).catch(() => {
           input.select();
         });
@@ -570,11 +851,11 @@ export class UI {
     logPanel.id = "eventLogPanel";
     logPanel.className = "panel";
     logPanel.innerHTML = `
-      <div style="font-size:12px;color:#aaa;margin-bottom:4px;">Ereignisse</div>
+      <div id="eventsLabel" style="font-size:12px;color:#aaa;margin-bottom:4px;">${t("game.events")}</div>
       <div id="eventLog"></div>
       <div id="chatRow">
-        <input id="chatInput" type="text" placeholder="Chat..." />
-        <button id="chatSendBtn">Send</button>
+        <input id="chatInput" type="text" placeholder="${t("game.chat")}" />
+        <button id="chatSendBtn">${t("game.send")}</button>
       </div>
     `;
     hud.appendChild(logPanel);
@@ -592,9 +873,9 @@ export class UI {
     actionPanel.id = "actionPanel";
     actionPanel.className = "panel";
     actionPanel.innerHTML = `
-      <button id="rollBtn">Würfeln</button>
-      <button id="ransomBtn">Freikaufen</button>
-      <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">✓ Zug beenden</button>
+      <button id="rollBtn">${t("game.roll")}</button>
+      <button id="ransomBtn">${t("game.ransom")}</button>
+      <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">${t("game.endTurn")}</button>
     `;
     hud.appendChild(actionPanel);
 
@@ -626,7 +907,7 @@ export class UI {
     // Spectator banner
     const spectatorBanner = document.createElement("div");
     spectatorBanner.id = "spectatorBanner";
-    spectatorBanner.textContent = "Du bist Zuschauer";
+    spectatorBanner.textContent = t("game.spectator");
     hide(spectatorBanner);
     this.root.appendChild(spectatorBanner);
     this.spectatorBanner = spectatorBanner;
@@ -675,15 +956,15 @@ export class UI {
     const viewBtn = document.createElement("button");
     viewBtn.className = "hdr-btn";
     viewBtn.id = "headerViewBtn";
-    viewBtn.textContent = "🗺 Standard-Ansicht";
+    viewBtn.textContent = t("header.standardView");
     viewBtn.addEventListener("click", () => {
       if (this.currentView === "standard") {
         this.currentView = "top";
-        viewBtn.textContent = "🗺 Vogel-Ansicht";
+        viewBtn.textContent = t("header.topView");
         this.board3d.setView("top");
       } else {
         this.currentView = "standard";
-        viewBtn.textContent = "🗺 Standard-Ansicht";
+        viewBtn.textContent = t("header.standardView");
         this.board3d.setView("standard");
       }
     });
@@ -705,8 +986,9 @@ export class UI {
 
     const settingsBtn = document.createElement("button");
     settingsBtn.className = "hdr-btn";
-    settingsBtn.textContent = "⚙";
-    settingsBtn.title = "Einstellungen";
+    settingsBtn.id = "settingsHdrBtn";
+    settingsBtn.textContent = t("header.settingsTitle");
+    settingsBtn.title = t("header.settings");
     settingsBtn.addEventListener("click", () => {
       const visible = this.settingsOverlay.style.display !== "none";
       if (visible) hide(this.settingsOverlay);
@@ -717,8 +999,9 @@ export class UI {
 
     const helpBtn = document.createElement("button");
     helpBtn.className = "hdr-btn";
-    helpBtn.textContent = "?";
-    helpBtn.title = "Hilfe";
+    helpBtn.id = "helpHdrBtn";
+    helpBtn.textContent = t("header.help");
+    helpBtn.title = t("header.helpTitle");
     helpBtn.addEventListener("click", () => {
       const visible = this.helpOverlay.style.display !== "none";
       if (visible) hide(this.helpOverlay);
@@ -729,7 +1012,8 @@ export class UI {
 
     const leaveBtn = document.createElement("button");
     leaveBtn.className = "hdr-btn";
-    leaveBtn.textContent = "✕ Verlassen";
+    leaveBtn.id = "leaveGameBtn";
+    leaveBtn.textContent = t("header.leave");
     leaveBtn.style.background = "rgba(153,27,27,0.6)";
     leaveBtn.addEventListener("click", () => {
       clearSession();
@@ -750,22 +1034,27 @@ export class UI {
     // Help overlay (non-modal, toggled)
     const help = document.createElement("div");
     help.id = "helpOverlay";
-    help.innerHTML = `
+    const buildHelpContent = () => `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <h3 style="margin:0;color:#f97316;font-size:14px;">Spielregeln &amp; Steuerung</h3>
+        <h3 style="margin:0;color:#f97316;font-size:14px;">${t("help.title")}</h3>
         <button id="helpCloseBtn" style="background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;padding:0;line-height:1;">×</button>
       </div>
       <ul style="margin:0;padding-left:18px;">
-        <li><strong>Würfeln:</strong> Klick auf „Würfeln"</li>
-        <li><strong>Kaufen:</strong> Kaufangebot erscheint rechts – „Kaufen" oder „Ablehnen"</li>
-        <li><strong>Bauen:</strong> Dein Grundstück → Haus/Hotel/Fabrik-Taste</li>
-        <li><strong>Tauschen:</strong> „Tauschen" in der Grundstücksliste</li>
-        <li><strong>Reisen:</strong> Von einem Bahnhof aus „Reisen nach…"</li>
-        <li><strong>Ansicht:</strong> Schaltfläche oben rechts wechselt zwischen Schräg- und Vogelperspektive</li>
-        <li><strong>Chat:</strong> Eingabefeld unten links</li>
-        <li><strong>Grundstück:</strong> Klick auf ein Feld zeigt Grundbuchdaten</li>
+        <li>${t("help.roll")}</li>
+        <li>${t("help.buy")}</li>
+        <li>${t("help.build")}</li>
+        <li>${t("help.trade")}</li>
+        <li>${t("help.travel")}</li>
+        <li>${t("help.view")}</li>
+        <li>${t("help.chat")}</li>
+        <li>${t("help.deed")}</li>
       </ul>
     `;
+    help.innerHTML = buildHelpContent();
+    (help as HTMLElement & { _rebuildContent?: () => void })._rebuildContent = () => {
+      help.innerHTML = buildHelpContent();
+      help.querySelector("#helpCloseBtn")!.addEventListener("click", () => hide(help));
+    };
     hide(help);
     this.gameHud.appendChild(help);
     this.helpOverlay = help;
@@ -780,34 +1069,125 @@ export class UI {
     // Settings overlay (non-modal, toggled)
     const settings = document.createElement("div");
     settings.id = "settingsOverlay";
-    settings.innerHTML = `
-      <div style="font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;">Einstellungen</div>
-      <label>Sprache / Locale</label>
+    const buildSettingsContent = () => `
+      <div id="settingsTitle" style="font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;">${t("settings.title")}</div>
+      <label id="settingsLocaleLabel">${t("settings.locale")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
-        <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;background:rgba(255,255,255,0.25);">🇩🇪 DE</button>
-        <button id="localeENBtn" class="hdr-btn" style="font-size:12px;">🇬🇧 EN</button>
+        <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'de' ? 'rgba(255,255,255,0.35)' : ''};">🇩🇪 DE</button>
+        <button id="localeENBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'en' ? 'rgba(255,255,255,0.35)' : ''};">🇬🇧 EN</button>
       </div>
-      <div style="margin-top:8px;font-size:11px;color:#888;">Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.</div>
+      <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
     `;
+    settings.innerHTML = buildSettingsContent();
     hide(settings);
     this.gameHud.appendChild(settings);
     this.settingsOverlay = settings;
 
-    // Wire locale buttons — send setLocale to server + persist
+    // Wire locale buttons — send setLocale to server + persist + re-render UI
     const LOCALE_KEY = "laspoly_locale";
-    const applyLocale = (locale: "de" | "en") => {
+    const applyLocale = (locale: Locale) => {
+      _locale = locale;
+      this.currentLocale = locale;
       localStorage.setItem(LOCALE_KEY, locale);
       this.net.send({ t: "setLocale", locale });
-      (settings.querySelector("#localeDEBtn") as HTMLElement).style.background =
-        locale === "de" ? "rgba(255,255,255,0.35)" : "";
-      (settings.querySelector("#localeENBtn") as HTMLElement).style.background =
-        locale === "en" ? "rgba(255,255,255,0.35)" : "";
+      // Rebuild settings panel with new locale
+      settings.innerHTML = buildSettingsContent();
+      this.wireLocaleButtons(settings, applyLocale);
+      // Re-render all static UI text
+      this.relabelUI();
     };
-    const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as "de" | "en";
+    this.wireLocaleButtons(settings, applyLocale);
+    const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
     setTimeout(() => applyLocale(savedLocale), 0);
-    settings.querySelector("#localeDEBtn")!.addEventListener("click", () => applyLocale("de"));
-    settings.querySelector("#localeENBtn")!.addEventListener("click", () => applyLocale("en"));
+  }
+
+  private wireLocaleButtons(settings: HTMLElement, applyLocale: (locale: Locale) => void) {
+    settings.querySelector("#localeDEBtn")?.addEventListener("click", () => applyLocale("de"));
+    settings.querySelector("#localeENBtn")?.addEventListener("click", () => applyLocale("en"));
+  }
+
+  /** Re-apply i18n labels to all static UI text after a locale switch. */
+  private relabelUI() {
+    // Lobby
+    const lobbyTitle = document.getElementById("lobbyTitle");
+    if (lobbyTitle) lobbyTitle.textContent = t("lobby.title");
+    const lobbyNickLabel = document.getElementById("lobbyNicknameLabel");
+    if (lobbyNickLabel) lobbyNickLabel.textContent = t("lobby.nickname");
+    const lobbyBoardLabel = document.getElementById("lobbyBoardLabel");
+    if (lobbyBoardLabel) lobbyBoardLabel.textContent = t("lobby.board");
+    const lobbyBotLabel = document.getElementById("lobbyBotCountLabel");
+    if (lobbyBotLabel) lobbyBotLabel.textContent = t("lobby.botCount");
+    const createRoomBtn = document.getElementById("createRoom");
+    if (createRoomBtn) createRoomBtn.textContent = t("lobby.createRoom");
+
+    // Room panel
+    const roomPanelTitle = document.getElementById("roomPanelTitle");
+    if (roomPanelTitle) roomPanelTitle.textContent = t("room.title");
+    const copyBtn = document.getElementById("roomLinkCopyBtn");
+    if (copyBtn) copyBtn.textContent = t("room.copyLink");
+    const startGameBtn = document.getElementById("startGame");
+    if (startGameBtn) startGameBtn.textContent = t("room.startGame");
+    const leaveRoomBtn = document.getElementById("leaveRoom");
+    if (leaveRoomBtn) leaveRoomBtn.textContent = t("room.leaveRoom");
+
+    // Game HUD static labels
+    const eventsLabel = document.getElementById("eventsLabel");
+    if (eventsLabel) eventsLabel.textContent = t("game.events");
+    const chatInput = document.getElementById("chatInput") as HTMLInputElement | null;
+    if (chatInput) chatInput.placeholder = t("game.chat");
+    const chatSendBtn = document.getElementById("chatSendBtn");
+    if (chatSendBtn) chatSendBtn.textContent = t("game.send");
+    const rollBtn = document.getElementById("rollBtn");
+    if (rollBtn) rollBtn.textContent = t("game.roll");
+    const ransomBtn = document.getElementById("ransomBtn");
+    if (ransomBtn) ransomBtn.textContent = t("game.ransom");
+    const endTurnBtn = document.getElementById("endTurnBtn");
+    if (endTurnBtn) endTurnBtn.textContent = t("game.endTurn");
+    const spectatorBanner = document.getElementById("spectatorBanner");
+    if (spectatorBanner) spectatorBanner.textContent = t("game.spectator");
+
+    // Header buttons
+    const viewBtn = document.getElementById("headerViewBtn");
+    if (viewBtn) viewBtn.textContent = this.currentView === "top" ? t("header.topView") : t("header.standardView");
+    const settingsHdrBtn = document.getElementById("settingsHdrBtn");
+    if (settingsHdrBtn) settingsHdrBtn.title = t("header.settings");
+    const helpHdrBtn = document.getElementById("helpHdrBtn");
+    if (helpHdrBtn) helpHdrBtn.title = t("header.helpTitle");
+    const leaveGameBtn = document.getElementById("leaveGameBtn");
+    if (leaveGameBtn) leaveGameBtn.textContent = t("header.leave");
+
+    // Help overlay (rebuild content if visible)
+    const helpOverlay = document.getElementById("helpOverlay") as HTMLElement & { _rebuildContent?: () => void } | null;
+    if (helpOverlay?._rebuildContent) helpOverlay._rebuildContent();
+
+    // Buy offer panel
+    const buyHeader = document.querySelector("#buyOfferPanel .buy-header");
+    if (buyHeader) buyHeader.textContent = t("buy.header");
+    const buyBtn = document.getElementById("buyOfferBuyBtn");
+    if (buyBtn) buyBtn.textContent = t("buy.buy");
+    const buyDeclineBtn = document.getElementById("buyOfferDeclineBtn");
+    if (buyDeclineBtn) buyDeclineBtn.textContent = t("buy.decline");
+
+    // Action card popup
+    const cardHeader = document.querySelector("#actionCardPopup .ac-header");
+    if (cardHeader) cardHeader.textContent = t("card.header");
+    const cardConfirm = document.getElementById("actionCardConfirmBtn");
+    if (cardConfirm) cardConfirm.textContent = t("card.confirm");
+
+    // Game over banner
+    const gameOverTitle = document.querySelector("#gameOverBanner h1");
+    if (gameOverTitle) gameOverTitle.textContent = t("gameover.title");
+    const gameOverRestart = document.getElementById("gameOverRestart");
+    if (gameOverRestart) gameOverRestart.textContent = t("gameover.back");
+
+    // Figure picker title in room panel
+    const figureTitle = document.querySelector("#figurePicker .fp-title");
+    if (figureTitle) figureTitle.textContent = t("room.figureTitle");
+
+    // My properties panel header (will be rebuilt next updateGame call)
+    const myPropHeader = document.querySelector("#myPropsPanel span[style*='facc15']");
+    if (myPropHeader) myPropHeader.textContent = t("props.title");
   }
 
   private buildTurnToast() {
@@ -867,9 +1247,9 @@ export class UI {
     const banner = document.createElement("div");
     banner.id = "gameOverBanner";
     banner.innerHTML = `
-      <h1>Spiel vorbei!</h1>
+      <h1>${t("gameover.title")}</h1>
       <div id="gameOverWinner" style="font-size:1.5rem;color:#fff;"></div>
-      <button id="gameOverRestart" style="margin-top:16px;">Zurück zur Lobby</button>
+      <button id="gameOverRestart" style="margin-top:16px;">${t("gameover.back")}</button>
     `;
     hide(banner);
     this.root.appendChild(banner);
@@ -902,10 +1282,10 @@ export class UI {
     const popup = document.createElement("div");
     popup.id = "actionCardPopup";
     popup.innerHTML = `
-      <div class="ac-header">🃏 Aktionskarte</div>
+      <div class="ac-header">${t("card.header")}</div>
       <div class="ac-body" id="actionCardText"></div>
       <div class="ac-footer">
-        <button id="actionCardConfirmBtn" style="background:#f97316;">Bestätigen</button>
+        <button id="actionCardConfirmBtn" style="background:#f97316;">${t("card.confirm")}</button>
       </div>
     `;
     hide(popup);
@@ -934,14 +1314,14 @@ export class UI {
     const panel = document.createElement("div");
     panel.id = "buyOfferPanel";
     panel.innerHTML = `
-      <div class="buy-header">Kaufangebot</div>
+      <div class="buy-header">${t("buy.header")}</div>
       <div class="buy-body">
         <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:#facc15;margin-bottom:6px;font-size:13px;">—</div>
-        <div class="buy-detail" id="buyPrice">Preis: —</div>
-        <div class="buy-detail" id="buyBalance">Dein Kapital: —</div>
+        <div class="buy-detail" id="buyPrice">${t("buy.price")} —</div>
+        <div class="buy-detail" id="buyBalance">${t("buy.balance")} —</div>
         <div class="buy-btns">
-          <button id="buyOfferBuyBtn" style="background:#16a34a;flex:1;">Kaufen</button>
-          <button id="buyOfferDeclineBtn" style="background:#991b1b;flex:1;">Ablehnen</button>
+          <button id="buyOfferBuyBtn" style="background:#16a34a;flex:1;">${t("buy.buy")}</button>
+          <button id="buyOfferDeclineBtn" style="background:#991b1b;flex:1;">${t("buy.decline")}</button>
         </div>
       </div>
     `;
@@ -1010,32 +1390,32 @@ export class UI {
 
     if (tile.type === "street") {
       const st = tile as StreetTile;
-      row("Preis", `${st.price} LPD`);
-      row("Hypothek", `${st.mortgage} LPD`);
-      row("Grundmiete", `${st.rent[0]} LPD`);
-      row("1 Haus", `${st.rent[1]} LPD`);
-      row("2 Häuser", `${st.rent[2]} LPD`);
-      row("3 Häuser", `${st.rent[3]} LPD`);
-      row("4 Häuser", `${st.rent[4]} LPD`);
-      row("Hotel", `${st.rent[5]} LPD`);
-      row("Fabrik", `${st.factoryRevenue} LPD`);
-      row("Hauskosten", `${st.houseCost} LPD`);
-      row("Hotelkosten", `${st.hotelCost} LPD`);
-      row("Fabrikkosten", `${st.factoryCost} LPD`);
+      row(t("deed.price"), `${st.price} LPD`);
+      row(t("deed.mortgage"), `${st.mortgage} LPD`);
+      row(t("deed.baseRent"), `${st.rent[0]} LPD`);
+      row(t("deed.house1"), `${st.rent[1]} LPD`);
+      row(t("deed.house2"), `${st.rent[2]} LPD`);
+      row(t("deed.house3"), `${st.rent[3]} LPD`);
+      row(t("deed.house4"), `${st.rent[4]} LPD`);
+      row(t("deed.hotel"), `${st.rent[5]} LPD`);
+      row(t("deed.factory"), `${st.factoryRevenue} LPD`);
+      row(t("deed.houseCost"), `${st.houseCost} LPD`);
+      row(t("deed.hotelCost"), `${st.hotelCost} LPD`);
+      row(t("deed.factoryCost"), `${st.factoryCost} LPD`);
     } else if (tile.type === "station") {
       const r = board.rules.station;
-      row("Preis", `${r.price} LPD`);
-      row("Hypothek", `${r.mortgage} LPD`);
-      row("Miete (1 Bhf)", `${r.rent[0] ?? 0} LPD`);
-      row("Miete (2 Bhf)", `${r.rent[1] ?? 0} LPD`);
-      row("Miete (3 Bhf)", `${r.rent[2] ?? 0} LPD`);
-      row("Miete (4 Bhf)", `${r.rent[3] ?? 0} LPD`);
+      row(t("deed.price"), `${r.price} LPD`);
+      row(t("deed.mortgage"), `${r.mortgage} LPD`);
+      row(t("deed.rentStation1"), `${r.rent[0] ?? 0} LPD`);
+      row(t("deed.rentStation2"), `${r.rent[1] ?? 0} LPD`);
+      row(t("deed.rentStation3"), `${r.rent[2] ?? 0} LPD`);
+      row(t("deed.rentStation4"), `${r.rent[3] ?? 0} LPD`);
     } else if (tile.type === "attraction") {
       const a = board.rules.attraction;
-      row("Preis", `${a.price} LPD`);
-      row("Hypothek", `${a.mortgage} LPD`);
-      row("Miete (1 Attr.)", `Würfel × ${a.factorOne}`);
-      row("Miete (2 Attr.)", `Würfel × ${a.factorBoth}`);
+      row(t("deed.price"), `${a.price} LPD`);
+      row(t("deed.mortgage"), `${a.mortgage} LPD`);
+      row(t("deed.rentAttr1"), `Würfel × ${a.factorOne}`);
+      row(t("deed.rentAttr2"), `Würfel × ${a.factorBoth}`);
     }
 
     // Owner + buildings
@@ -1044,7 +1424,7 @@ export class UI {
       const owner = state.players.find(p => p.id === ownerId);
       const ownerDiv = document.createElement("div");
       ownerDiv.className = "dc-owner";
-      ownerDiv.textContent = `Eigentümer: ${owner?.name ?? "?"}`;
+      ownerDiv.textContent = `${t("deed.owner")} ${owner?.name ?? "?"}`;
       body.appendChild(ownerDiv);
 
       const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
@@ -1055,20 +1435,20 @@ export class UI {
       if (buildStr) {
         const bDiv = document.createElement("div");
         bDiv.className = "dc-status";
-        bDiv.textContent = `Gebäude: ${buildStr}`;
+        bDiv.textContent = `${t("deed.building")} ${buildStr}`;
         body.appendChild(bDiv);
       }
 
       if (state.mortgaged[pos]) {
         const mDiv = document.createElement("div");
         mDiv.className = "dc-status";
-        mDiv.textContent = "Hypothek aktiv";
+        mDiv.textContent = t("deed.mortgaged");
         body.appendChild(mDiv);
       }
     } else {
       const unownedDiv = document.createElement("div");
       unownedDiv.className = "dc-owner";
-      unownedDiv.textContent = "Nicht im Besitz";
+      unownedDiv.textContent = t("deed.unowned");
       body.appendChild(unownedDiv);
     }
 
@@ -1193,13 +1573,18 @@ export class UI {
     container.innerHTML = "";
     const title = document.createElement("div");
     title.className = "fp-title";
-    title.textContent = "Farbe & Figur wählen:";
+    title.textContent = t("room.figureTitle");
     container.appendChild(title);
 
-    const takenMap = new Map<string, string>();
+    // Which colours are already taken by OTHER players (colour is unique per player)
+    const takenColors = new Map<string, string>(); // color -> nickname
+    const takenCombos = new Map<string, string>(); // color:figureIndex -> nickname
     for (const p of room.players) {
-      if (p.id !== this.net.playerId && p.color !== undefined && p.figureIndex !== undefined) {
-        takenMap.set(`${p.color}:${p.figureIndex}`, p.nickname);
+      if (p.id !== this.net.playerId && p.color !== undefined) {
+        takenColors.set(p.color, p.nickname);
+        if (p.figureIndex !== undefined) {
+          takenCombos.set(`${p.color}:${p.figureIndex}`, p.nickname);
+        }
       }
     }
 
@@ -1208,24 +1593,58 @@ export class UI {
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
 
-    for (const color of FIGURE_COLORS) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:4px;";
-      const dot = document.createElement("span");
-      dot.style.cssText = `display:inline-block;width:12px;height:12px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;`;
-      row.appendChild(dot);
+    const figureThumbs = [
+      "/assets/car1_color.png",
+      "/assets/car2_color.png",
+      "/assets/car3_color.png",
+      "/assets/car4_color.png",
+      "/assets/car5_color.png",
+      "/assets/police_color.png",
+    ];
 
+    for (const color of FIGURE_COLORS) {
+      const isColorTaken = takenColors.has(color);
+      const takerName = takenColors.get(color) ?? "";
+
+      const colorRow = document.createElement("div");
+      colorRow.style.cssText = `display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px;border-radius:6px;border:1px solid ${isColorTaken ? "#555" : "rgba(255,255,255,0.1)"};${isColorTaken ? "opacity:0.5;" : ""}`;
+
+      // Colour swatch dot on the left
+      const dot = document.createElement("span");
+      dot.style.cssText = `display:inline-block;width:14px;height:14px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;`;
+      if (isColorTaken) dot.title = `${takerName} hat diese Farbe`;
+      colorRow.appendChild(dot);
+
+      // Figure thumbnails
       const grid = document.createElement("div");
       grid.className = "fp-grid";
+      grid.style.cssText = "flex-wrap:wrap;gap:4px;";
       for (let fi = 0; fi < FIGURE_COUNT; fi++) {
         const key = `${color}:${fi}`;
-        const isTaken = takenMap.has(key);
+        const isTaken = isColorTaken || takenCombos.has(key);
         const isSelected = this.myColor === color && this.myFigureIndex === fi;
         const sw = document.createElement("div");
         sw.className = "fp-swatch" + (isSelected ? " selected" : "") + (isTaken ? " taken" : "");
-        sw.style.background = colorHex[color] ?? color;
-        sw.textContent = String(fi + 1);
-        sw.title = isTaken ? `${takenMap.get(key)} hat das` : `${color} #${fi + 1}`;
+        sw.style.cssText = `background:${colorHex[color] ?? color};width:36px;height:36px;padding:2px;position:relative;display:flex;align-items:center;justify-content:center;`;
+
+        // Show figure thumbnail if available
+        const thumb = figureThumbs[fi];
+        if (thumb) {
+          const img = document.createElement("img");
+          img.src = thumb;
+          img.style.cssText = "width:28px;height:28px;object-fit:contain;image-rendering:auto;pointer-events:none;";
+          img.alt = `Figure ${fi + 1}`;
+          sw.appendChild(img);
+        } else {
+          sw.textContent = String(fi + 1);
+        }
+
+        if (isColorTaken) {
+          sw.title = `${takerName} hat diese Farbe`;
+        } else {
+          sw.title = `${color} #${fi + 1}`;
+        }
+
         if (!isTaken) {
           sw.addEventListener("click", () => {
             this.myColor = color;
@@ -1236,8 +1655,8 @@ export class UI {
         }
         grid.appendChild(sw);
       }
-      row.appendChild(grid);
-      container.appendChild(row);
+      colorRow.appendChild(grid);
+      container.appendChild(colorRow);
     }
 
     const others = room.players.filter(p => p.id !== this.net.playerId && !p.isBot && p.color !== undefined);
@@ -1319,6 +1738,13 @@ export class UI {
     if (this.settingsOverlay) hide(this.settingsOverlay);
     if (this.deedCardPopup) hide(this.deedCardPopup);
     if (this.specialEventToast) hide(this.specialEventToast);
+    if (this.actionCardPopup) hide(this.actionCardPopup);
+    if (this.buyOfferPanel) hide(this.buyOfferPanel);
+    if (this.myPropsPanel) hide(this.myPropsPanel);
+    if (this.travelPanel) hide(this.travelPanel);
+    if (this.tradePanel) hide(this.tradePanel);
+    if (this.incomingSwapPanel) hide(this.incomingSwapPanel);
+    if (this.gameOverBanner) hide(this.gameOverBanner);
     this.lastState = null;
     this.wasMyTurn = false;
     this.net.send({ t: "listRooms" });
@@ -1334,14 +1760,14 @@ export class UI {
     if (rooms.length > 0) {
       const header = document.createElement("div");
       header.style.cssText = "margin-top:12px;font-size:12px;color:#aaa;";
-      header.textContent = "Offene Räume:";
+      header.textContent = t("lobby.openRooms");
       this.roomList.appendChild(header);
 
       for (const room of rooms) {
         if (room.started) continue;
         const item = document.createElement("div");
         item.className = "room-item";
-        item.innerHTML = `<strong>${room.name}</strong> <span style="color:#aaa;font-size:12px;">(${room.playerCount} Spieler)</span>`;
+        item.innerHTML = `<strong>${room.name}</strong> <span style="color:#aaa;font-size:12px;">(${room.playerCount} ${t("lobby.players")})</span>`;
         item.addEventListener("click", () => {
           const nickname = this.nicknameInput.value.trim() || "Player";
           this.net.send({ t: "joinRoom", roomId: room.id, nickname });
@@ -1379,8 +1805,8 @@ export class UI {
     const playerNames = room.players.map(p => p.nickname + (p.isBot ? " (Bot)" : "")).join(", ");
     this.roomInfo.innerHTML = `
       <div><strong>${room.name}</strong></div>
-      <div style="margin-top:4px;">Spieler: ${playerNames}</div>
-      <div style="margin-top:4px;color:#aaa;">Board: ${room.boardId} | Bots: ${room.botCount}</div>
+      <div style="margin-top:4px;">${t("room.players")}: ${playerNames}</div>
+      <div style="margin-top:4px;color:#aaa;">${t("room.board")}: ${room.boardId} | ${t("room.bots")}: ${room.botCount}</div>
     `;
 
     // Show start button only if we're the host
@@ -1423,22 +1849,15 @@ export class UI {
       if (boardLabel) boardLabel.textContent = state.boardId;
 
       const turnText = isMyTurn && amAlive
-        ? (state.phase === "turn-end" ? "Zug beenden" : "Du bist am Zug")
-        : `${currentPlayer?.name ?? "?"} ist am Zug`;
+        ? (state.phase === "turn-end" ? t("turn.end") : t("turn.mine"))
+        : `${currentPlayer?.name ?? "?"} ${t("turn.other")}`;
       this.headerTurnStatus.textContent = turnText;
-      this.headerRound.textContent = `Runde ${state.round}`;
+      this.headerRound.textContent = `${t("turn.round")} ${state.round}`;
 
       // Special event label in header
       if (state.activeEvent) {
-        const eventLabels: Record<string, string> = {
-          circus: '🎪 Zirkus in der Stadt',
-          boom: '📈 Wirtschaftsboom',
-          recession: '📉 Rezession',
-          jackpot: '🎰 Casino-Jackpot-Nacht',
-          buildingSale: '🏗️ Bau-Rabatt',
-          quietDay: '😴 Ruhiger Tag',
-        };
-        this.headerEvent.textContent = eventLabels[state.activeEvent.id] ?? state.activeEvent.id;
+        const eventKey = `event.${state.activeEvent.id}`;
+        this.headerEvent.textContent = t(eventKey) || state.activeEvent.id;
       } else {
         this.headerEvent.textContent = '';
       }
@@ -1516,8 +1935,8 @@ export class UI {
       const priceEl = document.getElementById("buyPrice");
       const balanceEl = document.getElementById("buyBalance");
       if (tileNameEl) tileNameEl.textContent = tile?.name ?? "—";
-      if (priceEl) priceEl.textContent = `Preis: ${price} LPD`;
-      if (balanceEl) balanceEl.textContent = `Dein Kapital: ${me?.money ?? 0} LPD`;
+      if (priceEl) priceEl.textContent = `${t("buy.price")} ${price} LPD`;
+      if (balanceEl) balanceEl.textContent = `${t("buy.balance")} ${me?.money ?? 0} LPD`;
       show(this.buyOfferPanel, "block");
     } else {
       hide(this.buyOfferPanel);
@@ -1540,12 +1959,19 @@ export class UI {
       hide(this.incomingSwapPanel);
     }
 
-    // My-properties panel + travel (during awaiting-roll OR turn-end, not in jail)
+    // My-properties panel: always visible during the game (trading is always possible)
+    if (myId && amAlive) {
+      this.refreshMyPropsPanel(state, myId);
+    } else if (myId && !amAlive && state.phase !== "finished") {
+      // Spectator: still show panel (read-only) if they owned properties
+      this.refreshMyPropsPanel(state, myId);
+    } else {
+      hide(this.myPropsPanel);
+    }
+
+    // Travel panel: show if player is at a station AND it's their turn
     const showMgmt = isMyTurn && amAlive && (state.phase === "awaiting-roll" || state.phase === "turn-end") && !(me?.inJail ?? false);
     if (showMgmt && myId) {
-      this.refreshMyPropsPanel(state, myId);
-
-      // Travel panel: show if player is at a station
       const travelDests = canTravelFrom(state, myId);
       if (travelDests.length > 0) {
         this.refreshTravelPanel(state, myId);
@@ -1554,7 +1980,6 @@ export class UI {
         hide(this.travelPanel);
       }
     } else {
-      hide(this.myPropsPanel);
       hide(this.travelPanel);
       if (!isMyTurn) hide(this.tradePanel);
     }
@@ -1576,7 +2001,7 @@ export class UI {
 
   showGameOver(winnerName: string) {
     const winnerEl = document.getElementById("gameOverWinner");
-    if (winnerEl) winnerEl.textContent = `Gewinner: ${winnerName}`;
+    if (winnerEl) winnerEl.textContent = `${t("gameover.winner")} ${winnerName}`;
     show(this.gameOverBanner, "flex");
   }
 
@@ -1599,18 +2024,25 @@ export class UI {
     const board = getBoard(state.boardId);
     const props = ownedPropsOf(state, myId).sort((a, b) => a - b);
 
-    if (props.length === 0) {
-      hide(panel);
-      return;
-    }
+    const isMyTurn = state.players[state.currentPlayerIndex]?.id === myId;
+    const amAlive = me?.alive ?? false;
+    const canAct = isMyTurn && amAlive && (state.phase === "awaiting-roll" || state.phase === "turn-end") && !(me?.inJail ?? false);
 
-    // Header with trade button
+    // Building cost multiplier from special event (buildingSale halves costs)
+    // state.buildingCostMult is the base multiplier (from settings)
+    // When buildingSale is active, the engine halves costs. We show the halved cost in the panel.
+    const eventMult = state.activeEvent?.id === "buildingSale" ? 0.5 : 1.0;
+    const costMult = (state.buildingCostMult ?? 1.0) * eventMult;
+
+    // Header with capital + trade button
     const header = document.createElement("div");
-    header.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
-    header.innerHTML = `<span style="font-size:13px;color:#facc15;font-weight:bold;">Meine Grundstücke</span>`;
+    header.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-bottom:8px;";
+    const headerRow = document.createElement("div");
+    headerRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;";
+    headerRow.innerHTML = `<span style="font-size:13px;color:#facc15;font-weight:bold;">${t("props.title")}</span>`;
     const tradeBtn = document.createElement("button");
     tradeBtn.className = "prop-btn";
-    tradeBtn.textContent = "Tauschen";
+    tradeBtn.textContent = t("props.trade");
     tradeBtn.addEventListener("click", () => {
       const panelVisible = this.tradePanel.style.display !== "none";
       if (panelVisible) {
@@ -1620,8 +2052,33 @@ export class UI {
         show(this.tradePanel, "block");
       }
     });
-    header.appendChild(tradeBtn);
+    headerRow.appendChild(tradeBtn);
+    header.appendChild(headerRow);
+
+    // Cash line
+    const cashLine = document.createElement("div");
+    cashLine.style.cssText = "font-size:12px;color:#86efac;";
+    cashLine.textContent = `${t("props.capital")}: ${me?.money ?? 0} LPD`;
+    header.appendChild(cashLine);
+
+    // buildingSale indicator
+    if (state.activeEvent?.id === "buildingSale") {
+      const saleLabel = document.createElement("div");
+      saleLabel.style.cssText = "font-size:11px;color:#f97316;";
+      saleLabel.textContent = "🏗️ Bau-Rabatt aktiv (50%)";
+      header.appendChild(saleLabel);
+    }
+
     panel.appendChild(header);
+
+    if (props.length === 0) {
+      const emptyMsg = document.createElement("div");
+      emptyMsg.style.cssText = "font-size:12px;color:#666;";
+      emptyMsg.textContent = "—";
+      panel.appendChild(emptyMsg);
+      show(panel, "block");
+      return;
+    }
 
     for (const pos of props) {
       const tile = board.tiles[pos];
@@ -1638,35 +2095,35 @@ export class UI {
         : "";
 
       let buildingStr = "";
-      if (b.hotel) buildingStr = "[Hotel]";
-      else if (b.factory) buildingStr = "[Fabrik]";
-      else if (b.houses > 0) buildingStr = `[${b.houses} Haus${b.houses > 1 ? "häuser" : ""}]`;
+      if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
+      else if (b.factory) buildingStr = `[${t("deed.factory")}]`;
+      else if (b.houses > 0) buildingStr = `[${b.houses} ${t("deed.house1").replace("1 ", "")}${b.houses > 1 ? "" : ""}]`;
       else buildingStr = "—";
 
-      const mortgageStr = isMortgaged ? " <span style='color:#f87171;'>[Hypothek]</span>" : "";
+      const mortgageStr = isMortgaged ? ` <span style='color:#f87171;'>[${t("deed.mortgaged")}]</span>` : "";
 
       row.innerHTML = `
         <div class="prop-name">${groupColor}${tile.name}${mortgageStr}</div>
-        <div class="prop-detail">Gebäude: ${buildingStr}</div>
+        <div class="prop-detail">${t("deed.building")} ${buildingStr}</div>
       `;
       row.style.cursor = "pointer";
       row.addEventListener("click", () => this.showDeedCard(pos));
 
-      // Buttons
+      // Buttons — greyed out (disabled) when not player's turn, not hidden
       const btnRow = document.createElement("div");
       btnRow.style.marginTop = "4px";
       const myMoney = me?.money ?? 0;
 
-      // Feature #5: grey out buttons the player cannot afford
-      const makeBtn = (label: string, cost: number | null, cls: string, onClick: () => void): HTMLButtonElement => {
+      const makeBtn = (label: string, cost: number | null, cls: string, onClick: () => void, forceDisabled = false): HTMLButtonElement => {
         const btn = document.createElement("button");
         btn.className = cls;
         btn.textContent = label;
         const unaffordable = cost !== null && cost > myMoney;
-        if (unaffordable) {
+        if (forceDisabled || unaffordable || !canAct) {
           btn.disabled = true;
-          btn.style.opacity = "0.45";
-          btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
+          btn.style.opacity = "0.4";
+          if (unaffordable) btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
+          else if (!canAct) btn.title = "Nur in deinem Zug verfügbar";
         } else {
           btn.addEventListener("click", onClick);
         }
@@ -1676,27 +2133,32 @@ export class UI {
       // BUILD buttons (only for streets with whole-group ownership)
       if (tile.type === "street") {
         const st = tile as StreetTile;
+        // Compute discounted costs
+        const hCost = Math.floor(st.houseCost * costMult);
+        const htCost = Math.floor(st.hotelCost * costMult);
+        const fCost = Math.floor(st.factoryCost * costMult);
+
         if (canBuild(state, pos, "house")) {
           btnRow.appendChild(makeBtn(
-            `Haus (${st.houseCost} LPD)`, st.houseCost, "prop-btn",
+            `${t("prop.house")} (${hCost} LPD)`, hCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } })
           ));
         }
         if (canBuild(state, pos, "hotel")) {
           btnRow.appendChild(makeBtn(
-            `Hotel (${st.hotelCost} LPD)`, st.hotelCost, "prop-btn",
+            `${t("prop.hotel")} (${htCost} LPD)`, htCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } })
           ));
         }
         if (canBuild(state, pos, "factory")) {
           btnRow.appendChild(makeBtn(
-            `Fabrik (${st.factoryCost} LPD)`, st.factoryCost, "prop-btn",
+            `${t("prop.factory")} (${fCost} LPD)`, fCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } })
           ));
         }
         if (canSellBuilding(state, pos)) {
           btnRow.appendChild(makeBtn(
-            "Gebäude verk.", null, "prop-btn danger",
+            t("prop.sellBuilding"), null, "prop-btn danger",
             () => this.net.send({ t: "command", command: { type: "SELL_BUILDING", pos } })
           ));
         }
@@ -1705,7 +2167,7 @@ export class UI {
       if (canMortgage(state, pos)) {
         const mv = mortgageValue(board, tile);
         btnRow.appendChild(makeBtn(
-          `Hypothek (+${mv})`, null, "prop-btn",
+          `${t("prop.mortgage")} (+${mv})`, null, "prop-btn",
           () => this.net.send({ t: "command", command: { type: "MORTGAGE", pos } })
         ));
       }
@@ -1713,14 +2175,14 @@ export class UI {
         const mv = mortgageValue(board, tile);
         const cost = Math.floor(mv * board.rules.mortgageUnmortgageMultiplier);
         btnRow.appendChild(makeBtn(
-          `Ablösen (-${cost})`, cost, "prop-btn",
+          `${t("prop.unmortgage")} (-${cost})`, cost, "prop-btn",
           () => this.net.send({ t: "command", command: { type: "UNMORTGAGE", pos } })
         ));
       }
       if (canSellProperty(state, pos)) {
         const refund = Math.floor(tilePrice(board, tile) / 2);
         btnRow.appendChild(makeBtn(
-          `Verkaufen (+${refund})`, null, "prop-btn danger",
+          `${t("prop.sell")} (+${refund})`, null, "prop-btn danger",
           () => this.net.send({ t: "command", command: { type: "SELL_PROPERTY", pos } })
         ));
       }
@@ -1744,7 +2206,7 @@ export class UI {
 
     const title = document.createElement("div");
     title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
-    title.textContent = "Reisen nach…";
+    title.textContent = t("travel.title");
     panel.appendChild(title);
 
     for (const dest of dests) {
@@ -1760,8 +2222,8 @@ export class UI {
       const btn = document.createElement("button");
       btn.style.cssText = "display:block;width:100%;margin:4px 0;text-align:left;";
       btn.textContent = ticketCost > 0
-        ? `${tile.name} (${ticketCost} LPD Ticket)`
-        : `${tile.name} (kostenlos)`;
+        ? `${tile.name} (${ticketCost} LPD ${t("travel.ticket")})`
+        : `${tile.name} (${t("travel.free")})`;
       btn.addEventListener("click", () => {
         this.net.send({ t: "command", command: { type: "TRAVEL", toPos: dest } });
         hide(panel);
@@ -1771,7 +2233,7 @@ export class UI {
 
     const closeBtn = document.createElement("button");
     closeBtn.style.cssText = "display:block;width:100%;margin-top:8px;background:#555;";
-    closeBtn.textContent = "Schließen";
+    closeBtn.textContent = t("travel.close");
     closeBtn.addEventListener("click", () => hide(panel));
     panel.appendChild(closeBtn);
   }
@@ -1785,12 +2247,12 @@ export class UI {
 
     const title = document.createElement("div");
     title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:10px;";
-    title.textContent = "Tauschangebot erstellen";
+    title.textContent = t("trade.title");
     panel.appendChild(title);
 
     // Target player selector
     const targetLabel = document.createElement("label");
-    targetLabel.textContent = "Anbieten an:";
+    targetLabel.textContent = t("trade.offerTo");
     panel.appendChild(targetLabel);
 
     const targetSelect = document.createElement("select");
@@ -1810,7 +2272,7 @@ export class UI {
 
     const giveSection = document.createElement("div");
     giveSection.className = "swap-section";
-    giveSection.innerHTML = `<div class="swap-label">Ich gebe (Grundstücke):</div>`;
+    giveSection.innerHTML = `<div class="swap-label">${t("trade.give")}</div>`;
 
     const giveChecks = new Map<number, HTMLInputElement>();
     for (const pos of myProps) {
@@ -1837,7 +2299,7 @@ export class UI {
     giveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
     giveMoneyInput.id = "giveMoneyInput";
     const giveMoneyLbl = document.createElement("label");
-    giveMoneyLbl.textContent = "Geld geben:";
+    giveMoneyLbl.textContent = t("trade.giveMoney");
     giveMoneyRow.appendChild(giveMoneyLbl);
     giveMoneyRow.appendChild(giveMoneyInput);
     const giveMoneyUnit = document.createElement("span");
@@ -1860,10 +2322,10 @@ export class UI {
     receiveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
     receiveMoneyInput.id = "receiveMoneyInput";
     const recvLbl = document.createElement("label");
-    recvLbl.textContent = "Geld erhalten:";
+    recvLbl.textContent = t("trade.receiveMoneyLabel");
     const recvUnit = document.createElement("span");
     recvUnit.textContent = " LPD";
-    receiveMoneySection.innerHTML = `<div class="swap-label">Ich erhalte (Geld):</div>`;
+    receiveMoneySection.innerHTML = `<div class="swap-label">${t("trade.receiveMoney")}</div>`;
     const recvMoneyRow = document.createElement("div");
     recvMoneyRow.className = "swap-check-row";
     recvMoneyRow.appendChild(recvLbl);
@@ -1877,7 +2339,7 @@ export class UI {
     const rebuildReceiveSection = () => {
       const tId = targetSelect.value;
       const targetName = targetSelect.options[targetSelect.selectedIndex]?.text ?? "?";
-      receiveSection.innerHTML = `<div class="swap-label">Ich erhalte (Grundstücke von ${targetName}):</div>`;
+      receiveSection.innerHTML = `<div class="swap-label">${t("trade.receive")} ${targetName}):</div>`;
       receiveChecks.clear();
       const theirProps = ownedPropsOf(state, tId).filter((pos) => {
         const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
@@ -1907,7 +2369,7 @@ export class UI {
     btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
 
     const offerBtn = document.createElement("button");
-    offerBtn.textContent = "Anbieten";
+    offerBtn.textContent = t("trade.offer");
     offerBtn.addEventListener("click", () => {
       const toId = targetSelect.value;
       const giveProps = [...giveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
@@ -1928,7 +2390,7 @@ export class UI {
 
     const cancelBtn = document.createElement("button");
     cancelBtn.style.cssText = "background:#555;";
-    cancelBtn.textContent = "Abbrechen";
+    cancelBtn.textContent = t("trade.cancel");
     cancelBtn.addEventListener("click", () => hide(panel));
 
     btnRow.appendChild(offerBtn);
@@ -1951,7 +2413,7 @@ export class UI {
 
     const title = document.createElement("div");
     title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
-    title.textContent = `Tauschangebot von ${from?.name ?? "?"}`;
+    title.textContent = `${t("swap.from")} ${from?.name ?? "?"}`;
     panel.appendChild(title);
 
     const giveNames = swap.give.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
@@ -1960,8 +2422,8 @@ export class UI {
     const info = document.createElement("div");
     info.style.cssText = "font-size:12px;color:#ccc;margin-bottom:10px;";
     info.innerHTML = `
-      <div><strong>Du gibst:</strong> ${recvNames} + ${swap.receive.money} LPD</div>
-      <div><strong>Du erhältst:</strong> ${giveNames} + ${swap.give.money} LPD</div>
+      <div><strong>${t("swap.give")}</strong> ${recvNames} + ${swap.receive.money} LPD</div>
+      <div><strong>${t("swap.receive")}</strong> ${giveNames} + ${swap.give.money} LPD</div>
     `;
     panel.appendChild(info);
 
@@ -1969,7 +2431,7 @@ export class UI {
     btnRow.style.cssText = "display:flex;gap:8px;";
 
     const acceptBtn = document.createElement("button");
-    acceptBtn.textContent = "Annehmen";
+    acceptBtn.textContent = t("swap.accept");
     acceptBtn.addEventListener("click", () => {
       this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: true } });
       hide(panel);
@@ -1977,7 +2439,7 @@ export class UI {
 
     const declineBtn = document.createElement("button");
     declineBtn.style.background = "#991b1b";
-    declineBtn.textContent = "Ablehnen";
+    declineBtn.textContent = t("swap.decline");
     declineBtn.addEventListener("click", () => {
       this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: false } });
       hide(panel);

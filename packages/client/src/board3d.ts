@@ -506,7 +506,8 @@ export class Board3D {
     angleDeg: number
   ) {
     // High-resolution texture so labels read crisply in standard AND top-down.
-    const TEX_W = 1024;
+    // Streets use 2048 wide for maximum sharpness; corners stay 1024×1024.
+    const TEX_W = isCorner ? 1024 : 2048;
     const TEX_H = isCorner ? 1024 : 512;
 
     const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, false);
@@ -528,12 +529,13 @@ export class Board3D {
       // Street / station / attraction: HORIZONTAL text, word-wrapped onto up to
       // 3 lines, vertically centred in the label region (which sits clear of the
       // inner colour bar once the plane is positioned).
+      // Font sizes scale with texture width so text uses the full resolution.
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const FONT_SIZE = 112;
-      const SMALL_SIZE = 84;
-      const LINE_H = 128;
+      const FONT_SIZE = Math.round(TEX_W * 0.055); // ~112 at 2048, ~56 at 1024
+      const SMALL_SIZE = Math.round(TEX_W * 0.041);  // ~84 at 2048
+      const LINE_H = Math.round(TEX_W * 0.063);       // ~128 at 2048
       ctx.font = `bold ${FONT_SIZE}px Arial`;
       const MAX_W = TEX_W - 24;
       const words = name.split(" ");
@@ -559,6 +561,9 @@ export class Board3D {
     }
 
     tex.update();
+    // Anisotropic filtering reduces mip-map blurring when the label is viewed
+    // at a shallow angle (standard view). 8× is well-supported and keeps labels sharp.
+    tex.anisotropicFilteringLevel = 8;
 
     // Plane sits in the INNER region of the tile (between the colour bar on the
     // inner edge and the tile centre) so the colour bar never covers the name.
