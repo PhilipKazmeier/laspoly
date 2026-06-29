@@ -1222,6 +1222,9 @@ export class Board3D {
 
   /** Enqueues a token move from `from` to `to` and resolves when the token arrives at `to`. */
   animateMoveAsync(playerId: string, from: number, to: number): Promise<void> {
+    // No movement: resolve immediately so the queue never stalls.
+    if (from === to) return Promise.resolve();
+
     // Station → station TRAVEL: dive underground and emerge at the destination
     // instead of walking the ring. forwardDist > 4 excludes the rare adjacent
     // dice-step between neighbouring stations.
@@ -1231,9 +1234,51 @@ export class Board3D {
       return this.animateSubwayTravel(playerId, from, to);
     }
     return new Promise<void>((resolve) => {
-      this.moveResolvers.set(playerId, resolve);
+      let done = false;
+      let timer: ReturnType<typeof setTimeout>;
+      // Wrapped resolver: clears the safety timer and resolves exactly once.
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+
+      // If a resolver for this player is already registered (e.g. two state
+      // updates for the same player arrived back-to-back), fire the stale one
+      // immediately so it doesn't leak.
+      const stale = this.moveResolvers.get(playerId);
+      if (stale) { this.moveResolvers.delete(playerId); stale(); }
+
+      this.moveResolvers.set(playerId, finish);
       this.enqueueMove(playerId, from, to);
+
+      // Safety net: token moves are driven by onBeforeRenderObservable. If the
+      // render loop stalls (e.g. headless/background-tab requestAnimationFrame
+      // throttling), force-complete so the serial state queue can NEVER deadlock
+      // and the game always makes progress. Snaps the token to its destination.
+      const hops = forwardDist > 12 ? 1 : forwardDist;
+      const capMs = hops * 120 + 1800;
+      timer = setTimeout(() => {
+        if (done) return;
+        this.moveQueues.delete(playerId);
+        this.moveAnimating.delete(playerId);
+        this.snapTokenToTile(playerId, to);
+        if (this.moveResolvers.get(playerId) === finish) this.moveResolvers.delete(playerId);
+        finish();
+      }, capMs);
     });
+  }
+
+  /** Instantly place a player's token (and its label/ring) on a tile. Jail-aware. */
+  private snapTokenToTile(playerId: string, pos: number) {
+    const [x, z] = pos === 40 ? [0, 0] : tileXZ(pos);
+    const mesh = this.tokenMeshes.get(playerId);
+    if (mesh) { mesh.position.set(x, 0.35, z); mesh.rotation.y = 0; }
+    const lbl = this.tokenLabels.get(playerId);
+    if (lbl) lbl.position.set(x, 1.1, z);
+    const ring = this.tokenRings.get(playerId);
+    if (ring) ring.position.set(x, 0.12, z);
   }
 
   /**
@@ -1249,16 +1294,36 @@ export class Board3D {
       const ring = this.tokenRings.get(playerId);
       if (!mesh) { resolve(); return; }
 
+      // eslint-disable-next-line prefer-const
+      let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+
       const [destX, destZ] = tileXZ(to);
       const DIVE_MS = 420;
       const EMERGE_MS = 420;
+      const TOTAL_MS = DIVE_MS + EMERGE_MS;
       const startY = mesh.position.y; // ≈ 0.35
       const UNDERGROUND = -1.6;
       let phase: "dive" | "emerge" = "dive";
       let elapsed = 0;
       let lastTime = performance.now();
+      let done = false;
 
-      const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const finish = () => {
+        if (done) return;
+        done = true;
+        this.scene.onBeforeRenderObservable.remove(obs);
+        clearTimeout(safetyTimer);
+        mesh.position.set(destX, startY, destZ);
+        mesh.rotation.y = 0;
+        if (lbl) lbl.position.set(destX, 1.1, destZ);
+        if (ring) ring.position.set(destX, 0.12, destZ);
+        resolve();
+      };
+
+      // Safety timer so the promise resolves even when rAF is throttled.
+      const safetyTimer = setTimeout(finish, TOTAL_MS + 200);
+
+      obs = this.scene.onBeforeRenderObservable.add(() => {
         const now = performance.now();
         elapsed += now - lastTime;
         lastTime = now;
@@ -1284,14 +1349,7 @@ export class Board3D {
           mesh.rotation.y = (1 - t) * Math.PI * 4;
           if (lbl) lbl.position.set(destX, mesh.position.y + 0.8, destZ);
           if (ring) ring.position.set(destX, 0.12, destZ);
-          if (t >= 1) {
-            mesh.position.set(destX, startY, destZ);
-            mesh.rotation.y = 0;
-            if (lbl) lbl.position.set(destX, 1.1, destZ);
-            if (ring) ring.position.set(destX, 0.12, destZ);
-            this.scene.onBeforeRenderObservable.remove(obs);
-            resolve();
-          }
+          if (t >= 1) finish();
         }
       });
     });
@@ -1334,6 +1392,23 @@ export class Board3D {
     const HOP_HEIGHT = 0.5;
     let elapsed = 0;
     let lastTime = performance.now();
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(hopTimer);
+      mesh.position.set(targetX, 0.35, targetZ);
+      const lbl = this.tokenLabels.get(playerId);
+      if (lbl) lbl.position.set(targetX, 1.1, targetZ);
+      const ring2 = this.tokenRings.get(playerId);
+      if (ring2) ring2.position.set(targetX, 0.12, targetZ);
+      this.driveAnimation(playerId);
+    };
+
+    // Safety timer: advance to the next hop even if rAF is throttled.
+    const hopTimer = setTimeout(finish, HOP_DURATION + 80);
 
     const obs = this.scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
@@ -1349,14 +1424,7 @@ export class Board3D {
       const ring = this.tokenRings.get(playerId);
       if (ring) ring.position.set(mesh.position.x, 0.12, mesh.position.z);
 
-      if (t >= 1) {
-        this.scene.onBeforeRenderObservable.remove(obs);
-        mesh.position.set(targetX, 0.35, targetZ);
-        if (lbl) lbl.position.set(targetX, 1.1, targetZ);
-        const ring2 = this.tokenRings.get(playerId);
-        if (ring2) ring2.position.set(targetX, 0.12, targetZ);
-        this.driveAnimation(playerId);
-      }
+      if (t >= 1) finish();
     });
   }
 
@@ -1564,7 +1632,7 @@ export class Board3D {
         if (die1) die1.position.y = 0.25 + bounce;
         if (die2) die2.position.y = 0.25 + bounce;
         if (elapsed >= 400) {
-          this.showDiceResultLabel(d1, d2, cup.position.x, cup.position.z);
+          // No number overlay — the dice pips themselves show the rolled value.
           this.scene.onBeforeRenderObservable.remove(obs);
           this.diceAnimating = false;
           // Dice have settled — now release any token moves that were waiting,
@@ -1580,16 +1648,27 @@ export class Board3D {
 
   /** Plays the dice animation and resolves when the dice have fully settled. */
   playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
+    if (this.diceAnimating) return Promise.resolve();
+    // Total animation time: lift(300) + shake(400) + descend(300) + settle(400) = 1400 ms.
+    // We use a timer-based resolve that mirrors the animation phases so the promise
+    // resolves even when the render loop is throttled (e.g. in headless tests).
+    const ANIM_TOTAL_MS = 1450;
+    this.playDiceAnimation(d1, d2);
     return new Promise<void>((resolve) => {
-      if (this.diceAnimating) { resolve(); return; }
-      // Attach a one-time observer that resolves when diceAnimating goes false
+      // Also watch the render loop (real browser): resolves as soon as the flag clears.
       const check = this.scene.onBeforeRenderObservable.add(() => {
         if (!this.diceAnimating) {
           this.scene.onBeforeRenderObservable.remove(check);
+          clearTimeout(timer);
           resolve();
         }
       });
-      this.playDiceAnimation(d1, d2);
+      // Safety timer: resolves even if rAF is throttled (headless/background tabs).
+      const timer = setTimeout(() => {
+        this.scene.onBeforeRenderObservable.remove(check);
+        this.diceAnimating = false;
+        resolve();
+      }, ANIM_TOTAL_MS + 200);
     });
   }
 
