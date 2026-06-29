@@ -10,3 +10,5 @@ coverage/
 
 # playwright run artifacts
 packages/*/test-results/
+.gstack/
+test-results/
