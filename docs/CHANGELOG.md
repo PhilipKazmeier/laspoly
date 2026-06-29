@@ -123,6 +123,24 @@ per-task plans in [superpowers/plans](superpowers/plans/).
 - **Street labels:** read from OUTSIDE every edge (removed the upside-down top/left flip); doubled
   texture resolution + fonts for crispness; zeroed specular (no top-down glare).
 
+### Live-test round 2 (turn flow, animation order, lobby, i18n) — done
+- **Explicit end-of-turn:** a human's turn now ends on a "Zug beenden" confirm (or the 60s timer);
+  management (build/mortgage/trade/travel) allowed during the turn-end window. Bots/timer auto-end.
+- **Strict serial animation:** dice → token move → action-card popup play one after another; the buy
+  prompt and card popup appear only after the token lands; bots animate sequentially.
+- **Clockwise movement** (tile layout Z-negated); roll button hides on click; own action-card popup
+  waits for Confirm; action-card text now explains the effect + amount.
+- **Dice cup** bigger and fixed on its felt spot; dice hidden until the cup lifts, then shown with pip
+  faces. Board houses/hotels/factories render reliably.
+- **Lobby figure picker** shows car-model thumbnails; colour is unique per player (taken colours greyed).
+- **Full client i18n + working language switch:** ~120 DE/EN UI strings + per-player `setLocale`
+  (server formats events in the player's locale). Toggle flips the whole UI for that player only.
+- **"Mein Eigentum"** (renamed) always visible with own cash; illegal actions greyed; build costs show
+  the halved value during the Building-Sale event.
+- **Leave** fully exits to the lobby; **street labels** sharper (2048px + anisotropic); **jail siren** trimmed to ~1.2s.
+- Known minor leftovers: the turn toast string and a couple historical log lines aren't re-localized;
+  dice cup sits slightly toward the top edge.
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the
