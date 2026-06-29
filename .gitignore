@@ -4,3 +4,6 @@ dist/
 .DS_Store
 coverage/
 .vite/
+
+# local Claude config/worktrees
+.claude/
