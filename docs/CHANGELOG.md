@@ -161,6 +161,23 @@ per-task plans in [superpowers/plans](superpowers/plans/).
 - Known follow-ups: some CI specs (management/playthrough/qa-full-game) time out because they need a
   full game-over (slow with bots) — flaky, not product bugs; optional 3D figure preview in the picker.
 
+### Live-test round 4 — done
+- **Animation:** dice promise now waits the full ~1550 ms visual (was an early-resolve race that let
+  the token move during the cup); `showCup()` hides the previous roll's dice so a turn awaiting a roll
+  shows the cup, not leftover dice.
+- **Labels:** root-caused the "pixelig" complaint — the label texture had mipmaps OFF (aliasing);
+  enabled mipmaps + trilinear + anisotropic at 1024 px; later set a single uniform font size for all tiles.
+- **Lobby:** figure picker shows the actual car-model thumbnails labelled Car 1–5 / Police per colour row;
+  lobby/room panel no longer clipped at the top (max-height + internal scroll).
+- **Player list:** removed the $-chip-icon clutter (kept LPD amount + net-worth rank).
+- **Deed card:** highlights the currently-applicable rent/cost row based on the property's buildings.
+- **Action card:** popup now reads as a bold title + effect description on separate lines.
+- **Audio:** background music is now a synthesized melodic loop (not a drone); separate SFX/Music
+  volume sliders. The original copyrighted tracks (Frank Sinatra etc.) are NOT shipped — instead the
+  player can drop the originals into `public/assets/music/` for LOCAL/private use (gitignored +
+  excluded from the Docker image); deployed builds fall back to the synth loop.
+- Verified: 526 unit tests, sim 93 % finish / median first-elim turn 90.
+
 ## Open / in progress — animation & render polish (next)
 
 - Client animation QUEUE: play each player's dice+move animation to completion before applying the
