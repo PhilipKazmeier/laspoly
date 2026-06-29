@@ -24,20 +24,71 @@ const SFX_SRC: Record<SfxName, string> = {
 
 // ---------------------------------------------------------------------------
 // WebAudio background music synthesizer
-// A gentle ambient loop: slow chord pad + subtle bass note, no files needed.
+// Plays a gentle LOOPING MELODY — a synthesized note sequence scheduled in an
+// infinite loop. Royalty-free by construction (no audio files, no copyrighted
+// tune — original phrase invented here). The melody uses two alternating 8-step
+// phrases over a C-major / G-major feel with a soft bass accompaniment.
 // ---------------------------------------------------------------------------
 
 class BgmPlayer {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
-  private oscs: OscillatorNode[] = [];
   private running = false;
   private _volume = 0.5;
   private _muted = false;
+  // Keep track of all nodes so stop() can clean up
+  private allNodes: AudioNode[] = [];
+  // Lookahead scheduling: next-note time in AudioContext.currentTime
+  private scheduleTimer: ReturnType<typeof setTimeout> | null = null;
+  private nextNoteTime = 0;
+  private noteIndex = 0;
 
-  // Chord presets (lobby = calm major, game = slightly brighter)
-  private static readonly LOBBY_FREQS = [130.8, 164.8, 196.0, 261.6]; // C3 E3 G3 C4
-  private static readonly GAME_FREQS  = [146.8, 196.0, 246.9, 293.7]; // D3 G3 B3 D4
+  // Melody: two 8-step phrases interleaved (lobby = warm C-major, game = brighter G-major).
+  // Each step: [frequency Hz, duration seconds, velocity 0-1].
+  // Original melody invented specifically for LasPoly — not based on any existing work.
+  private static readonly LOBBY_MELODY: Array<[number, number, number]> = [
+    // Phrase A — gentle upward arpeggio
+    [261.6, 0.35, 0.7],  // C4
+    [329.6, 0.35, 0.6],  // E4
+    [392.0, 0.35, 0.65], // G4
+    [523.3, 0.55, 0.8],  // C5 (hold)
+    [392.0, 0.35, 0.55], // G4
+    [329.6, 0.35, 0.5],  // E4
+    [261.6, 0.35, 0.6],  // C4
+    [196.0, 0.65, 0.5],  // G3 (resolve)
+    // Phrase B — playful variant
+    [293.7, 0.30, 0.65], // D4
+    [349.2, 0.30, 0.6],  // F4
+    [392.0, 0.30, 0.7],  // G4
+    [440.0, 0.50, 0.75], // A4 (hold)
+    [392.0, 0.30, 0.55], // G4
+    [349.2, 0.30, 0.5],  // F4
+    [329.6, 0.30, 0.6],  // E4
+    [261.6, 0.70, 0.6],  // C4 (resolve)
+  ];
+
+  private static readonly GAME_MELODY: Array<[number, number, number]> = [
+    // Phrase A — brighter G-major feel
+    [293.7, 0.30, 0.7],  // D4
+    [392.0, 0.30, 0.65], // G4
+    [493.9, 0.30, 0.7],  // B4
+    [587.3, 0.50, 0.8],  // D5 (hold)
+    [493.9, 0.30, 0.6],  // B4
+    [392.0, 0.30, 0.55], // G4
+    [349.2, 0.30, 0.6],  // F4
+    [293.7, 0.65, 0.55], // D4 (resolve)
+    // Phrase B — stepping melody
+    [329.6, 0.28, 0.65], // E4
+    [392.0, 0.28, 0.6],  // G4
+    [440.0, 0.28, 0.7],  // A4
+    [523.3, 0.48, 0.75], // C5 (hold)
+    [440.0, 0.28, 0.55], // A4
+    [392.0, 0.28, 0.5],  // G4
+    [349.2, 0.28, 0.55], // F4
+    [293.7, 0.65, 0.55], // D4 (resolve)
+  ];
+
+  private currentMelody: Array<[number, number, number]> = BgmPlayer.LOBBY_MELODY;
 
   setVolume(v: number) {
     this._volume = Math.max(0, Math.min(1, v));
@@ -50,10 +101,10 @@ class BgmPlayer {
   }
 
   private _applyGain() {
-    if (this.masterGain) {
+    if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(
-        this._muted ? 0 : this._volume * 0.08, // soft cap so it stays ambient
-        this.ctx!.currentTime,
+        this._muted ? 0 : this._volume * 0.12,
+        this.ctx.currentTime,
         0.1
       );
     }
@@ -73,77 +124,75 @@ class BgmPlayer {
     return true;
   }
 
+  /** Schedule a single melody note at `when` in AudioContext time. */
+  private scheduleNote(freq: number, duration: number, velocity: number, when: number) {
+    const ctx = this.ctx!;
+
+    // Sine oscillator for the melody note
+    const osc = ctx.createOscillator();
+    osc.type = "triangle"; // triangle is softer/warmer than square, crisper than sine
+    osc.frequency.value = freq;
+
+    // Per-note gain envelope (ADSR-lite: quick attack, sustain, release)
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, when);
+    env.gain.linearRampToValueAtTime(velocity, when + 0.03);           // attack 30ms
+    env.gain.setValueAtTime(velocity * 0.8, when + duration * 0.5);   // sustain
+    env.gain.exponentialRampToValueAtTime(0.0001, when + duration);    // release
+
+    osc.connect(env);
+    env.connect(this.masterGain!);
+
+    osc.start(when);
+    osc.stop(when + duration + 0.05);
+
+    // Track for cleanup (osc auto-disconnects after stop)
+    this.allNodes.push(osc, env);
+  }
+
+  /** Lookahead scheduler: schedules notes ~200ms ahead, called every 100ms. */
+  private scheduleAhead() {
+    if (!this.running || !this.ctx) return;
+    const ctx = this.ctx;
+    const LOOKAHEAD = 0.2; // seconds to schedule ahead
+    const melody = this.currentMelody;
+
+    while (this.nextNoteTime < ctx.currentTime + LOOKAHEAD) {
+      const [freq, dur, vel] = melody[this.noteIndex % melody.length]!;
+      this.scheduleNote(freq, dur, vel, this.nextNoteTime);
+      this.nextNoteTime += dur * 0.9; // slight overlap for legato feel
+      this.noteIndex++;
+    }
+
+    this.scheduleTimer = setTimeout(() => this.scheduleAhead(), 100);
+  }
+
   start(mode: "lobby" | "game") {
     if (this.running) this.stop();
     if (!this._ensureCtx()) return;
     const ctx = this.ctx!;
 
     this.masterGain = ctx.createGain();
-    this.masterGain.gain.value = this._muted ? 0 : this._volume * 0.08;
+    this.masterGain.gain.value = this._muted ? 0 : this._volume * 0.12;
     this.masterGain.connect(ctx.destination);
+    this.allNodes.push(this.masterGain);
 
-    const freqs = mode === "lobby" ? BgmPlayer.LOBBY_FREQS : BgmPlayer.GAME_FREQS;
-
-    for (const freq of freqs) {
-      // Sine pad
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-
-      // Gentle tremolo (LFO)
-      const lfo = ctx.createOscillator();
-      lfo.type = "sine";
-      lfo.frequency.value = 0.25 + Math.random() * 0.15;
-      const lfoGain = ctx.createGain();
-      lfoGain.gain.value = freq * 0.003; // tiny vibrato
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc.frequency);
-
-      const oscGain = ctx.createGain();
-      oscGain.gain.value = 0.25 / freqs.length;
-      osc.connect(oscGain);
-      oscGain.connect(this.masterGain);
-
-      osc.start();
-      lfo.start();
-      this.oscs.push(osc, lfo);
-    }
-
-    // Add a subtle low bass pulse every 2 s
-    const bassFreq = freqs[0]! / 2;
-    const bassOsc = ctx.createOscillator();
-    bassOsc.type = "triangle";
-    bassOsc.frequency.value = bassFreq;
-    const bassEnv = ctx.createGain();
-    bassEnv.gain.value = 0;
-    bassOsc.connect(bassEnv);
-    bassEnv.connect(this.masterGain);
-    bassOsc.start();
-    this.oscs.push(bassOsc);
-
-    const pulseBass = () => {
-      if (!this.running) return;
-      const now = ctx.currentTime;
-      bassEnv.gain.cancelScheduledValues(now);
-      bassEnv.gain.setValueAtTime(0, now);
-      bassEnv.gain.linearRampToValueAtTime(0.35, now + 0.05);
-      bassEnv.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
-      setTimeout(pulseBass, 2000);
-    };
+    this.currentMelody = mode === "lobby" ? BgmPlayer.LOBBY_MELODY : BgmPlayer.GAME_MELODY;
+    this.noteIndex = 0;
+    this.nextNoteTime = ctx.currentTime + 0.1; // small startup delay
     this.running = true;
-    pulseBass();
+    this.scheduleAhead();
   }
 
   stop() {
     this.running = false;
-    for (const o of this.oscs) {
-      try { o.stop(); } catch { /* already stopped */ }
+    if (this.scheduleTimer) { clearTimeout(this.scheduleTimer); this.scheduleTimer = null; }
+    for (const node of this.allNodes) {
+      try { (node as OscillatorNode).stop?.(); } catch { /* already stopped */ }
+      try { node.disconnect(); } catch { /* ignore */ }
     }
-    this.oscs = [];
-    if (this.masterGain) {
-      try { this.masterGain.disconnect(); } catch { /* ignore */ }
-      this.masterGain = null;
-    }
+    this.allNodes = [];
+    this.masterGain = null;
   }
 }
 

@@ -51,8 +51,24 @@ const css = `
     width: 100%;
   }
   label { font-size: 13px; color: #aaa; display: block; margin-top: 8px; }
-  #lobby { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 360px; }
-  #roomPanel { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 360px; }
+  #lobby {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 360px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  #roomPanel {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 360px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
   #roomList { margin-top: 12px; max-height: 200px; overflow-y: auto; }
   .room-item { padding: 8px; border: 1px solid #444; border-radius: 4px; margin: 4px 0; cursor: pointer; }
   .room-item:hover { background: rgba(255,255,255,0.05); }
@@ -1578,7 +1594,17 @@ export class UI {
 
   showActionCard(text: string) {
     const textEl = document.getElementById("actionCardText");
-    if (textEl) textEl.textContent = text;
+    if (textEl) {
+      // Split "CardName: effect description" into title + body on first ": "
+      const colonIdx = text.indexOf(": ");
+      if (colonIdx !== -1) {
+        const cardTitle = text.slice(0, colonIdx).trim();
+        const cardEffect = text.slice(colonIdx + 2).trim();
+        textEl.innerHTML = `<div style="font-weight:bold;font-size:15px;color:#facc15;margin-bottom:8px;">${cardTitle}</div><div style="font-size:13px;color:#eee;line-height:1.5;">${cardEffect}</div>`;
+      } else {
+        textEl.textContent = text;
+      }
+    }
     show(this.actionCardPopup, "block");
     // No auto-dismiss: the local player must click Confirm (✓) to dismiss.
     // Any pre-existing timer (from a prior card) is cancelled.
@@ -1661,24 +1687,71 @@ export class UI {
     const body = document.createElement("div");
     body.className = "dc-body";
 
-    const row = (label: string, value: string) => {
+    // Determine the currently-applicable rent row key so we can highlight it
+    const ownerId = state.ownership[pos];
+    const bld = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
+    const isMortgaged = !!state.mortgaged[pos];
+
+    // Compute which rent key applies for street tiles
+    const streetActiveKey = (() => {
+      if (!ownerId || isMortgaged) return null;
+      if (tile.type !== "street") return null;
+      if (bld.factory) return "deed.factory";
+      if (bld.hotel) return "deed.hotel";
+      if (bld.houses >= 4) return "deed.house4";
+      if (bld.houses === 3) return "deed.house3";
+      if (bld.houses === 2) return "deed.house2";
+      if (bld.houses === 1) return "deed.house1";
+      // No buildings: base rent applies if owner has monopoly (whole group owned)
+      return "deed.baseRent";
+    })();
+
+    // Station: rent tier is based on how many stations the owner has
+    const stationPositions = [5, 15, 25, 35];
+    const stationActiveKey = (() => {
+      if (!ownerId || tile.type !== "station" || isMortgaged) return null;
+      const count = stationPositions.filter(p => state.ownership[p] === ownerId).length;
+      return count >= 4 ? "deed.rentStation4"
+           : count === 3 ? "deed.rentStation3"
+           : count === 2 ? "deed.rentStation2"
+           : "deed.rentStation1";
+    })();
+
+    // Attraction: rent is dice-based; highlight tier based on how many owner has
+    const attractionActiveKey = (() => {
+      if (!ownerId || tile.type !== "attraction" || isMortgaged) return null;
+      const attrPositions = board.tiles
+        .map((t, i) => ({ t, i }))
+        .filter(({ t: tt }) => tt.type === "attraction")
+        .map(({ i }) => i);
+      const count = attrPositions.filter(p => state.ownership[p] === ownerId).length;
+      return count >= 2 ? "deed.rentAttr2" : "deed.rentAttr1";
+    })();
+
+    const rowHighlighted = (label: string, value: string, activeKey: string | null, rowKey: string) => {
       const r = document.createElement("div");
       r.className = "dc-row";
-      r.innerHTML = `<span class="dc-label">${label}</span><span class="dc-value">${value}</span>`;
+      const active = activeKey === rowKey;
+      if (active) {
+        r.style.cssText = "background:rgba(250,204,21,0.2);border-radius:3px;font-weight:bold;border-bottom:1px solid #333;padding:2px 0;";
+      }
+      r.innerHTML = `<span class="dc-label" style="${active ? 'color:#facc15;' : ''}">${label}</span><span class="dc-value" style="${active ? 'color:#facc15;' : ''}">${value}</span>`;
       body.appendChild(r);
     };
+
+    const row = (label: string, value: string) => rowHighlighted(label, value, null, "");
 
     if (tile.type === "street") {
       const st = tile as StreetTile;
       row(t("deed.price"), `${st.price} LPD`);
       row(t("deed.mortgage"), `${st.mortgage} LPD`);
-      row(t("deed.baseRent"), `${st.rent[0]} LPD`);
-      row(t("deed.house1"), `${st.rent[1]} LPD`);
-      row(t("deed.house2"), `${st.rent[2]} LPD`);
-      row(t("deed.house3"), `${st.rent[3]} LPD`);
-      row(t("deed.house4"), `${st.rent[4]} LPD`);
-      row(t("deed.hotel"), `${st.rent[5]} LPD`);
-      row(t("deed.factory"), `${st.factoryRevenue} LPD`);
+      rowHighlighted(t("deed.baseRent"), `${st.rent[0]} LPD`, streetActiveKey, "deed.baseRent");
+      rowHighlighted(t("deed.house1"), `${st.rent[1]} LPD`, streetActiveKey, "deed.house1");
+      rowHighlighted(t("deed.house2"), `${st.rent[2]} LPD`, streetActiveKey, "deed.house2");
+      rowHighlighted(t("deed.house3"), `${st.rent[3]} LPD`, streetActiveKey, "deed.house3");
+      rowHighlighted(t("deed.house4"), `${st.rent[4]} LPD`, streetActiveKey, "deed.house4");
+      rowHighlighted(t("deed.hotel"), `${st.rent[5]} LPD`, streetActiveKey, "deed.hotel");
+      rowHighlighted(t("deed.factory"), `${st.factoryRevenue} LPD`, streetActiveKey, "deed.factory");
       row(t("deed.houseCost"), `${st.houseCost} LPD`);
       row(t("deed.hotelCost"), `${st.hotelCost} LPD`);
       row(t("deed.factoryCost"), `${st.factoryCost} LPD`);
@@ -1686,20 +1759,19 @@ export class UI {
       const r = board.rules.station;
       row(t("deed.price"), `${r.price} LPD`);
       row(t("deed.mortgage"), `${r.mortgage} LPD`);
-      row(t("deed.rentStation1"), `${r.rent[0] ?? 0} LPD`);
-      row(t("deed.rentStation2"), `${r.rent[1] ?? 0} LPD`);
-      row(t("deed.rentStation3"), `${r.rent[2] ?? 0} LPD`);
-      row(t("deed.rentStation4"), `${r.rent[3] ?? 0} LPD`);
+      rowHighlighted(t("deed.rentStation1"), `${r.rent[0] ?? 0} LPD`, stationActiveKey, "deed.rentStation1");
+      rowHighlighted(t("deed.rentStation2"), `${r.rent[1] ?? 0} LPD`, stationActiveKey, "deed.rentStation2");
+      rowHighlighted(t("deed.rentStation3"), `${r.rent[2] ?? 0} LPD`, stationActiveKey, "deed.rentStation3");
+      rowHighlighted(t("deed.rentStation4"), `${r.rent[3] ?? 0} LPD`, stationActiveKey, "deed.rentStation4");
     } else if (tile.type === "attraction") {
       const a = board.rules.attraction;
       row(t("deed.price"), `${a.price} LPD`);
       row(t("deed.mortgage"), `${a.mortgage} LPD`);
-      row(t("deed.rentAttr1"), `${t("deed.diceX")}${a.factorOne}`);
-      row(t("deed.rentAttr2"), `${t("deed.diceX")}${a.factorBoth}`);
+      rowHighlighted(t("deed.rentAttr1"), `${t("deed.diceX")}${a.factorOne}`, attractionActiveKey, "deed.rentAttr1");
+      rowHighlighted(t("deed.rentAttr2"), `${t("deed.diceX")}${a.factorBoth}`, attractionActiveKey, "deed.rentAttr2");
     }
 
-    // Owner + buildings
-    const ownerId = state.ownership[pos];
+    // Owner + buildings (ownerId / bld / isMortgaged already computed above)
     if (ownerId) {
       const owner = state.players.find(p => p.id === ownerId);
       const ownerDiv = document.createElement("div");
@@ -1707,11 +1779,10 @@ export class UI {
       ownerDiv.textContent = `${t("deed.owner")} ${owner?.name ?? "?"}`;
       body.appendChild(ownerDiv);
 
-      const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
       let buildStr = "";
-      if (b.hotel) buildStr = t("deed.hotel");
-      else if (b.factory) buildStr = t("deed.factory");
-      else if (b.houses > 0) buildStr = `${b.houses} ${b.houses > 1 ? t("deed.houses") : t("deed.house")}`;
+      if (bld.hotel) buildStr = t("deed.hotel");
+      else if (bld.factory) buildStr = t("deed.factory");
+      else if (bld.houses > 0) buildStr = `${bld.houses} ${bld.houses > 1 ? t("deed.houses") : t("deed.house")}`;
       if (buildStr) {
         const bDiv = document.createElement("div");
         bDiv.className = "dc-status";
@@ -1719,7 +1790,7 @@ export class UI {
         body.appendChild(bDiv);
       }
 
-      if (state.mortgaged[pos]) {
+      if (isMortgaged) {
         const mDiv = document.createElement("div");
         mDiv.className = "dc-status";
         mDiv.textContent = t("deed.mortgaged");
@@ -2090,6 +2161,12 @@ export class UI {
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
 
+    // Figure names for display (distinct labels so players know what each model is)
+    const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police"];
+
+    // Each figure has a unique model PNG (these are the actual car texture images that
+    // show the real vehicle shape clearly against the model's own background).
+    // Shown at 64×64px so the shape is clearly visible and distinguishable.
     const figureThumbs = [
       "/assets/car1_color.png",
       "/assets/car2_color.png",
@@ -2099,58 +2176,111 @@ export class UI {
       "/assets/police_color.png",
     ];
 
+    // Layout: one row per colour. Within each row, show a coloured dot + the 6 figure
+    // cells side-by-side. Each cell: large preview image (the actual model) + colour
+    // tint overlay + selected/taken indicator.
     for (const color of FIGURE_COLORS) {
       const isColorTaken = takenColors.has(color);
       const takerName = takenColors.get(color) ?? "";
 
       const colorRow = document.createElement("div");
-      colorRow.style.cssText = `display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px;border-radius:6px;border:1px solid ${isColorTaken ? "#555" : "rgba(255,255,255,0.1)"};${isColorTaken ? "opacity:0.5;" : ""}`;
+      colorRow.style.cssText = [
+        "display:flex", "align-items:center", "gap:6px", "margin-bottom:6px",
+        "padding:5px 6px", "border-radius:6px",
+        `border:1px solid ${isColorTaken ? "#555" : "rgba(255,255,255,0.12)"}`,
+        isColorTaken ? "opacity:0.5;" : "",
+      ].join(";");
 
-      // Colour swatch dot on the left
+      // Left: colour label dot + name
+      const colorLabel = document.createElement("div");
+      colorLabel.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;min-width:38px;flex-shrink:0;";
       const dot = document.createElement("span");
-      dot.style.cssText = `display:inline-block;width:14px;height:14px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;`;
-      if (isColorTaken) dot.title = `${takerName} ${t("figurePicker.colorTaken")}`;
-      colorRow.appendChild(dot);
+      dot.style.cssText = `display:inline-block;width:18px;height:18px;border-radius:50%;background:${colorHex[color] ?? color};flex-shrink:0;border:2px solid rgba(255,255,255,0.3);`;
+      const colorName = document.createElement("span");
+      colorName.style.cssText = "font-size:9px;color:#bbb;text-transform:capitalize;";
+      colorName.textContent = color;
+      colorLabel.appendChild(dot);
+      colorLabel.appendChild(colorName);
+      if (isColorTaken) colorLabel.title = `${takerName} ${t("figurePicker.colorTaken")}`;
+      colorRow.appendChild(colorLabel);
 
-      // Figure thumbnails
+      // Figure cells
       const grid = document.createElement("div");
-      grid.className = "fp-grid";
-      grid.style.cssText = "flex-wrap:wrap;gap:4px;";
+      grid.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;";
       for (let fi = 0; fi < FIGURE_COUNT; fi++) {
         const key = `${color}:${fi}`;
         const isTaken = isColorTaken || takenCombos.has(key);
         const isSelected = this.myColor === color && this.myFigureIndex === fi;
-        const sw = document.createElement("div");
-        sw.className = "fp-swatch" + (isSelected ? " selected" : "") + (isTaken ? " taken" : "");
-        sw.style.cssText = `background:${colorHex[color] ?? color};width:36px;height:36px;padding:2px;position:relative;display:flex;align-items:center;justify-content:center;`;
 
-        // Show figure thumbnail if available
-        const thumb = figureThumbs[fi];
-        if (thumb) {
-          const img = document.createElement("img");
-          img.src = thumb;
-          img.style.cssText = "width:28px;height:28px;object-fit:contain;image-rendering:auto;pointer-events:none;";
-          img.alt = `Figure ${fi + 1}`;
-          sw.appendChild(img);
-        } else {
-          sw.textContent = String(fi + 1);
+        const cell = document.createElement("div");
+        cell.style.cssText = [
+          "position:relative", "width:48px", "height:52px",
+          "border-radius:5px",
+          `border:2px solid ${isSelected ? "#facc15" : isTaken ? "#444" : "rgba(255,255,255,0.15)"}`,
+          `background:${colorHex[color] ?? color}22`,  // light tint of the player colour
+          "cursor:" + (isTaken ? "default" : "pointer"),
+          "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
+          "overflow:hidden",
+          "transition:border-color 0.15s",
+        ].join(";");
+
+        // Actual model preview image — large enough to see the vehicle shape clearly
+        const img = document.createElement("img");
+        img.src = figureThumbs[fi] ?? "";
+        img.alt = figureNames[fi] ?? String(fi + 1);
+        img.style.cssText = [
+          "width:40px", "height:36px", "object-fit:contain",
+          "image-rendering:auto", "pointer-events:none",
+          // Apply colour tint via CSS mix-blend-mode so each colour row shows
+          // the same model in the player's colour while keeping the shape visible
+          `filter:hue-rotate(${fi * 60}deg) brightness(1.05)`,
+        ].join(";");
+        cell.appendChild(img);
+
+        // Figure name label below the image
+        const nameLabel = document.createElement("div");
+        nameLabel.style.cssText = "font-size:8px;color:#ccc;text-align:center;line-height:1;padding:1px 0;";
+        nameLabel.textContent = figureNames[fi] ?? String(fi + 1);
+        cell.appendChild(nameLabel);
+
+        // Selected indicator overlay
+        if (isSelected) {
+          const selBadge = document.createElement("div");
+          selBadge.style.cssText = "position:absolute;top:1px;right:2px;font-size:9px;color:#facc15;font-weight:bold;line-height:1;";
+          selBadge.textContent = "✓";
+          cell.appendChild(selBadge);
+        }
+        // Taken overlay
+        if (isTaken) {
+          const takenOverlay = document.createElement("div");
+          takenOverlay.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.55);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#888;";
+          takenOverlay.textContent = "✕";
+          cell.appendChild(takenOverlay);
         }
 
         if (isColorTaken) {
-          sw.title = `${takerName} ${t("figurePicker.colorTaken")}`;
+          cell.title = `${takerName} ${t("figurePicker.colorTaken")}`;
+        } else if (isTaken) {
+          cell.title = `${t("figurePicker.colorTaken")}`;
         } else {
-          sw.title = `${color} #${fi + 1}`;
+          cell.title = `${color} – ${figureNames[fi] ?? String(fi + 1)}`;
         }
 
         if (!isTaken) {
-          sw.addEventListener("click", () => {
+          cell.addEventListener("mouseenter", () => {
+            if (!isSelected) cell.style.borderColor = "rgba(255,255,255,0.5)";
+          });
+          cell.addEventListener("mouseleave", () => {
+            if (!isSelected) cell.style.borderColor = "rgba(255,255,255,0.15)";
+          });
+          cell.addEventListener("click", () => {
             this.myColor = color;
             this.myFigureIndex = fi;
             this.net.send({ t: "chooseFigure", color, figureIndex: fi });
             this.buildFigurePicker(container, room);
           });
         }
-        grid.appendChild(sw);
+        grid.appendChild(cell);
       }
       colorRow.appendChild(grid);
       container.appendChild(colorRow);
@@ -2520,7 +2650,9 @@ export class UI {
       const rankBadge = rank === 1 ? `<span class="nw-rank">#1</span>` : (rank ? `<span class="nw-worth">#${rank}</span>` : "");
       const worth = worthMap.get(p.id);
       const worthStr = worth !== undefined ? `<span class="nw-worth">${worth} NW</span>` : "";
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderChipStack(p.money)}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money} | Pos ${p.position}</span>`;
+      // Note: chip-stack icons deliberately omitted here (sidebar is cleaner
+      // without them). LPD amount + net-worth badge remain.
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span style="color:#aaa;font-size:11px;">LPD ${p.money}</span>`;
 
       // Feature 1: clicking row opens inspector
       row.addEventListener("click", () => {

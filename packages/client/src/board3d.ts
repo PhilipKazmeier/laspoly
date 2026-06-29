@@ -598,18 +598,18 @@ export class Board3D {
       ctx.font = "bold 300px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
-      // Street / station / attraction: large text centred, word-wrapped if needed.
-      // Try the full name at FONT_SIZE; shrink only if it doesn't fit in 1 line.
+      // Street / station / attraction: uniform font size across ALL tiles.
+      // All tile names use the same font size (slightly smaller than before),
+      // wrapping to 2 lines at that size if needed. This ensures consistent
+      // visual weight across the board.
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
-      const FONT_SIZE = 184;      // px (texture is 1024 wide) — sharp & readable
-      const SMALL_SIZE = 140;     // fallback for long names needing 2 lines
-      const TINY_SIZE = 108;      // fallback for very long names needing 3 lines
-      const LINE_H_LARGE = 208;
-      const LINE_H_SMALL = 160;
-      const LINE_H_TINY = 124;
+      // Single uniform font size for all non-corner tiles — slightly smaller
+      // than the old LARGE size so all names look the same scale on the board.
+      const FONT_SIZE = 148; // px — uniform for all tiles (was 184/140/108)
+      const LINE_H = 172;    // px line height matching this font size
       const MAX_W = TEX_W - 32;
 
       ctx.font = `bold ${FONT_SIZE}px Arial`;
@@ -627,18 +627,13 @@ export class Board3D {
       }
       if (current) lines.push(current);
 
-      // Choose font size so all lines fit inside the texture height
-      let fontSize = FONT_SIZE;
-      let lineH = LINE_H_LARGE;
-      if (lines.length >= 3) { fontSize = TINY_SIZE; lineH = LINE_H_TINY; }
-      else if (lines.length === 2) { fontSize = SMALL_SIZE; lineH = LINE_H_SMALL; }
-      ctx.font = `bold ${fontSize}px Arial`;
-
-      const shown = Math.min(lines.length, 3);
-      const totalH = shown * lineH;
-      const startY = (TEX_H - totalH) / 2 + lineH / 2;
+      // Cap at 2 lines (same font size for all); if a name needs 3+ lines
+      // the second line simply carries the remainder (truncated by texture edge).
+      const shown = Math.min(lines.length, 2);
+      const totalH = shown * LINE_H;
+      const startY = (TEX_H - totalH) / 2 + LINE_H / 2;
       for (let i = 0; i < shown; i++) {
-        ctx.fillText(lines[i]!, TEX_W / 2, startY + i * lineH);
+        ctx.fillText(lines[i]!, TEX_W / 2, startY + i * LINE_H);
       }
     }
 
