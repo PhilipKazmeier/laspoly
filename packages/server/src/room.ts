@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   createGame,
   applyCommand,
+  applySurrender,
   currentPlayer,
   legalCommandsFor,
   botDecide,
@@ -10,9 +11,29 @@ import {
   type GameEvent,
   type Command,
   type Locale,
+  type GameSettings,
 } from "@laspoly/shared";
 import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
 import type { FormattedEvent, RoomView, RoomSummary } from "@laspoly/shared";
+
+// ---------------------------------------------------------------------------
+// Turn timer auto-action helper (pure, exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick a sensible auto-action for the given player when their turn timer expires.
+ * Pure function — no side effects. Returns null if no action is needed/possible.
+ */
+export function pickAutoAction(state: GameState, playerId: string): Command | null {
+  if (state.phase === "finished") return null;
+  const legal = legalCommandsFor(state, playerId);
+  if (legal.length === 0) return null;
+  // Awaiting-buy: decline so turn advances
+  if (legal.includes("DECLINE_PROPERTY")) return { type: "DECLINE_PROPERTY" };
+  // Awaiting-roll or in jail: just roll
+  if (legal.includes("ROLL_DICE")) return { type: "ROLL_DICE" };
+  return null;
+}
 
 export interface LobbyPlayer {
   id: string;
@@ -22,6 +43,7 @@ export interface LobbyPlayer {
   token: string; // session resume token
   color: string;
   figureIndex: number;
+  ready: boolean; // humans must mark ready before game can start
 }
 
 let _nextRoomId = 1;
@@ -36,6 +58,7 @@ export class GameRoom {
   players: LobbyPlayer[] = [];
   started = false;
   state: GameState | null = null;
+  settings: GameSettings = {};
 
   constructor(name: string, boardId: string, botCount: number) {
     this.id = String(_nextRoomId++);
@@ -67,12 +90,34 @@ export class GameRoom {
     const token = randomBytes(16).toString("hex");
     const color = this._nextFreeColor();
     const figureIndex = this._nextFreeFigureIndex();
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex };
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, ready: false };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
     }
     return id;
+  }
+
+  /** Set a human player's ready state. Returns error string or null on success. */
+  setReady(playerId: string, ready: boolean): string | null {
+    if (this.started) return "Game already started";
+    const p = this.players.find((p) => p.id === playerId && !p.isBot);
+    if (!p) return "Player not found";
+    p.ready = ready;
+    return null;
+  }
+
+  /** Whether the room can start: ≥2 participants and all humans ready. */
+  canStart(): boolean {
+    const humans = this.players.filter((p) => !p.isBot);
+    const total = humans.length + this.botCount;
+    if (total < 2) return false;
+    return humans.every((p) => p.ready);
+  }
+
+  /** Update game settings (host only, lobby only). */
+  updateSettings(settings: GameSettings): void {
+    this.settings = { ...this.settings, ...settings };
   }
 
   /**
@@ -142,7 +187,7 @@ export class GameRoom {
       const id = `b${_nextPlayerId++}`;
       const color = this._nextFreeColor();
       const figureIndex = this._nextFreeFigureIndex();
-      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex });
+      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex, ready: true });
     }
 
     const allPlayers = this.players.map((p) => ({
@@ -152,7 +197,7 @@ export class GameRoom {
       color: p.color,
     }));
 
-    this.state = createGame({ boardId: this.boardId, seed, players: allPlayers });
+    this.state = createGame({ boardId: this.boardId, seed, players: allPlayers, settings: this.settings });
     this.started = true;
     return this.state;
   }
@@ -160,6 +205,24 @@ export class GameRoom {
   applyHumanCommand(playerId: string, command: Command): GameEvent[] {
     if (!this.started || !this.state) throw new Error("Game not started");
     if (this.state.phase === "finished") throw new Error("Game is finished");
+
+    // SURRENDER may come from any alive player (not just current player)
+    if (command.type === "SURRENDER") {
+      const surrenderingPlayer = this.state.players.find((p) => p.id === playerId);
+      if (!surrenderingPlayer?.alive) throw new Error("Player is not alive");
+      const cp = currentPlayer(this.state);
+      if (cp.id === playerId) {
+        // Current player surrenders: use applyCommand (which surrenders currentPlayer)
+        const result = applyCommand(this.state, command);
+        this.state = result.state;
+        return result.events;
+      } else {
+        // Non-current player surrenders: use applySurrender
+        const result = applySurrender(this.state, playerId);
+        this.state = result.state;
+        return result.events;
+      }
+    }
 
     // RESPOND_SWAP may come from the swap target, not the current-turn player
     if (command.type === "RESPOND_SWAP") {
@@ -222,6 +285,22 @@ export class GameRoom {
     return allEvents;
   }
 
+  /**
+   * Restart the game with the same lobby players, board, and settings.
+   * Only valid after the game is finished. Resets state to a fresh game.
+   */
+  restart(newSeed: number): GameState {
+    if (!this.started || !this.state) throw new Error("Game not yet started");
+    if (this.state.phase !== "finished") throw new Error("Game is not finished yet");
+    // Remove bots that were added by start(), keep only the humans
+    this.players = this.players.filter((p) => !p.isBot);
+    // Reset ready state for humans
+    for (const p of this.players) p.ready = false;
+    this.started = false;
+    this.state = null;
+    return this.start(newSeed);
+  }
+
   /** Apply exactly one bot command for the current player (must be a bot). */
   stepOneBot(): GameEvent[] {
     if (!this.started || !this.state) return [];
@@ -273,8 +352,11 @@ export class GameRoom {
         isBot: p.isBot,
         color: p.color,
         figureIndex: p.figureIndex,
+        ready: p.isBot ? true : p.ready,
       })),
       started: this.started,
+      settings: this.settings,
+      canStart: this.canStart(),
     };
   }
 }

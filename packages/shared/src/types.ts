@@ -63,6 +63,10 @@ export interface GameState {
   builtThisTurn: boolean;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
   traveledThisTurn: boolean;
+  /** Building cost multiplier (from game settings, default 1.0). */
+  buildingCostMult: number;
+  /** Bot difficulty level (from game settings, default "normal"). */
+  botDifficulty: "easy" | "normal" | "hard";
 }
 
 export interface SwapLeg {
@@ -89,7 +93,8 @@ export type Command =
   | { type: "SELL_PROPERTY"; pos: number }
   | { type: "TRAVEL"; toPos: number }
   | { type: "PROPOSE_SWAP"; toId: string; give: SwapLeg; receive: SwapLeg }
-  | { type: "RESPOND_SWAP"; accept: boolean };
+  | { type: "RESPOND_SWAP"; accept: boolean }
+  | { type: "SURRENDER" };
 
 /**
  * A complete, localizable game event. `key` selects an i18n template; `params`
@@ -108,8 +113,15 @@ export interface ReduceResult {
   events: GameEvent[];
 }
 
+export interface GameSettings {
+  startingCapitalMult?: number; // default 1.0
+  buildingCostMult?: number;    // default 1.0
+  botDifficulty?: "easy" | "normal" | "hard"; // default "normal"
+}
+
 export interface NewGameOptions {
   boardId: string;
   seed: number;
   players: { id: string; name: string; isBot: boolean; color: string }[];
+  settings?: GameSettings;
 }

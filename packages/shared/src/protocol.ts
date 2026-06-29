@@ -1,5 +1,5 @@
 import pkg from "../../../package.json" with { type: "json" };
-import type { Command, GameState } from "./types.js";
+import type { Command, GameSettings, GameState } from "./types.js";
 
 export const VERSION: string = pkg.version;
 
@@ -19,6 +19,7 @@ export interface RoomPlayer {
   isBot: boolean;
   color?: string;
   figureIndex?: number;
+  ready: boolean;
 }
 
 // Available palette — client + server both import these to stay in sync.
@@ -35,6 +36,8 @@ export interface RoomView {
   host: string; // playerId of host
   players: RoomPlayer[];
   started: boolean;
+  settings: GameSettings;
+  canStart: boolean;
 }
 
 // ---- Wire messages ---------------------------------------------------------
@@ -49,7 +52,10 @@ export type ClientMessage =
   | { t: "listRooms" }
   | { t: "resume"; roomId: string; playerId: string; token: string }
   | { t: "setLocale"; locale: "de" | "en" }
-  | { t: "chooseFigure"; color: string; figureIndex: number };
+  | { t: "chooseFigure"; color: string; figureIndex: number }
+  | { t: "setReady"; ready: boolean }
+  | { t: "setGameSettings"; settings: GameSettings }
+  | { t: "newGame" };
 
 export interface FormattedEvent {
   key: string;
@@ -65,4 +71,5 @@ export type ServerMessage =
   | { t: "chat"; from: string; text: string }
   | { t: "error"; message: string }
   | { t: "gameOver"; winnerId: string; winnerName: string }
-  | { t: "resumed"; roomId: string; playerId: string };
+  | { t: "resumed"; roomId: string; playerId: string }
+  | { t: "turnTimer"; playerId: string; secondsLeft: number };

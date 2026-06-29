@@ -51,6 +51,7 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   swapAccepted: { from: "Alice", to: "Bob", giveProps: "Park Lane", giveMoney: 100, receiveProps: "Boardwalk", receiveMoney: 0 },
   swapDeclined: { from: "Alice", to: "Bob" },
   swapFailed: { from: "Alice", to: "Bob", reason: "insufficient funds" },
+  surrendered: { player: "Alice" },
   specialEvent_circus: { round: 2 },
   specialEvent_boom: { round: 2 },
   specialEvent_recession: { round: 2 },

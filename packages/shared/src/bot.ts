@@ -13,8 +13,15 @@ import type { Command, GameState } from "./types.js";
  * no group member is mortgaged (which blocks construction in the engine).
  */
 
-/** Minimum cash the bot tries to keep on hand before rolling. */
+/** Minimum cash the bot tries to keep on hand before rolling (normal difficulty). */
 const DANGER_THRESHOLD = 200;
+
+/** Per-difficulty thresholds and buy buffers. */
+const DIFFICULTY_CONFIG = {
+  easy:   { dangerThreshold: 400, buyBuffer: 400 }, // passive, keeps more cash
+  normal: { dangerThreshold: 200, buyBuffer: 200 },
+  hard:   { dangerThreshold: 100, buyBuffer: 50  }, // aggressive, low cash reserve
+} as const;
 
 /**
  * Returns whether a house on `pos` can be sold (even-sell rule):
@@ -80,6 +87,10 @@ export function botDecide(state: GameState): Command {
   const legal = legalCommands(state);
   const board = getBoard(state.boardId);
   const p = currentPlayer(state);
+  const diff = state.botDifficulty ?? "normal";
+  const cfg = DIFFICULTY_CONFIG[diff];
+  const threshold = cfg.dangerThreshold;
+  const buyBuffer = cfg.buyBuffer;
 
   if (state.phase === "awaiting-buy") {
     const pos = state.pendingPurchase!;
@@ -90,7 +101,7 @@ export function botDecide(state: GameState): Command {
     else if (tile.type === "attraction") price = board.rules.attraction.price;
 
     // Buy only if we can afford it while keeping a safety buffer
-    if (legal.includes("BUY_PROPERTY") && p.money >= price + DANGER_THRESHOLD) {
+    if (legal.includes("BUY_PROPERTY") && p.money >= price + buyBuffer) {
       return { type: "BUY_PROPERTY" };
     }
     return { type: "DECLINE_PROPERTY" };
@@ -105,7 +116,7 @@ export function botDecide(state: GameState): Command {
   }
 
   // --- Survive-bankruptcy: raise cash before rolling if critically low ---
-  if (p.money < DANGER_THRESHOLD) {
+  if (p.money < threshold) {
     // 1. Sell a building (hotel or factory first, then house if even-sell allows)
     if (legal.includes("SELL_BUILDING")) {
       for (const [posStr, ownerId] of Object.entries(state.ownership)) {
@@ -142,7 +153,7 @@ export function botDecide(state: GameState): Command {
     }
   }
 
-  // --- BUILD: only build when we'll still have >= DANGER_THRESHOLD after spending ---
+  // --- BUILD: only build when we'll still have >= threshold after spending ---
   if (legal.includes("BUILD")) {
     for (const [posStr, ownerId] of Object.entries(state.ownership)) {
       if (ownerId !== p.id) continue;
@@ -155,14 +166,14 @@ export function botDecide(state: GameState): Command {
 
       // Hotel upgrade: validate with engine-mirrored check
       if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {
-        if (p.money - tile.hotelCost >= DANGER_THRESHOLD) {
+        if (p.money - tile.hotelCost >= threshold) {
           return { type: "BUILD", pos, building: "hotel" };
         }
       }
 
       // House: validate with engine-mirrored check
       if (b.houses < 4 && canBuildHouseAt(state, board, pos)) {
-        if (p.money - tile.houseCost >= DANGER_THRESHOLD) {
+        if (p.money - tile.houseCost >= threshold) {
           return { type: "BUILD", pos, building: "house" };
         }
       }

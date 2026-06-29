@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { applyCommand, botDecide, currentPlayer, formatEvent } from "@laspoly/shared";
 import type { GameEvent, Locale } from "@laspoly/shared";
-import { RoomManager, GameRoom } from "./room.js";
+import { RoomManager, GameRoom, pickAutoAction } from "./room.js";
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
 const PORT = Number(process.env["PORT"] ?? 8080);
@@ -27,6 +27,7 @@ const MAX_WS_PAYLOAD = 8 * 1024;
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 1000;
 const PING_INTERVAL_MS = 30_000;
+const TURN_TIMER_SECONDS = 60;
 
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -105,6 +106,81 @@ const wss = new WebSocketServer({
 });
 
 const rooms = new RoomManager();
+
+// ---- Turn timer ------------------------------------------------------------
+
+/** Per-room turn timer handles: { timerId, playerId } */
+const turnTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; playerId: string }>();
+
+function cancelTurnTimer(roomId: string): void {
+  const existing = turnTimers.get(roomId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    turnTimers.delete(roomId);
+  }
+}
+
+function scheduleTurnTimer(room: GameRoom): void {
+  if (!room.state || room.state.phase === "finished") return;
+  const cp = currentPlayer(room.state);
+  // Only start timer for human (connected) players
+  const lobby = room.players.find((p) => p.id === cp.id);
+  if (cp.isBot || !lobby || !lobby.connected) return;
+
+  cancelTurnTimer(room.id);
+  const playerId = cp.id;
+  let secondsLeft = TURN_TIMER_SECONDS;
+
+  // Broadcast initial timer to room
+  broadcastToRoom(room, { t: "turnTimer", playerId, secondsLeft });
+
+  const tick = (): void => {
+    secondsLeft -= 1;
+    if (!room.state || room.state.phase === "finished") {
+      cancelTurnTimer(room.id);
+      return;
+    }
+    // Check player is still current and connected
+    const nowCp = currentPlayer(room.state);
+    if (nowCp.id !== playerId) {
+      cancelTurnTimer(room.id);
+      return;
+    }
+    if (secondsLeft > 0) {
+      broadcastToRoom(room, { t: "turnTimer", playerId, secondsLeft });
+      const timer = setTimeout(tick, 1000);
+      timer.unref?.();
+      turnTimers.set(room.id, { timer, playerId });
+      return;
+    }
+    // Timer expired: apply auto-action
+    turnTimers.delete(room.id);
+    try {
+      const action = pickAutoAction(room.state, playerId);
+      if (action) {
+        const result = applyCommand(room.state, action);
+        room.state = result.state;
+        log(`room:${room.id} AFK auto-action for ${nowCp.name}: ${action.type}`);
+        broadcastState(room, result.events);
+        if (room.state.phase === "finished" && room.state.winnerId) {
+          const winner = room.state.players.find((p) => p.id === room.state!.winnerId);
+          if (winner) {
+            broadcastToRoom(room, { t: "gameOver", winnerId: winner.id, winnerName: winner.name });
+          }
+          return;
+        }
+        if (room.currentIsBot()) scheduleBotSteps(room);
+        else scheduleTurnTimer(room);
+      }
+    } catch (err) {
+      log(`room:${room.id} AFK auto-action error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const timer = setTimeout(tick, 1000);
+  timer.unref?.();
+  turnTimers.set(room.id, { timer, playerId });
+}
 
 interface ConnState {
   roomId: string | null;
@@ -237,7 +313,12 @@ function scheduleBotSteps(room: GameRoom, delayMs = 700): void {
       if (ev.key === "bankrupt") log(`room:${room.id} ${cp.name} went bankrupt`);
     }
 
-    scheduleBotSteps(room, delayMs);
+    if (room.currentIsBot()) {
+      scheduleBotSteps(room, delayMs);
+    } else {
+      // Human's turn now — start the turn timer
+      scheduleTurnTimer(room);
+    }
   }, delayMs);
 }
 
@@ -318,6 +399,7 @@ function validateCommand(cmd: unknown): string | null {
       if (!isBool(cmd["accept"])) return "RESPOND_SWAP.accept must be a boolean";
       break;
     }
+    case "SURRENDER": break;
     default: return `unknown command type: ${String(type)}`;
   }
   return null;
@@ -499,15 +581,14 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (!room) throw new Error("Room not found");
       if (room.host !== cs.playerId) throw new Error("Only the host can start the game");
       if (room.started) throw new Error("Already started");
-      const humanCount = room.players.filter((p) => !p.isBot).length;
-      const totalPlayers = humanCount + room.botCount;
-      if (totalPlayers < 2) throw new Error("Mindestens 2 Spieler nötig");
+      if (!room.canStart()) throw new Error("Not all players are ready");
       const seed = Date.now();
       room.start(seed);
       log(`room:${room.id} game started (${room.state!.players.length} players, seed:${seed})`);
       broadcastState(room, []);
       broadcastRoomList();
       if (room.currentIsBot()) scheduleBotSteps(room);
+      else scheduleTurnTimer(room);
       break;
     }
 
@@ -519,6 +600,8 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (cmdError) throw new Error(cmdError);
       const player = room.players.find((p) => p.id === cs.playerId);
       log(`room:${room.id} ${player?.nickname ?? cs.playerId} → ${msg.command.type}`);
+      // Human acted: cancel their turn timer
+      cancelTurnTimer(room.id);
       let rawEvents = room.applyHumanCommand(cs.playerId, msg.command);
 
       // If a PROPOSE_SWAP was directed at a bot, resolve the bot's response immediately
@@ -547,6 +630,9 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         broadcastRoomList();
       } else if (room.currentIsBot()) {
         scheduleBotSteps(room);
+      } else {
+        // Still a human's turn (e.g. management command didn't advance turn) — restart timer
+        scheduleTurnTimer(room);
       }
       break;
     }
@@ -618,6 +704,61 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex);
       if (err) throw new Error(err);
       broadcastToRoom(room, { t: "room", room: room.toView() });
+      break;
+    }
+
+    case "setReady": {
+      if (!cs.roomId || !cs.playerId) throw new Error("Not in a room");
+      const room = rooms.get(cs.roomId);
+      if (!room) throw new Error("Room not found");
+      if (!isBool(msg.ready)) throw new Error("ready must be a boolean");
+      const err = room.setReady(cs.playerId, msg.ready);
+      if (err) throw new Error(err);
+      broadcastToRoom(room, { t: "room", room: room.toView() });
+      break;
+    }
+
+    case "setGameSettings": {
+      if (!cs.roomId || !cs.playerId) throw new Error("Not in a room");
+      const room = rooms.get(cs.roomId);
+      if (!room) throw new Error("Room not found");
+      if (room.host !== cs.playerId) throw new Error("Only the host can change settings");
+      if (room.started) throw new Error("Game already started");
+      if (!isObj(msg.settings)) throw new Error("settings must be an object");
+      const s = msg.settings;
+      const settings: import("@laspoly/shared").GameSettings = {};
+      if (s["startingCapitalMult"] !== undefined) {
+        if (typeof s["startingCapitalMult"] !== "number" || s["startingCapitalMult"] <= 0)
+          throw new Error("startingCapitalMult must be a positive number");
+        settings.startingCapitalMult = s["startingCapitalMult"] as number;
+      }
+      if (s["buildingCostMult"] !== undefined) {
+        if (typeof s["buildingCostMult"] !== "number" || s["buildingCostMult"] <= 0)
+          throw new Error("buildingCostMult must be a positive number");
+        settings.buildingCostMult = s["buildingCostMult"] as number;
+      }
+      if (s["botDifficulty"] !== undefined) {
+        if (!["easy", "normal", "hard"].includes(s["botDifficulty"] as string))
+          throw new Error("botDifficulty must be 'easy', 'normal', or 'hard'");
+        settings.botDifficulty = s["botDifficulty"] as "easy" | "normal" | "hard";
+      }
+      room.updateSettings(settings);
+      broadcastToRoom(room, { t: "room", room: room.toView() });
+      break;
+    }
+
+    case "newGame": {
+      if (!cs.roomId || !cs.playerId) throw new Error("Not in a room");
+      const room = rooms.get(cs.roomId);
+      if (!room) throw new Error("Room not found");
+      if (room.host !== cs.playerId) throw new Error("Only the host can start a new game");
+      if (!room.started || room.state?.phase !== "finished") throw new Error("Game is not finished yet");
+      cancelTurnTimer(room.id);
+      const newSeed = Date.now();
+      room.restart(newSeed);
+      log(`room:${room.id} restarted (seed:${newSeed})`);
+      broadcastState(room, []);
+      broadcastRoomList();
       break;
     }
 

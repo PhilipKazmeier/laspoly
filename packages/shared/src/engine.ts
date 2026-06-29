@@ -117,11 +117,15 @@ const STATION_POSITIONS = [5, 15, 25, 35];
 export function createGame(opts: NewGameOptions): GameState {
   const board = getBoard(opts.boardId);
   if (opts.players.length < 2) throw new Error("Need at least 2 players");
+  const startingCapitalMult = opts.settings?.startingCapitalMult ?? 1.0;
+  const buildingCostMult = opts.settings?.buildingCostMult ?? 1.0;
+  const botDifficulty = opts.settings?.botDifficulty ?? "normal";
+  const initialMoney = Math.round(board.rules.initialCapital * startingCapitalMult);
   const players: PlayerState[] = opts.players.map((p) => ({
     id: p.id,
     name: p.name,
     isBot: p.isBot,
-    money: board.rules.initialCapital,
+    money: initialMoney,
     position: 0,
     inJail: false,
     jailTurns: 0,
@@ -156,6 +160,8 @@ export function createGame(opts: NewGameOptions): GameState {
     activeEvent: firstEvent,
     builtThisTurn: false,
     traveledThisTurn: false,
+    buildingCostMult,
+    botDifficulty,
   };
 }
 
@@ -345,19 +351,27 @@ export function legalCommands(state: GameState): Command["type"][] {
 
 /**
  * Returns command types that are legal for the given player in the current state.
- * For the current player this delegates to legalCommands(). For the swap target
- * it additionally returns RESPOND_SWAP when there is a pending swap addressed to them.
+ * For the current player this delegates to legalCommands() and adds SURRENDER.
+ * For the swap target it returns RESPOND_SWAP.
+ * SURRENDER is always legal for any alive player (server routes it via applySurrender
+ * for out-of-turn players, bypassing this check for non-current players).
  */
 export function legalCommandsFor(state: GameState, playerId: string): Command["type"][] {
+  if (state.phase === "finished") return [];
+  const player = state.players.find((p) => p.id === playerId);
   const cp = state.players[state.currentPlayerIndex];
   if (cp && cp.id === playerId) {
-    return legalCommands(state);
+    const cmds = legalCommands(state);
+    // SURRENDER always available to current alive player
+    if (player?.alive && !cmds.includes("SURRENDER")) cmds.push("SURRENDER");
+    return cmds;
   }
-  // Non-current player: only legal action is responding to a swap addressed to them
+  // Non-current player
+  const extra: Command["type"][] = [];
   if (state.pendingSwap && state.pendingSwap.toId === playerId) {
-    return ["RESPOND_SWAP"];
+    extra.push("RESPOND_SWAP");
   }
-  return [];
+  return extra;
 }
 
 // ---- rent ---------------------------------------------------------------
@@ -925,18 +939,20 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
 
       if (command.building === 'house') {
         if (!canConstructHouse(state, board, pos)) throw new Error('Cannot build house here (even-build rule or other restriction)');
-        const cost = state.activeEvent?.id === 'buildingSale'
+        const baseCost = state.activeEvent?.id === 'buildingSale'
           ? Math.floor(st.houseCost / 2)
           : st.houseCost;
+        const cost = Math.round(baseCost * state.buildingCostMult);
         if (p.money < cost) throw new Error('Cannot afford house');
         p.money -= cost;
         b.houses += 1;
         events.push({ key: 'built', params: { player: p.name, building: 'house', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'hotel') {
         if (!canConstructHotel(state, board, pos)) throw new Error('Cannot build hotel here');
-        const cost = state.activeEvent?.id === 'buildingSale'
+        const baseCost = state.activeEvent?.id === 'buildingSale'
           ? Math.floor(st.hotelCost / 2)
           : st.hotelCost;
+        const cost = Math.round(baseCost * state.buildingCostMult);
         if (p.money < cost) throw new Error('Cannot afford hotel');
         p.money -= cost;
         b.houses = 0;
@@ -945,9 +961,10 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         events.push({ key: 'built', params: { player: p.name, building: 'hotel', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'factory') {
         if (!canConstructFactory(state, board, pos)) throw new Error('Cannot build factory here');
-        const cost = state.activeEvent?.id === 'buildingSale'
+        const baseCost = state.activeEvent?.id === 'buildingSale'
           ? Math.floor(st.factoryCost / 2)
           : st.factoryCost;
+        const cost = Math.round(baseCost * state.buildingCostMult);
         if (p.money < cost) throw new Error('Cannot afford factory');
         p.money -= cost;
         b.houses = 0;
@@ -1143,6 +1160,21 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       break;
     }
 
+    case "SURRENDER": {
+      // Surrenders the current player (validated upstream; room.ts uses applySurrender for non-turn players)
+      const surrenderer = currentPlayer(state);
+      if (!surrenderer.alive) throw new Error("Player is already eliminated");
+      events.push({ key: "surrendered", params: { player: surrenderer.name }, playerId: surrenderer.id });
+      bankrupt(state, board, surrenderer, events);
+      if (state.pendingSwap && (state.pendingSwap.fromId === surrenderer.id || state.pendingSwap.toId === surrenderer.id)) {
+        state.pendingSwap = null;
+      }
+      if (!checkWin(state, events)) {
+        continueOrAdvance(state, events);
+      }
+      break;
+    }
+
     case "RESPOND_SWAP": {
       const swap = state.pendingSwap;
       if (!swap) throw new Error("No pending swap offer");
@@ -1315,4 +1347,66 @@ export function canTravelFrom(state: GameState, playerId: string): number[] {
   return STATION_POSITIONS.filter((s) => s !== player.position);
 }
 
+/**
+ * Surrender a player by id (even if it's not their turn).
+ * Used by the server for out-of-turn surrenders.
+ */
+export function applySurrender(prev: GameState, playerId: string): ReduceResult {
+  const state: GameState = structuredClone(prev);
+  const board = getBoard(state.boardId);
+  const events: GameEvent[] = [];
+  if (state.phase === "finished") throw new Error("Game is finished");
+  const player = playerById(state, playerId);
+  if (!player) throw new Error("Player not found");
+  if (!player.alive) throw new Error("Player is already eliminated");
+  events.push({ key: "surrendered", params: { player: player.name }, playerId: player.id });
+  bankrupt(state, board, player, events);
+  if (state.pendingSwap && (state.pendingSwap.fromId === playerId || state.pendingSwap.toId === playerId)) {
+    state.pendingSwap = null;
+  }
+  if (!checkWin(state, events)) {
+    // If the surrendered player was the current player, advance turn
+    const isCurrentPlayer = state.players[state.currentPlayerIndex]?.id === playerId || !player.alive;
+    // After bankrupt(), player.alive is false. Check if it was the current player.
+    const wasCurrentPlayer = prev.players[prev.currentPlayerIndex]?.id === playerId;
+    if (wasCurrentPlayer) {
+      continueOrAdvance(state, events);
+    }
+  }
+  return { state, events };
+}
+
 export { mortgageValue, tilePrice };
+
+/**
+ * Net worth of a player: cash + sum of property values (buildings at sell-back price,
+ * mortgaged properties valued at 0 for their equity since they're encumbered).
+ * Matches the values the engine uses for selling/building.
+ */
+export function netWorth(state: GameState, playerId: string): number {
+  const player = playerById(state, playerId);
+  if (!player) return 0;
+  const board = getBoard(state.boardId);
+  let total = player.money;
+  for (const [posStr, ownerId] of Object.entries(state.ownership)) {
+    if (ownerId !== playerId) continue;
+    const pos = Number(posStr);
+    if (state.mortgaged[pos]) continue; // mortgaged: no equity counted
+    const tile = board.tiles[pos];
+    if (!tile) continue;
+    // Property sell-back value: half the purchase price (mirrors SELL_PROPERTY)
+    total += Math.floor(tilePrice(board, tile) / 2);
+    const b = state.buildings[pos];
+    if (!b) continue;
+    if (tile.type === "street") {
+      const st = tile as import("./board.js").StreetTile;
+      // Hotel sell-back: st.mortgage (mirrors SELL_BUILDING hotel)
+      if (b.hotel) total += st.mortgage;
+      // Houses sell-back: st.mortgage per house
+      else if (b.houses > 0) total += b.houses * st.mortgage;
+      // Factory sell-back: st.houseCost (mirrors SELL_BUILDING factory)
+      else if (b.factory) total += st.houseCost;
+    }
+  }
+  return total;
+}
