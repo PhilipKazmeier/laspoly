@@ -14,6 +14,7 @@ import {
   AbstractMesh,
   Mesh,
   SceneLoader,
+  MultiMaterial,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
@@ -82,6 +83,10 @@ function brighten(c: Color3, target = 0.95): Color3 {
 // Coordinate helpers (mirrored from Board.java, scaled 20/1200 ≈ 0.01667)
 // ---------------------------------------------------------------------------
 const SCALE = 20 / 1200; // 1 Java unit → 0.01667 Babylon units
+
+// Station tile positions (mirror of engine.ts STATION_POSITIONS) used to detect
+// station→station TRAVEL and play the subway dive/emerge animation.
+const STATION_POSITIONS = new Set([5, 15, 25, 35]);
 
 // Regular tile: 100 J wide × 150 J deep
 const TILE_W = 100 * SCALE; // ≈ 1.667
@@ -200,10 +205,8 @@ export class Board3D {
   // Interaction hooks
   private rollHandler: (() => void) | null = null;
   private tileClickHandler: ((pos: number) => void) | null = null;
-  // Dice cup visibility + dice value labels
+  // Dice cup visibility
   private cupVisible = true;
-  private diePipLabel1: AbstractMesh | null = null;
-  private diePipLabel2: AbstractMesh | null = null;
   // Token moves deferred until the dice animation settles
   private movePending: Map<string, { from: number; to: number }> = new Map();
   // Resolvers for animateMoveAsync
@@ -486,8 +489,9 @@ export class Board3D {
     tileD: number,
     angleDeg: number
   ) {
-    const TEX_W = 256;
-    const TEX_H = isCorner ? 256 : 128;
+    // Higher-resolution texture so labels read crisply in standard AND top-down.
+    const TEX_W = 512;
+    const TEX_H = isCorner ? 512 : 256;
 
     const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, false);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
@@ -502,19 +506,20 @@ export class Board3D {
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "bold 40px Arial";
+      ctx.font = "bold 110px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
       // Street / station / attraction: HORIZONTAL text, word-wrapped onto up to
-      // 3 lines, drawn near the top of the texture (which maps to just inside the
+      // 3 lines, vertically centred in the label region (which sits clear of the
       // inner colour bar once the plane is positioned).
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      const FONT_SIZE = 16;
-      const LINE_H = 20;
+      ctx.textBaseline = "middle";
+      const FONT_SIZE = 56;
+      const SMALL_SIZE = 42;
+      const LINE_H = 64;
       ctx.font = `bold ${FONT_SIZE}px Arial`;
-      const MAX_W = TEX_W - 16;
+      const MAX_W = TEX_W - 24;
       const words = name.split(" ");
       const lines: string[] = [];
       let current = "";
@@ -529,32 +534,37 @@ export class Board3D {
       }
       if (current) lines.push(current);
       // Shrink slightly if it spills past 2 lines so 3 lines still fit.
-      ctx.font = lines.length > 2 ? `bold 13px Arial` : `bold ${FONT_SIZE}px Arial`;
-      const startY = 10;
-      for (let i = 0; i < Math.min(lines.length, 3); i++) {
+      ctx.font = lines.length > 2 ? `bold ${SMALL_SIZE}px Arial` : `bold ${FONT_SIZE}px Arial`;
+      const shown = Math.min(lines.length, 3);
+      const startY = TEX_H / 2 - ((shown - 1) * LINE_H) / 2;
+      for (let i = 0; i < shown; i++) {
         ctx.fillText(lines[i]!, TEX_W / 2, startY + i * LINE_H);
       }
     }
 
     tex.update();
 
-    // Plane on top of the tile, occupying the inner portion (below the bar).
+    // Plane sits in the INNER region of the tile (between the colour bar on the
+    // inner edge and the tile centre) so the colour bar never covers the name.
     const BAR_DEPTH = 0.4;
-    const labelDepth = tileD - BAR_DEPTH;
-    const planeW = isCorner ? CORNER * 0.88 : TILE_W * 0.88;
-    const planeH = isCorner ? CORNER * 0.88 : labelDepth * 0.85;
+    const labelRegionDepth = tileD - BAR_DEPTH;
+    const planeW = isCorner ? CORNER * 0.9 : TILE_W * 0.9;
+    const planeH = isCorner ? CORNER * 0.9 : labelRegionDepth * 0.9;
     const label = MeshBuilder.CreatePlane(
       `label_${pos}`,
       { width: planeW, height: planeH },
       this.scene
     );
     label.rotation.x = Math.PI / 2; // lie flat
-    // Read upright from the outer edge: top (21–29) & left (31–39) edges need +180°
-    // so the horizontal text isn't upside-down when viewed from outside the ring.
-    const textAngleDeg = (!isCorner && pos >= 21 && pos <= 39) ? angleDeg + 180 : angleDeg;
+    // Orientation so the name reads UPRIGHT from the default camera (which looks
+    // from the south edge toward +Z). Bottom (1–9) and right (11–19) edges read
+    // upright at their natural tile angle; top (21–29) and left (31–39) edges
+    // need a 180° flip so the text isn't upside-down.
+    const needsFlip = !isCorner && pos >= 20 && pos <= 39;
+    const textAngleDeg = needsFlip ? angleDeg + 180 : angleDeg;
     label.rotation.y = (textAngleDeg * Math.PI) / 180;
     // Shift toward the board centre (opposite the outer edge) so the label sits
-    // below the inner colour bar rather than centred on the tile.
+    // clear of the inner colour bar rather than centred on the whole tile.
     const [odx, odz] = outerDirection(pos);
     const innerShift = isCorner ? 0 : BAR_DEPTH / 2;
     label.position.set(cx - odx * innerShift, 0.096, cz - odz * innerShift);
@@ -817,6 +827,47 @@ export class Board3D {
     void myId;
   }
 
+  /**
+   * Ensure a token mesh (+ label + ring) exists for `playerId`, positioned at the
+   * player's CURRENT tile, before an animation begins. Used by the serial state
+   * queue so animateMoveAsync always has a mesh to move. No-op if it exists.
+   */
+  ensureTokenExists(playerId: string, state: GameState, _myId: string | null): void {
+    if (this.tokenMeshes.has(playerId)) return;
+    const player = state.players.find((p) => p.id === playerId);
+    if (!player) return;
+    const color = playerColor3(player.color);
+    const carIdx = (state.players.indexOf(player) % 5) + 1;
+    const mesh = this.carsLoaded
+      ? (this.cloneCarToken(carIdx, color, playerId) ?? this.makeFallbackToken(playerId, color))
+      : this.makeFallbackToken(playerId, color);
+    this.tokenMeshes.set(playerId, mesh);
+    if (!this.tokenLabels.has(playerId)) {
+      this.addTokenLabel(playerId, player.name, player.color);
+    }
+    const [x, z] = tileXZ(player.position);
+    mesh.position.set(x, 0.35, z);
+    const lbl = this.tokenLabels.get(playerId);
+    if (lbl) lbl.position.set(x, 1.1, z);
+    let ring = this.tokenRings.get(playerId);
+    if (!ring) {
+      const ringColor = brighten(playerColor3(player.color));
+      ring = MeshBuilder.CreateTorus(
+        `ring_${playerId}`,
+        { diameter: 0.55, thickness: 0.12, tessellation: 16 },
+        this.scene
+      );
+      const ringMat = new StandardMaterial(`ringMat_${playerId}`, this.scene);
+      ringMat.diffuseColor = ringColor.scale(0.3);
+      ringMat.emissiveColor = ringColor;
+      ringMat.specularColor = new Color3(0, 0, 0);
+      ring.material = ringMat;
+      ring.isPickable = false;
+      this.tokenRings.set(playerId, ring);
+    }
+    ring.position.set(x, 0.12, z);
+  }
+
   // -------------------------------------------------------------------------
   // Buildings
   // -------------------------------------------------------------------------
@@ -970,7 +1021,7 @@ export class Board3D {
       // Money
       ctx.fillStyle = "#facc15";
       ctx.font = "12px Arial";
-      ctx.fillText(`€${player.money.toLocaleString()}`, 18, 20);
+      ctx.fillText(`LPD ${player.money.toLocaleString()}`, 18, 20);
 
       // Owned property group colour chips
       let dotX = 4;
@@ -1070,10 +1121,27 @@ export class Board3D {
     }
   }
 
+  /**
+   * Bring the dice cup back when the turn advances to a player awaiting a roll
+   * (the cup was hidden after the previous roll settled). Called by the serial
+   * state queue (main.ts) using the previously-rendered state for comparison.
+   */
+  prepareCupForTurn(state: GameState, prev: GameState | null): void {
+    if (!prev) {
+      if (state.phase === "awaiting-roll") this.showCup();
+      return;
+    }
+    if (
+      state.phase === "awaiting-roll" &&
+      (prev.phase !== "awaiting-roll" || prev.currentPlayerIndex !== state.currentPlayerIndex)
+    ) {
+      this.showCup();
+    }
+  }
+
   /** Detect per-player position changes and enqueue movement / jail animations. */
   private applyStateDiffs(state: GameState) {
-    // When the turn advances to a new player awaiting a roll, bring the cup back
-    // (it was hidden after the previous roll) and clear the resting dice labels.
+    // When the turn advances to a new player awaiting a roll, bring the cup back.
     if (this.lastState) {
       const prevPhase = this.lastState.phase;
       const prevCurrentIdx = this.lastState.currentPlayerIndex;
@@ -1082,8 +1150,6 @@ export class Board3D {
         (prevPhase !== "awaiting-roll" || prevCurrentIdx !== state.currentPlayerIndex)
       ) {
         this.showCup();
-        if (this.diePipLabel1) { this.diePipLabel1.dispose(); this.diePipLabel1 = null; }
-        if (this.diePipLabel2) { this.diePipLabel2.dispose(); this.diePipLabel2 = null; }
       }
     }
 
@@ -1156,9 +1222,78 @@ export class Board3D {
 
   /** Enqueues a token move from `from` to `to` and resolves when the token arrives at `to`. */
   animateMoveAsync(playerId: string, from: number, to: number): Promise<void> {
+    // Station → station TRAVEL: dive underground and emerge at the destination
+    // instead of walking the ring. forwardDist > 4 excludes the rare adjacent
+    // dice-step between neighbouring stations.
+    const RING = 40;
+    const forwardDist = (((to - from) % RING) + RING) % RING;
+    if (STATION_POSITIONS.has(from) && STATION_POSITIONS.has(to) && forwardDist > 4) {
+      return this.animateSubwayTravel(playerId, from, to);
+    }
     return new Promise<void>((resolve) => {
       this.moveResolvers.set(playerId, resolve);
       this.enqueueMove(playerId, from, to);
+    });
+  }
+
+  /**
+   * Subway-style travel: the token dives DOWN below the board (subway entrance),
+   * teleports to the destination station while hidden underground, then emerges
+   * UP at the destination. One self-contained queued animation that resolves on
+   * completion (so the serial queue can await it).
+   */
+  private animateSubwayTravel(playerId: string, _from: number, to: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const mesh = this.tokenMeshes.get(playerId);
+      const lbl = this.tokenLabels.get(playerId);
+      const ring = this.tokenRings.get(playerId);
+      if (!mesh) { resolve(); return; }
+
+      const [destX, destZ] = tileXZ(to);
+      const DIVE_MS = 420;
+      const EMERGE_MS = 420;
+      const startY = mesh.position.y; // ≈ 0.35
+      const UNDERGROUND = -1.6;
+      let phase: "dive" | "emerge" = "dive";
+      let elapsed = 0;
+      let lastTime = performance.now();
+
+      const obs = this.scene.onBeforeRenderObservable.add(() => {
+        const now = performance.now();
+        elapsed += now - lastTime;
+        lastTime = now;
+
+        if (phase === "dive") {
+          const t = Math.min(elapsed / DIVE_MS, 1);
+          mesh.position.y = startY + (UNDERGROUND - startY) * t;
+          mesh.rotation.y = t * Math.PI * 4; // spin while descending
+          if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
+          if (ring) ring.position.y = mesh.position.y;
+          if (t >= 1) {
+            // Teleport to destination while invisible underground.
+            mesh.position.x = destX;
+            mesh.position.z = destZ;
+            if (lbl) { lbl.position.x = destX; lbl.position.z = destZ; }
+            if (ring) { ring.position.x = destX; ring.position.z = destZ; }
+            phase = "emerge";
+            elapsed = 0;
+          }
+        } else {
+          const t = Math.min(elapsed / EMERGE_MS, 1);
+          mesh.position.y = UNDERGROUND + (startY - UNDERGROUND) * t;
+          mesh.rotation.y = (1 - t) * Math.PI * 4;
+          if (lbl) lbl.position.set(destX, mesh.position.y + 0.8, destZ);
+          if (ring) ring.position.set(destX, 0.12, destZ);
+          if (t >= 1) {
+            mesh.position.set(destX, startY, destZ);
+            mesh.rotation.y = 0;
+            if (lbl) lbl.position.set(destX, 1.1, destZ);
+            if (ring) ring.position.set(destX, 0.12, destZ);
+            this.scene.onBeforeRenderObservable.remove(obs);
+            resolve();
+          }
+        }
+      });
     });
   }
 
@@ -1238,40 +1373,6 @@ export class Board3D {
     this.cupVisible = false;
   }
 
-  /**
-   * Show a guaranteed-correct pip value as a billboard above a resting die.
-   * Drawing the number on a DynamicTexture sidesteps any uncertainty about the
-   * rounded-dice.obj face layout — the shown value always matches the roll.
-   */
-  private showDiceValue(labelRef: "die1" | "die2", value: number, x: number, z: number) {
-    const existing = labelRef === "die1" ? this.diePipLabel1 : this.diePipLabel2;
-    if (existing) existing.dispose();
-
-    const tex = new DynamicTexture(`pipTex_${labelRef}`, { width: 64, height: 64 }, this.scene, false);
-    const ctx = tex.getContext() as CanvasRenderingContext2D;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, 64, 64);
-    ctx.fillStyle = "#111111";
-    ctx.font = "bold 36px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(value), 32, 32);
-    tex.update();
-
-    const plane = MeshBuilder.CreatePlane(`pipLabel_${labelRef}`, { width: 0.45, height: 0.45 }, this.scene);
-    plane.position.set(x, 0.55, z);
-    plane.billboardMode = 7;
-    const mat = new StandardMaterial(`pipMat_${labelRef}`, this.scene);
-    mat.diffuseTexture = tex;
-    mat.backFaceCulling = false;
-    mat.emissiveColor = new Color3(1, 1, 1);
-    plane.material = mat;
-    plane.isPickable = false;
-
-    if (labelRef === "die1") this.diePipLabel1 = plane;
-    else this.diePipLabel2 = plane;
-  }
-
   private async initDice(): Promise<void> {
     // Felt centre is empty except the jail cage (origin) and deck (+4,+4).
     // Place the dice area in the opposite felt corner so it stays on-screen.
@@ -1316,54 +1417,90 @@ export class Board3D {
       this.diceCupMesh = fallbackCup;
     }
 
+    // Pip dice — built procedurally as cubes whose six faces carry real pip
+    // patterns (1–6 dots). No OBJ / number-overlay needed.
+    const DIE_SIZE = 0.45;
     for (let d = 0; d < 2; d++) {
       const dx = CX + (d === 0 ? -0.3 : 0.3);
       const dz = CZ + (d === 0 ? -0.12 : 0.12);
-      try {
-        const diceResult = await SceneLoader.ImportMeshAsync("", "/assets/", "rounded-dice.obj", this.scene);
-        const diceReal = diceResult.meshes.filter(
-          (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
-        );
-        const die = diceReal.length === 1
-          ? diceReal[0]!
-          : Mesh.MergeMeshes(diceReal, true, true, undefined, false, false);
-        if (die) {
-          const dieMat = new StandardMaterial(`dieMat_${d}`, this.scene);
-          dieMat.diffuseColor = new Color3(0.95, 0.95, 0.92);
-          dieMat.specularColor = new Color3(0.2, 0.2, 0.2);
-          die.material = dieMat;
-          // Normalise raw die (~2.5 units) to a ~0.5-unit die.
-          const ext = die.getBoundingInfo().boundingBox.extendSize;
-          const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
-          die.scaling.setAll(0.5 / maxDim);
-          die.isPickable = false;
-          die.position.set(dx, 0.25, dz);
-          if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
-        } else {
-          throw new Error("no die mesh");
-        }
-      } catch {
-        const fb = MeshBuilder.CreateBox(`dieFb_${d}`, { width: 0.45, height: 0.45, depth: 0.45 }, this.scene);
-        fb.position.set(dx, 0.25, dz);
-        const dieMat = new StandardMaterial(`dieMatFb_${d}`, this.scene);
-        dieMat.diffuseColor = new Color3(0.95, 0.95, 0.95);
-        fb.material = dieMat;
-        if (d === 0) this.dieMesh1 = fb; else this.dieMesh2 = fb;
-      }
+      const die = this.createPipDie(`die_${d}`, DIE_SIZE);
+      die.isPickable = false;
+      die.position.set(dx, 0.25, dz);
+      if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
     }
   }
 
-  /** Rotate a die mesh so the given face value faces up. */
-  private orientDie(mesh: AbstractMesh, face: number) {
-    const PI = Math.PI;
-    const H = PI / 2;
-    switch (face) {
-      case 1: mesh.rotation.set(0, 0, 0); break;
-      case 2: mesh.rotation.set(H, 0, 0); break;
-      case 3: mesh.rotation.set(0, 0, -H); break;
-      case 4: mesh.rotation.set(0, 0, H); break;
-      case 5: mesh.rotation.set(-H, 0, 0); break;
-      case 6: mesh.rotation.set(PI, 0, 0); break;
+  /** Draw a standard Western die pip pattern for `value` (1–6) onto a W×H canvas. */
+  private drawPipFace(ctx: CanvasRenderingContext2D, value: number, W: number, H: number) {
+    ctx.fillStyle = "#f4f4ee";
+    ctx.fillRect(0, 0, W, H);
+    // Thin border so adjacent faces read as separate.
+    ctx.strokeStyle = "#ccccc4";
+    ctx.lineWidth = W * 0.03;
+    ctx.strokeRect(0, 0, W, H);
+    ctx.fillStyle = "#161616";
+    const r = W * 0.1;   // pip radius
+    const m = W * 0.27;  // margin from edge to pip centre
+    const c = W / 2;     // centre
+    const dots: Array<[number, number]> = [];
+    if (value === 1) { dots.push([c, c]); }
+    if (value === 2) { dots.push([m, m], [W - m, H - m]); }
+    if (value === 3) { dots.push([m, m], [c, c], [W - m, H - m]); }
+    if (value === 4) { dots.push([m, m], [W - m, m], [m, H - m], [W - m, H - m]); }
+    if (value === 5) { dots.push([m, m], [W - m, m], [c, c], [m, H - m], [W - m, H - m]); }
+    if (value === 6) { dots.push([m, m], [W - m, m], [m, c], [W - m, c], [m, H - m], [W - m, H - m]); }
+    for (const [px, py] of dots) {
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /**
+   * Build a die cube with six DynamicTexture pip faces.
+   * Babylon CreateBox sub-mesh face order: +X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5.
+   * Base pose (no rotation): +Y(top)=1, +X=2, +Z=3; opposite faces sum to 7 so
+   * -Y=6, -X=5, -Z=4. orientDie() then rotates `value` onto +Y.
+   */
+  private createPipDie(name: string, size: number): Mesh {
+    const box = MeshBuilder.CreateBox(name, { size }, this.scene);
+    // pip value per face sub-mesh index [+X, -X, +Y, -Y, +Z, -Z]
+    const faceValues = [2, 5, 1, 6, 3, 4];
+
+    const multi = new MultiMaterial(`dieMat_${name}`, this.scene);
+    const TEX = 128;
+    for (let faceIdx = 0; faceIdx < 6; faceIdx++) {
+      const pipValue = faceValues[faceIdx]!;
+      const tex = new DynamicTexture(`dieTex_${name}_f${faceIdx}`, { width: TEX, height: TEX }, this.scene, false);
+      const fctx = tex.getContext() as CanvasRenderingContext2D;
+      this.drawPipFace(fctx, pipValue, TEX, TEX);
+      tex.update();
+      const mat = new StandardMaterial(`dieFaceMat_${name}_f${faceIdx}`, this.scene);
+      mat.diffuseTexture = tex;
+      mat.specularColor = new Color3(0.12, 0.12, 0.12);
+      mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
+      multi.subMaterials.push(mat);
+    }
+    box.material = multi;
+    // Map each face sub-mesh to its own sub-material.
+    if (box.subMeshes) {
+      for (let i = 0; i < box.subMeshes.length; i++) {
+        box.subMeshes[i]!.materialIndex = i;
+      }
+    }
+    return box;
+  }
+
+  /** Rotate a die so `value` pips face up. Base pose: +Y=1, +X=2, +Z=3, -Z=4, -X=5, -Y=6. */
+  private orientDie(mesh: AbstractMesh, value: number) {
+    const H = Math.PI / 2;
+    switch (value) {
+      case 1: mesh.rotation.set(0, 0, 0); break;        // +Y=1 already up
+      case 6: mesh.rotation.set(Math.PI, 0, 0); break;  // flip → -Y=6 up
+      case 2: mesh.rotation.set(0, 0, -H); break;       // +X=2 → up
+      case 5: mesh.rotation.set(0, 0, H); break;        // -X=5 → up
+      case 3: mesh.rotation.set(-H, 0, 0); break;       // +Z=3 → up
+      case 4: mesh.rotation.set(H, 0, 0); break;        // -Z=4 → up
     }
   }
 
@@ -1412,11 +1549,9 @@ export class Board3D {
         if (t >= 1) {
           elapsed = 0;
           phase = "settle";
-          // Cup vanishes; the two dice are revealed lying on the felt showing
-          // the actual rolled values (guaranteed-correct DynamicTexture faces).
+          // Cup vanishes; the two pip dice are revealed lying on the felt,
+          // oriented (in the settle phase) so the rolled value faces up.
           this.hideCup();
-          this.showDiceValue("die1", d1, cup.position.x - 0.3, cup.position.z - 0.12);
-          this.showDiceValue("die2", d2, cup.position.x + 0.3, cup.position.z + 0.12);
         }
       } else {
         const cx = cup.position.x;
