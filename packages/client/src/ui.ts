@@ -851,7 +851,7 @@ export class UI {
     }
   }
 
-  private appendEventLine(text: string) {
+  appendEventLine(text: string) {
     const line = document.createElement("div");
     line.className = "event-line";
     line.textContent = text;

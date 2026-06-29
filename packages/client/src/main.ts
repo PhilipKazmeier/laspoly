@@ -36,10 +36,14 @@ net.onMessage((msg) => {
       break;
     case "state":
       board3d.handleEvents(msg.events);
-      // Show action card popup if any actionCard* event in this batch
       for (const ev of msg.events) {
         if (ev.key.startsWith("actionCard")) {
-          ui.showActionCard(ev.text);
+          // Show popup only for the local player's own draw
+          if (ev.playerId && net.playerId && ev.playerId === net.playerId) {
+            ui.showActionCard(ev.text);
+          }
+          // For other players' draws: the event text is already in msg.events
+          // and will be appended to the log by updateGame → appendEventLine loop.
           break;
         }
       }
