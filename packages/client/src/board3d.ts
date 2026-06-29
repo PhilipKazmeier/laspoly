@@ -489,9 +489,9 @@ export class Board3D {
     tileD: number,
     angleDeg: number
   ) {
-    // Higher-resolution texture so labels read crisply in standard AND top-down.
-    const TEX_W = 512;
-    const TEX_H = isCorner ? 512 : 256;
+    // High-resolution texture so labels read crisply in standard AND top-down.
+    const TEX_W = 1024;
+    const TEX_H = isCorner ? 1024 : 512;
 
     const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, false);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
@@ -506,7 +506,7 @@ export class Board3D {
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "bold 110px Arial";
+      ctx.font = "bold 220px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
       // Street / station / attraction: HORIZONTAL text, word-wrapped onto up to
@@ -515,9 +515,9 @@ export class Board3D {
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const FONT_SIZE = 56;
-      const SMALL_SIZE = 42;
-      const LINE_H = 64;
+      const FONT_SIZE = 112;
+      const SMALL_SIZE = 84;
+      const LINE_H = 128;
       ctx.font = `bold ${FONT_SIZE}px Arial`;
       const MAX_W = TEX_W - 24;
       const words = name.split(" ");
@@ -556,13 +556,11 @@ export class Board3D {
       this.scene
     );
     label.rotation.x = Math.PI / 2; // lie flat
-    // Orientation so the name reads UPRIGHT from the default camera (which looks
-    // from the south edge toward +Z). Bottom (1–9) and right (11–19) edges read
-    // upright at their natural tile angle; top (21–29) and left (31–39) edges
-    // need a 180° flip so the text isn't upside-down.
-    const needsFlip = !isCorner && pos >= 20 && pos <= 39;
-    const textAngleDeg = needsFlip ? angleDeg + 180 : angleDeg;
-    label.rotation.y = (textAngleDeg * Math.PI) / 180;
+    // Orient so each name reads from OUTSIDE its edge (real-board convention):
+    // the top of the text points toward the outer edge. At the tile's natural
+    // angle this holds for all four edges — no per-edge flip (a flip is what made
+    // the top/left edges read upside-down).
+    label.rotation.y = (angleDeg * Math.PI) / 180;
     // Shift toward the board centre (opposite the outer edge) so the label sits
     // clear of the inner colour bar rather than centred on the whole tile.
     const [odx, odz] = outerDirection(pos);
@@ -573,7 +571,8 @@ export class Board3D {
     const labelMat = new StandardMaterial(`labelMat_${pos}`, this.scene);
     labelMat.diffuseTexture = tex;
     labelMat.backFaceCulling = false;
-    labelMat.emissiveColor = new Color3(0.05, 0.05, 0.05); // a touch of self-lit so text is legible
+    labelMat.specularColor = new Color3(0, 0, 0); // no shine → no top-down glare
+    labelMat.emissiveColor = new Color3(0.15, 0.15, 0.15); // a touch of self-lit so text is legible
     label.material = labelMat;
   }
 
