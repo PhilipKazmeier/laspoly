@@ -6,6 +6,7 @@ import {
   PointLight,
   DirectionalLight,
   Vector3,
+  Vector4,
   MeshBuilder,
   StandardMaterial,
   Color3,
@@ -14,7 +15,6 @@ import {
   AbstractMesh,
   Mesh,
   SceneLoader,
-  MultiMaterial,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
@@ -293,9 +293,8 @@ export class Board3D {
     );
     table.position.y = -0.45;
     const tableMat = new StandardMaterial("tableMat", this.scene);
-    // Try to apply a tiled wood-ish colour; no external wood texture required.
-    tableMat.diffuseColor = new Color3(0.45, 0.28, 0.12);
-    tableMat.specularColor = new Color3(0.15, 0.1, 0.05);
+    tableMat.diffuseTexture = this.makeWoodTexture();
+    tableMat.specularColor = new Color3(0.18, 0.12, 0.06);
     table.material = tableMat;
 
     // ---- Initial board -------------------------------------------------------
@@ -312,6 +311,75 @@ export class Board3D {
 
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  // -------------------------------------------------------------------------
+  // Wood texture (procedural planks/grain for the table)
+  // -------------------------------------------------------------------------
+  private makeWoodTexture(): DynamicTexture {
+    const W = 512, H = 512;
+    const tex = new DynamicTexture("woodTex", { width: W, height: H }, this.scene, true);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+
+    // Base warm brown
+    ctx.fillStyle = "#6b3d12";
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw horizontal wood planks (lighter grain lines)
+    const PLANK_H = 64; // px per plank
+    const NUM_PLANKS = Math.ceil(H / PLANK_H);
+    for (let p = 0; p < NUM_PLANKS; p++) {
+      const py = p * PLANK_H;
+      // Slight shade variation per plank
+      const shade = 0.85 + Math.sin(p * 1.7) * 0.1;
+      const r = Math.round(107 * shade);
+      const g = Math.round(61 * shade);
+      const b = Math.round(18 * shade);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, py, W, PLANK_H - 2);
+
+      // Grain lines within each plank
+      for (let gl = 0; gl < 8; gl++) {
+        const gy = py + (gl / 8) * (PLANK_H - 2);
+        const brightness = 0.9 + Math.sin(gl * 2.1 + p * 0.9) * 0.08;
+        const gr = Math.round(130 * brightness);
+        const gg = Math.round(74 * brightness);
+        const gb = Math.round(22 * brightness);
+        ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        // Slightly wavy grain line
+        ctx.moveTo(0, gy);
+        for (let x = 0; x <= W; x += 16) {
+          const waver = Math.sin((x / W) * Math.PI * 6 + p * 1.3 + gl * 0.8) * 2;
+          ctx.lineTo(x, gy + waver);
+        }
+        ctx.stroke();
+      }
+
+      // Plank gap (dark line between planks)
+      ctx.fillStyle = "#3a1e07";
+      ctx.fillRect(0, py + PLANK_H - 2, W, 2);
+    }
+
+    // Knot holes (circular dark spots)
+    const knots = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15], [W * 0.45, H * 0.65], [W * 0.85, H * 0.55]];
+    for (const [kx, ky] of knots) {
+      const grad = ctx.createRadialGradient(kx, ky, 2, kx, ky, 14);
+      grad.addColorStop(0, "rgba(30,12,3,0.85)");
+      grad.addColorStop(0.6, "rgba(60,28,8,0.5)");
+      grad.addColorStop(1, "rgba(107,61,18,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(kx, ky, 14, 10, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    tex.update();
+    // Tile the texture across the large table surface (scale factor on UV)
+    tex.uScale = 3;
+    tex.vScale = 3;
+    return tex;
   }
 
   // -------------------------------------------------------------------------
@@ -505,10 +573,12 @@ export class Board3D {
     tileD: number,
     angleDeg: number
   ) {
-    // High-resolution texture so labels read crisply in standard AND top-down.
-    // Streets use 2048 wide for maximum sharpness; corners stay 1024×1024.
-    const TEX_W = isCorner ? 1024 : 2048;
-    const TEX_H = isCorner ? 1024 : 512;
+    // For non-corner tiles: texture is wide (along the tile's long axis) and
+    // short (across the label region). 512×256 gives generous pixel density at
+    // the plane size used — bigger than this doesn't help since the plane itself
+    // is only ~1.5 × 1.8 Babylon units wide.
+    const TEX_W = isCorner ? 512 : 512;
+    const TEX_H = isCorner ? 512 : 256;
 
     const tex = new DynamicTexture(`labelTex_${pos}`, { width: TEX_W, height: TEX_H }, this.scene, false);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
@@ -523,21 +593,24 @@ export class Board3D {
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "bold 220px Arial";
+      ctx.font = "bold 160px Arial";
       ctx.fillText(label, TEX_W / 2, TEX_H / 2);
     } else {
-      // Street / station / attraction: HORIZONTAL text, word-wrapped onto up to
-      // 3 lines, vertically centred in the label region (which sits clear of the
-      // inner colour bar once the plane is positioned).
-      // Font sizes scale with texture width so text uses the full resolution.
+      // Street / station / attraction: large text centred, word-wrapped if needed.
+      // Try the full name at FONT_SIZE; shrink only if it doesn't fit in 1 line.
       ctx.fillStyle = "#111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const FONT_SIZE = Math.round(TEX_W * 0.055); // ~112 at 2048, ~56 at 1024
-      const SMALL_SIZE = Math.round(TEX_W * 0.041);  // ~84 at 2048
-      const LINE_H = Math.round(TEX_W * 0.063);       // ~128 at 2048
+
+      const FONT_SIZE = 96;       // px — generous so text is sharp & readable
+      const SMALL_SIZE = 72;      // fallback for long names needing 2 lines
+      const TINY_SIZE = 56;       // fallback for very long names needing 3 lines
+      const LINE_H_LARGE = 108;
+      const LINE_H_SMALL = 82;
+      const LINE_H_TINY = 64;
+      const MAX_W = TEX_W - 16;
+
       ctx.font = `bold ${FONT_SIZE}px Arial`;
-      const MAX_W = TEX_W - 24;
       const words = name.split(" ");
       const lines: string[] = [];
       let current = "";
@@ -551,26 +624,34 @@ export class Board3D {
         }
       }
       if (current) lines.push(current);
-      // Shrink slightly if it spills past 2 lines so 3 lines still fit.
-      ctx.font = lines.length > 2 ? `bold ${SMALL_SIZE}px Arial` : `bold ${FONT_SIZE}px Arial`;
+
+      // Choose font size so all lines fit inside the texture height
+      let fontSize = FONT_SIZE;
+      let lineH = LINE_H_LARGE;
+      if (lines.length >= 3) { fontSize = TINY_SIZE; lineH = LINE_H_TINY; }
+      else if (lines.length === 2) { fontSize = SMALL_SIZE; lineH = LINE_H_SMALL; }
+      ctx.font = `bold ${fontSize}px Arial`;
+
       const shown = Math.min(lines.length, 3);
-      const startY = TEX_H / 2 - ((shown - 1) * LINE_H) / 2;
+      const totalH = shown * lineH;
+      const startY = (TEX_H - totalH) / 2 + lineH / 2;
       for (let i = 0; i < shown; i++) {
-        ctx.fillText(lines[i]!, TEX_W / 2, startY + i * LINE_H);
+        ctx.fillText(lines[i]!, TEX_W / 2, startY + i * lineH);
       }
     }
 
     tex.update();
     // Anisotropic filtering reduces mip-map blurring when the label is viewed
     // at a shallow angle (standard view). 8× is well-supported and keeps labels sharp.
-    tex.anisotropicFilteringLevel = 8;
+    tex.anisotropicFilteringLevel = 16;
 
-    // Plane sits in the INNER region of the tile (between the colour bar on the
-    // inner edge and the tile centre) so the colour bar never covers the name.
+    // Plane covers the full label region of the tile (excluding the colour bar).
+    // The colour bar sits at the inner edge, so the label plane spans the rest
+    // of the tile width and depth for maximum text coverage.
     const BAR_DEPTH = 0.4;
     const labelRegionDepth = tileD - BAR_DEPTH;
-    const planeW = isCorner ? CORNER * 0.9 : TILE_W * 0.9;
-    const planeH = isCorner ? CORNER * 0.9 : labelRegionDepth * 0.9;
+    const planeW = isCorner ? CORNER * 0.9 : TILE_W * 0.92;
+    const planeH = isCorner ? CORNER * 0.9 : labelRegionDepth * 0.92;
     const label = MeshBuilder.CreatePlane(
       `label_${pos}`,
       { width: planeW, height: planeH },
@@ -579,8 +660,7 @@ export class Board3D {
     label.rotation.x = Math.PI / 2; // lie flat
     // Orient so each name reads from OUTSIDE its edge (real-board convention):
     // the top of the text points toward the outer edge. At the tile's natural
-    // angle this holds for all four edges — no per-edge flip (a flip is what made
-    // the top/left edges read upside-down).
+    // angle this holds for all four edges.
     label.rotation.y = (angleDeg * Math.PI) / 180;
     // Shift toward the board centre (opposite the outer edge) so the label sits
     // clear of the inner colour bar rather than centred on the whole tile.
@@ -593,7 +673,7 @@ export class Board3D {
     labelMat.diffuseTexture = tex;
     labelMat.backFaceCulling = false;
     labelMat.specularColor = new Color3(0, 0, 0); // no shine → no top-down glare
-    labelMat.emissiveColor = new Color3(0.15, 0.15, 0.15); // a touch of self-lit so text is legible
+    labelMat.emissiveColor = new Color3(0.2, 0.2, 0.2); // self-lit so text is legible
     label.material = labelMat;
   }
 
@@ -1461,80 +1541,45 @@ export class Board3D {
     this.cupVisible = false;
   }
 
-  private async initDice(): Promise<void> {
-    // Place the dice area in the felt corner opposite the card deck (+4,+4 in world).
-    // With the z-flip the near corner is at +z, so we use CZ = +3.5 to stay visible.
+  private initDice(): void {
+    // Place the dice area in the felt corner opposite the card deck.
+    // CZ = +3.5 puts it in the near (camera-facing) half of the felt.
     const CX = -3.5, CZ = 3.5;
-    // Cup sits at a fixed XZ spot on the felt.  The lift animation moves it straight
-    // up (Y only) and back — it never shifts horizontally.
-    const CUP_BASE_Y = 0.5; // rests on the felt surface
+    // Cup base Y so the bottom rim sits on the felt surface.
+    const CUP_BASE_Y = 0.02;
+    const CUP_HEIGHT = 2.2;  // clearly bigger than a single die
+    const CUP_R_TOP = 0.85;
+    const CUP_R_BOT = 0.65;
 
-    // Always build a clean procedural cup first (reliable > fancy OBJ).
-    const fallbackCup = MeshBuilder.CreateCylinder(
+    // Procedural cup: open-top truncated cone.
+    // Use backFaceCulling=false so both the outside and inside of the shell are
+    // visible (fixes the "half-rendered" bug where the interior was invisible).
+    const cup = MeshBuilder.CreateCylinder(
       "diceCup",
-      { diameterTop: 1.4, diameterBottom: 0.9, height: 1.8, tessellation: 16 },
+      { diameterTop: CUP_R_TOP * 2, diameterBottom: CUP_R_BOT * 2, height: CUP_HEIGHT, tessellation: 20, sideOrientation: Mesh.DOUBLESIDE },
       this.scene
     );
-    fallbackCup.position.set(CX, CUP_BASE_Y + 0.9, CZ); // y = base + half-height so bottom rests on felt
-    fallbackCup.isPickable = true; // click-to-roll
-    const cupMat = new StandardMaterial("cupMatFb", this.scene);
-    cupMat.diffuseColor = new Color3(0.22, 0.13, 0.05); // dark leather brown
-    cupMat.emissiveColor = new Color3(0.06, 0.03, 0.01);
-    cupMat.specularColor = new Color3(0.3, 0.2, 0.1);
-    fallbackCup.material = cupMat;
-    this.diceCupMesh = fallbackCup;
+    // Centre of the cylinder is at its mid-height, so shift up by half-height to rest on felt.
+    cup.position.set(CX, CUP_BASE_Y + CUP_HEIGHT / 2, CZ);
+    cup.isPickable = true; // click-to-roll
 
-    // Try to load the OBJ cup; if it works and looks reasonable, replace the procedural one.
-    try {
-      const cupResult = await SceneLoader.ImportMeshAsync("", "/assets/", "DiceCup.obj", this.scene);
-      const cupReal = cupResult.meshes.filter(
-        (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
-      );
-      const cup = cupReal.length === 1
-        ? cupReal[0]!
-        : Mesh.MergeMeshes(cupReal, true, true, undefined, false, false);
-      if (cup) {
-        const ext = cup.getBoundingInfo().boundingBox.extendSize;
-        const maxDim = Math.max(ext.x, ext.y, ext.z) * 2 || 1;
-        // Only accept the OBJ if it has reasonable geometry.
-        if (maxDim > 0.01 && maxDim < 50) {
-          const objMat = new StandardMaterial("cupMatObj", this.scene);
-          objMat.diffuseColor = new Color3(0.18, 0.12, 0.06);
-          objMat.specularColor = new Color3(0.4, 0.3, 0.2);
-          objMat.emissiveColor = new Color3(0.08, 0.05, 0.02);
-          cup.material = objMat;
-          // Scale to ~1.8 units tall (clearly bigger than a single die).
-          cup.scaling.setAll(1.8 / maxDim);
-          cup.name = "diceCupObj";
-          cup.isPickable = true;
-          cup.position.set(CX, CUP_BASE_Y + 0.9, CZ);
-          // Retire the procedural fallback and use the OBJ.
-          fallbackCup.dispose();
-          this.diceCupMesh = cup;
-        } else {
-          cup.dispose();
-        }
-      } else {
-        throw new Error("no cup mesh");
-      }
-    } catch {
-      // Keep procedural cup — already assigned above.
-    }
+    const cupMat = new StandardMaterial("cupMat", this.scene);
+    cupMat.diffuseColor = new Color3(0.22, 0.13, 0.05);  // dark leather brown
+    cupMat.emissiveColor = new Color3(0.08, 0.04, 0.01);
+    cupMat.specularColor = new Color3(0.35, 0.22, 0.12);
+    cupMat.backFaceCulling = false; // double-sided so interior shows
+    cup.material = cupMat;
+    this.diceCupMesh = cup;
 
-    // Ensure the cup's name is "diceCup" so the click picker finds it.
-    if (this.diceCupMesh) this.diceCupMesh.name = "diceCup";
-
-    // Pip dice — built procedurally as cubes with real pip-face textures.
-    // They start HIDDEN below the felt (y < 0) and only become visible after
-    // the cup lifts away.
-    const DIE_SIZE = 0.45;
+    // Pip dice — atlas-textured cubes with distinct faces for 1–6.
+    // They start hidden below the felt and only surface after the cup lifts.
+    const DIE_SIZE = 0.48;
     for (let d = 0; d < 2; d++) {
-      const dx = CX + (d === 0 ? -0.3 : 0.3);
-      const dz = CZ + (d === 0 ? -0.12 : 0.12);
+      const dx = CX + (d === 0 ? -0.32 : 0.32);
+      const dz = CZ + (d === 0 ? -0.14 : 0.14);
       const die = this.createPipDie(`die_${d}`, DIE_SIZE);
       die.isPickable = false;
-      // Hide below the felt until the cup lifts away.
-      die.position.set(dx, -2, dz);
+      die.position.set(dx, -2, dz);  // hidden below felt
       if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
     }
   }
@@ -1566,37 +1611,52 @@ export class Board3D {
   }
 
   /**
-   * Build a die cube with six DynamicTexture pip faces.
-   * Babylon CreateBox sub-mesh face order: +X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5.
-   * Base pose (no rotation): +Y(top)=1, +X=2, +Z=3; opposite faces sum to 7 so
-   * -Y=6, -X=5, -Z=4. orientDie() then rotates `value` onto +Y.
+   * Build a die cube using a 6-column texture atlas so every face shows distinct pips.
+   * BabylonJS CreateBox with faceUV maps each of the 6 cube faces to a 1/6-width
+   * strip of the atlas texture — this is the reliable multi-face approach.
+   *
+   * Atlas column layout (left→right): +X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5.
+   * We assign pip values: +X→2, -X→5, +Y→1, -Y→6, +Z→3, -Z→4  (opposites sum to 7).
+   * orientDie() then rotates the die so the rolled value faces up.
    */
   private createPipDie(name: string, size: number): Mesh {
-    const box = MeshBuilder.CreateBox(name, { size }, this.scene);
-    // pip value per face sub-mesh index [+X, -X, +Y, -Y, +Z, -Z]
+    const COLS = 6;
+    const CELL = 128;
+    const ATLAS_W = COLS * CELL;
+    const ATLAS_H = CELL;
+
+    // pip value per atlas column: columns 0..5 → values for faces +X,-X,+Y,-Y,+Z,-Z
     const faceValues = [2, 5, 1, 6, 3, 4];
 
-    const multi = new MultiMaterial(`dieMat_${name}`, this.scene);
-    const TEX = 128;
-    for (let faceIdx = 0; faceIdx < 6; faceIdx++) {
-      const pipValue = faceValues[faceIdx]!;
-      const tex = new DynamicTexture(`dieTex_${name}_f${faceIdx}`, { width: TEX, height: TEX }, this.scene, false);
-      const fctx = tex.getContext() as CanvasRenderingContext2D;
-      this.drawPipFace(fctx, pipValue, TEX, TEX);
-      tex.update();
-      const mat = new StandardMaterial(`dieFaceMat_${name}_f${faceIdx}`, this.scene);
-      mat.diffuseTexture = tex;
-      mat.specularColor = new Color3(0.12, 0.12, 0.12);
-      mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
-      multi.subMaterials.push(mat);
+    // Draw the atlas (6 pip faces side by side)
+    const atlas = new DynamicTexture(`dieAtlas_${name}`, { width: ATLAS_W, height: ATLAS_H }, this.scene, false);
+    const actx = atlas.getContext() as CanvasRenderingContext2D;
+    for (let col = 0; col < COLS; col++) {
+      const pipValue = faceValues[col]!;
+      // Sub-region: col * CELL .. (col+1) * CELL wide
+      actx.save();
+      actx.translate(col * CELL, 0);
+      this.drawPipFace(actx, pipValue, CELL, CELL);
+      actx.restore();
     }
-    box.material = multi;
-    // Map each face sub-mesh to its own sub-material.
-    if (box.subMeshes) {
-      for (let i = 0; i < box.subMeshes.length; i++) {
-        box.subMeshes[i]!.materialIndex = i;
-      }
+    atlas.update();
+
+    // Map each face to its column in the atlas via faceUV
+    // Vector4(u0, v0, u1, v1) in UV space; each column is 1/6 wide.
+    const faceUV: Vector4[] = [];
+    for (let i = 0; i < COLS; i++) {
+      const u0 = i / COLS;
+      const u1 = (i + 1) / COLS;
+      faceUV.push(new Vector4(u0, 0, u1, 1));
     }
+
+    const box = MeshBuilder.CreateBox(name, { size, faceUV, wrap: true }, this.scene);
+
+    const mat = new StandardMaterial(`dieMat_${name}`, this.scene);
+    mat.diffuseTexture = atlas;
+    mat.specularColor = new Color3(0.12, 0.12, 0.12);
+    mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
+    box.material = mat;
     return box;
   }
 
