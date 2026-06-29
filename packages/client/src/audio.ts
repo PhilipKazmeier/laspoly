@@ -93,11 +93,13 @@ class BgmPlayer {
   setVolume(v: number) {
     this._volume = Math.max(0, Math.min(1, v));
     this._applyGain();
+    if (this.audioEl) this.audioEl.volume = this._muted ? 0 : this._volume;
   }
 
   setMuted(m: boolean) {
     this._muted = m;
     this._applyGain();
+    if (this.audioEl) this.audioEl.volume = this._muted ? 0 : this._volume;
   }
 
   private _applyGain() {
@@ -167,8 +169,51 @@ class BgmPlayer {
     this.scheduleTimer = setTimeout(() => this.scheduleAhead(), 100);
   }
 
+  // Optional original soundtrack: if mp3 files are present under /assets/music
+  // (local/private builds only — excluded from the public Docker image) they play
+  // instead of the synthesized melody. On 404 (deployed build) we fall back to synth.
+  private static readonly TRACKS = [
+    "/assets/music/Cruisin.mp3",
+    "/assets/music/jazzcomedy.mp3",
+    "/assets/music/thejazzpiano.mp3",
+  ];
+  private audioEl: HTMLAudioElement | null = null;
+  private trackIndex = 0;
+  private gestureBound = false;
+
   start(mode: "lobby" | "game") {
     if (this.running) this.stop();
+    this.running = true;
+    this.currentMelody = mode === "lobby" ? BgmPlayer.LOBBY_MELODY : BgmPlayer.GAME_MELODY;
+    // Try the original tracks first; fall back to the synth melody if absent.
+    const el = new Audio();
+    el.preload = "auto";
+    el.volume = this._muted ? 0 : this._volume;
+    this.trackIndex = 0;
+    const playCurrent = () => {
+      el.src = BgmPlayer.TRACKS[this.trackIndex % BgmPlayer.TRACKS.length]!;
+      el.play().catch(() => {
+        // Autoplay policy blocked it — resume on the first user gesture.
+        if (!this.gestureBound) {
+          this.gestureBound = true;
+          const resume = () => { this.audioEl?.play().catch(() => {}); };
+          window.addEventListener("pointerdown", resume, { once: true });
+          window.addEventListener("keydown", resume, { once: true });
+        }
+      });
+    };
+    el.onended = () => { this.trackIndex++; playCurrent(); };
+    el.onerror = () => {
+      // Files not present (public build) → use the synthesized melody instead.
+      el.onerror = null;
+      this.audioEl = null;
+      if (this.running) this.startSynth(mode);
+    };
+    this.audioEl = el;
+    playCurrent();
+  }
+
+  private startSynth(mode: "lobby" | "game") {
     if (!this._ensureCtx()) return;
     const ctx = this.ctx!;
 
@@ -186,6 +231,12 @@ class BgmPlayer {
 
   stop() {
     this.running = false;
+    if (this.audioEl) {
+      this.audioEl.onended = null;
+      this.audioEl.onerror = null;
+      try { this.audioEl.pause(); } catch { /* ignore */ }
+      this.audioEl = null;
+    }
     if (this.scheduleTimer) { clearTimeout(this.scheduleTimer); this.scheduleTimer = null; }
     for (const node of this.allNodes) {
       try { (node as OscillatorNode).stop?.(); } catch { /* already stopped */ }

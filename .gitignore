@@ -12,3 +12,6 @@ coverage/
 packages/*/test-results/
 .gstack/
 test-results/
+
+# Original BGM tracks (copyrighted) — local only, not committed
+packages/client/public/assets/music/

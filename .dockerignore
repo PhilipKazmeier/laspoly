@@ -17,3 +17,6 @@ old-java/
 coverage/
 test-results/
 docs/
+
+# Original BGM tracks: local/private use only, NOT shipped in the public image
+packages/client/public/assets/music/
