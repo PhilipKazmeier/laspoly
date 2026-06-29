@@ -54,9 +54,9 @@ const css = `
   .room-item { padding: 8px; border: 1px solid #444; border-radius: 4px; margin: 4px 0; cursor: pointer; }
   .room-item:hover { background: rgba(255,255,255,0.05); }
   #playerList {
-    position: absolute; top: 16px; left: 16px;
+    position: absolute; top: 64px; left: 16px;
     width: 220px;
-    max-height: 60vh;
+    max-height: calc(60vh - 48px);
     overflow-y: auto;
   }
   .player-row { padding: 8px 10px; margin: 4px 0; border-radius: 6px; border: 1px solid #333; font-size: 13px; }
@@ -168,9 +168,9 @@ const css = `
     text-overflow: ellipsis;
   }
   #myPropsPanel {
-    position: absolute; top: 16px; right: 16px;
+    position: absolute; top: 64px; right: 16px;
     width: 280px;
-    max-height: 70vh;
+    max-height: calc(70vh - 48px);
     overflow-y: auto;
   }
   .prop-row { padding: 8px; border: 1px solid #333; border-radius: 4px; margin: 4px 0; font-size: 12px; }
