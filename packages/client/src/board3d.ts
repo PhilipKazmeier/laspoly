@@ -206,6 +206,8 @@ export class Board3D {
   private diePipLabel2: AbstractMesh | null = null;
   // Token moves deferred until the dice animation settles
   private movePending: Map<string, { from: number; to: number }> = new Map();
+  // Resolvers for animateMoveAsync
+  private moveResolvers: Map<string, () => void> = new Map();
   // Ownership markers (tilePos -> stripe mesh) and per-player deed/money displays
   private ownershipMarkers: Map<number, AbstractMesh> = new Map();
   private playerDisplayMeshes: Map<string, AbstractMesh> = new Map();
@@ -1004,17 +1006,33 @@ export class Board3D {
   // Public update (called on every GameState message)
   // -------------------------------------------------------------------------
   update(state: GameState, _myId: string | null) {
-    // Diff against the previous state to drive animations BEFORE meshes are
-    // repositioned. (FormattedEvent carries no params, so we read the data we
-    // need straight from the authoritative GameState.)
     this.applyStateDiffs(state);
+    this.applyVisuals(state, _myId);
+  }
+
+  /** Apply all non-animation visual updates (buildings, ownership, HUD, board). Called after animation resolves. */
+  applyVisuals(state: GameState, myId: string | null): void {
     this.lastState = state;
-    this.lastMyId = _myId;
+    this.lastMyId = myId;
     this.drawBoard(state.boardId);
-    this.rebuildTokens(state, _myId);
+    this.rebuildTokens(state, myId);
     this.updateBuildings(state);
     this.updateOwnershipMarkers(state);
     this.updatePlayerDisplays(state);
+  }
+
+  /** Instantly snap all tokens to positions in `state` (reconnect / fast-forward). */
+  snapToState(state: GameState, myId: string | null): void {
+    // Clear any in-flight animations
+    this.moveQueues.clear();
+    this.moveAnimating.clear();
+    this.movePending.clear();
+    // Reset prevPositions so next diff starts clean
+    for (const p of state.players) {
+      const pos = p.inJail ? JAIL_POS : p.position;
+      this.prevPositions.set(p.id, pos);
+    }
+    this.applyVisuals(state, myId);
   }
 
   /** Register a callback invoked when the player clicks the dice cup to roll. */
@@ -1136,6 +1154,14 @@ export class Board3D {
     if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
   }
 
+  /** Enqueues a token move from `from` to `to` and resolves when the token arrives at `to`. */
+  animateMoveAsync(playerId: string, from: number, to: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.moveResolvers.set(playerId, resolve);
+      this.enqueueMove(playerId, from, to);
+    });
+  }
+
   private enqueueJailAnimation(playerId: string) {
     const jailXZ: [number, number] = [0, 0]; // cage is at world origin
     const existing = this.moveQueues.get(playerId) ?? [];
@@ -1145,10 +1171,20 @@ export class Board3D {
 
   private driveAnimation(playerId: string) {
     const mesh = this.tokenMeshes.get(playerId);
-    if (!mesh) { this.moveAnimating.delete(playerId); return; }
+    if (!mesh) {
+      this.moveAnimating.delete(playerId);
+      const res = this.moveResolvers.get(playerId);
+      if (res) { this.moveResolvers.delete(playerId); res(); }
+      return;
+    }
 
     const queue = this.moveQueues.get(playerId);
-    if (!queue || queue.length === 0) { this.moveAnimating.delete(playerId); return; }
+    if (!queue || queue.length === 0) {
+      this.moveAnimating.delete(playerId);
+      const res = this.moveResolvers.get(playerId);
+      if (res) { this.moveResolvers.delete(playerId); res(); }
+      return;
+    }
 
     this.moveAnimating.add(playerId);
     const next = queue.shift()!;
@@ -1404,6 +1440,21 @@ export class Board3D {
           this.movePending.clear();
         }
       }
+    });
+  }
+
+  /** Plays the dice animation and resolves when the dice have fully settled. */
+  playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (this.diceAnimating) { resolve(); return; }
+      // Attach a one-time observer that resolves when diceAnimating goes false
+      const check = this.scene.onBeforeRenderObservable.add(() => {
+        if (!this.diceAnimating) {
+          this.scene.onBeforeRenderObservable.remove(check);
+          resolve();
+        }
+      });
+      this.playDiceAnimation(d1, d2);
     });
   }
 
