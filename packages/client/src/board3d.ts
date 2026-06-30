@@ -12,11 +12,13 @@ import {
   MeshBuilder,
   StandardMaterial,
   Color3,
+  Color4,
   Texture,
   DynamicTexture,
   AbstractMesh,
   Mesh,
   SceneLoader,
+  GlowLayer,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
@@ -244,6 +246,10 @@ export class Board3D {
     this.engine = new Engine(canvas, true);
     this.scene = new Scene(this.engine);
 
+    // Neon-Vegas: midnight scene background so any edge beyond the table reads
+    // as the same dark world as the HUD (matches --bg-0 #0a0913).
+    this.scene.clearColor = new Color4(0.039, 0.035, 0.075, 1);
+
     // ---- Camera ------------------------------------------------------------
     this.camera = new ArcRotateCamera(
       "camera",
@@ -272,6 +278,13 @@ export class Board3D {
     const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
     fill.intensity = 0.25;
     fill.specular = new Color3(0, 0, 0);
+    // Cool the ambient slightly toward the violet world tone (vs. neutral white).
+    ambient.diffuse = new Color3(0.85, 0.83, 0.95);
+
+    // Neon-Vegas: bloom on emissive elements (player tokens, active-turn marker,
+    // dice pips). Moderate intensity so it glows without washing out tile labels.
+    const glow = new GlowLayer("glow", this.scene);
+    glow.intensity = 0.55;
 
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
@@ -298,7 +311,7 @@ export class Board3D {
     table.position.y = -0.45;
     const tableMat = new StandardMaterial("tableMat", this.scene);
     tableMat.diffuseTexture = this.makeWoodTexture();
-    tableMat.specularColor = new Color3(0.18, 0.12, 0.06);
+    tableMat.specularColor = new Color3(0.05, 0.04, 0.09); // cool, low sheen
     table.material = tableMat;
 
     // ---- Initial board -------------------------------------------------------
@@ -325,20 +338,21 @@ export class Board3D {
     const tex = new DynamicTexture("woodTex", { width: W, height: H }, this.scene, true);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
 
-    // Base warm brown
-    ctx.fillStyle = "#6b3d12";
+    // Neon-Vegas: dark charcoal-violet surround (was warm brown wood) so the
+    // table reads as the same dark-glass world as the HUD.
+    ctx.fillStyle = "#15121f";
     ctx.fillRect(0, 0, W, H);
 
-    // Draw horizontal wood planks (lighter grain lines)
+    // Draw horizontal planks (subtle cool grain lines)
     const PLANK_H = 64; // px per plank
     const NUM_PLANKS = Math.ceil(H / PLANK_H);
     for (let p = 0; p < NUM_PLANKS; p++) {
       const py = p * PLANK_H;
       // Slight shade variation per plank
       const shade = 0.85 + Math.sin(p * 1.7) * 0.1;
-      const r = Math.round(107 * shade);
-      const g = Math.round(61 * shade);
-      const b = Math.round(18 * shade);
+      const r = Math.round(28 * shade);
+      const g = Math.round(24 * shade);
+      const b = Math.round(40 * shade);
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(0, py, W, PLANK_H - 2);
 
@@ -346,9 +360,9 @@ export class Board3D {
       for (let gl = 0; gl < 8; gl++) {
         const gy = py + (gl / 8) * (PLANK_H - 2);
         const brightness = 0.9 + Math.sin(gl * 2.1 + p * 0.9) * 0.08;
-        const gr = Math.round(130 * brightness);
-        const gg = Math.round(74 * brightness);
-        const gb = Math.round(22 * brightness);
+        const gr = Math.round(46 * brightness);
+        const gg = Math.round(40 * brightness);
+        const gb = Math.round(66 * brightness);
         ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -362,7 +376,7 @@ export class Board3D {
       }
 
       // Plank gap (dark line between planks)
-      ctx.fillStyle = "#3a1e07";
+      ctx.fillStyle = "#0c0a14";
       ctx.fillRect(0, py + PLANK_H - 2, W, 2);
     }
 
@@ -370,9 +384,9 @@ export class Board3D {
     const knots = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15], [W * 0.45, H * 0.65], [W * 0.85, H * 0.55]];
     for (const [kx, ky] of knots) {
       const grad = ctx.createRadialGradient(kx, ky, 2, kx, ky, 14);
-      grad.addColorStop(0, "rgba(30,12,3,0.85)");
-      grad.addColorStop(0.6, "rgba(60,28,8,0.5)");
-      grad.addColorStop(1, "rgba(107,61,18,0)");
+      grad.addColorStop(0, "rgba(8,6,14,0.85)");
+      grad.addColorStop(0.6, "rgba(20,16,30,0.5)");
+      grad.addColorStop(1, "rgba(40,34,58,0)");
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.ellipse(kx, ky, 14, 10, 0.2, 0, Math.PI * 2);
@@ -445,7 +459,11 @@ export class Board3D {
     );
     boardBase.position.y = -0.04;
     const boardMat = new StandardMaterial("boardMat", this.scene);
-    boardMat.diffuseColor = new Color3(0.32, 0.54, 0.28);
+    // Neon-Vegas: dark glass board frame (was classic Monopoly green); the thin
+    // border showing between/around the cream tiles now reads as dark, with a
+    // faint gold self-lit edge so it ties to the HUD's gold accent.
+    boardMat.diffuseColor = new Color3(0.09, 0.07, 0.14);
+    boardMat.emissiveColor = new Color3(0.12, 0.09, 0.02);
     boardMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     boardBase.material = boardMat;
 
@@ -459,6 +477,9 @@ export class Board3D {
     felt.position.y = 0.01;
     const feltMat = new StandardMaterial("feltMat", this.scene);
     feltMat.diffuseTexture = new Texture("/assets/tex_felt.png", this.scene);
+    // Tint the felt texture darker + cooler so the centre matches the dark world
+    // (diffuseColor multiplies the texture).
+    feltMat.diffuseColor = new Color3(0.42, 0.4, 0.55);
     feltMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     felt.material = feltMat;
 
@@ -501,7 +522,7 @@ export class Board3D {
       tileMesh.isPickable = true; // tile-click hook (setTileClickHandler)
 
       const tileMat = new StandardMaterial(`tileMat_${tile.pos}`, this.scene);
-      tileMat.diffuseColor = new Color3(0.97, 0.95, 0.88);
+      tileMat.diffuseColor = new Color3(0.95, 0.95, 0.97); // bright, slightly cool (was warm cream)
       tileMesh.material = tileMat;
 
       // ---- Colour bar (inner-edge, facing board centre) --------------------
@@ -1587,9 +1608,10 @@ export class Board3D {
     cup.isPickable = true; // click-to-roll
 
     const cupMat = new StandardMaterial("cupMat", this.scene);
-    cupMat.diffuseColor = new Color3(0.22, 0.13, 0.05);  // dark leather brown
-    cupMat.emissiveColor = new Color3(0.08, 0.04, 0.01);
-    cupMat.specularColor = new Color3(0.35, 0.22, 0.12);
+    // Neon-Vegas: dark cup with a gold self-lit rim glow (was leather brown).
+    cupMat.diffuseColor = new Color3(0.14, 0.11, 0.2);
+    cupMat.emissiveColor = new Color3(0.22, 0.16, 0.03); // gold sheen, blooms via GlowLayer
+    cupMat.specularColor = new Color3(0.3, 0.24, 0.1);
     cupMat.backFaceCulling = false; // double-sided so interior shows
     cup.material = cupMat;
     this.diceCupMesh = cup;
