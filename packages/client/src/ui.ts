@@ -22,37 +22,83 @@ import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
 
 const css = `
+  /* ── Neon-Vegas glass design system ─────────────────────────────── */
+  :root {
+    --bg-0: #0a0913;
+    --glass: rgba(22, 19, 38, 0.72);
+    --glass-strong: rgba(15, 13, 26, 0.9);
+    --glass-light: rgba(255, 255, 255, 0.05);
+    --hairline: rgba(255, 255, 255, 0.10);
+    --hairline-soft: rgba(255, 255, 255, 0.06);
+    --text: #f3f1fb;
+    --text-dim: #a39fc0;
+    --text-mute: #6f6b8a;
+    --gold: #fbbf24;
+    --gold-deep: #f59e0b;
+    --violet: #7c3aed;
+    --magenta: #d946ef;
+    --success: #34d399;
+    --success-deep: #059669;
+    --danger: #f43f5e;
+    --danger-deep: #9f1239;
+    --info: #60a5fa;
+    --muted: rgba(255, 255, 255, 0.08);
+    --radius-lg: 16px;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 10px 36px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.6);
+    --glow-gold: 0 0 20px rgba(251, 191, 36, 0.35);
+    --glow-magenta: 0 0 22px rgba(217, 70, 239, 0.4);
+    --top-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --blur: blur(16px) saturate(140%);
+    --font: 'Segoe UI', system-ui, -apple-system, 'Inter', Roboto, sans-serif;
+    --ease: 0.18s cubic-bezier(.4, 0, .2, 1);
+  }
   .panel {
-    background: rgba(10, 10, 30, 0.85);
-    border: 1px solid #444;
-    border-radius: 8px;
-    padding: 16px;
-    color: #eee;
+    background: var(--glass);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    color: var(--text);
+    box-shadow: var(--shadow), var(--top-hi);
   }
   button {
-    background: #2563eb;
+    background: linear-gradient(135deg, var(--violet), var(--magenta));
     color: #fff;
     border: none;
-    border-radius: 6px;
-    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    padding: 9px 16px;
     cursor: pointer;
     font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
     margin: 4px 2px;
+    font-family: var(--font);
+    box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3);
+    transition: transform var(--ease), box-shadow var(--ease), filter var(--ease);
   }
-  button:hover { background: #1d4ed8; }
-  button:disabled { background: #555; cursor: default; }
+  button:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), var(--glow-magenta); }
+  button:active { transform: translateY(0); filter: brightness(0.97); }
+  button:disabled { background: var(--muted); color: var(--text-mute); cursor: default; box-shadow: none; transform: none; filter: none; }
   input, select {
-    background: #1e1e3a;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 6px 10px;
+    background: rgba(10, 9, 18, 0.6);
+    color: var(--text);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
     font-size: 14px;
     margin: 4px 0;
     width: 100%;
     box-sizing: border-box; /* include padding in width:100% (fixes lobby h-scrollbar, bug 2-2) */
+    font-family: var(--font);
+    transition: border-color var(--ease), box-shadow var(--ease);
   }
-  label { font-size: 13px; color: #aaa; display: block; margin-top: 8px; }
+  input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18); }
+  input::placeholder { color: var(--text-mute); }
+  label { font-size: 13px; color: var(--text-dim); display: block; margin-top: 8px; }
   #lobby {
     position: absolute;
     top: 50%; left: 50%;
@@ -74,16 +120,16 @@ const css = `
     box-sizing: border-box;
   }
   #roomList { margin-top: 12px; max-height: 200px; overflow-y: auto; }
-  .room-item { padding: 8px; border: 1px solid #444; border-radius: 4px; margin: 4px 0; cursor: pointer; }
-  .room-item:hover { background: rgba(255,255,255,0.05); }
+  .room-item { padding: 10px 12px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 6px 0; cursor: pointer; background: var(--glass-light); transition: background var(--ease), border-color var(--ease), transform var(--ease); }
+  .room-item:hover { background: rgba(255,255,255,0.08); border-color: var(--hairline); transform: translateX(2px); }
   #playerList {
     position: absolute; top: 80px; left: 16px;
     width: 220px;
     max-height: calc(60vh - 48px);
     overflow-y: auto;
   }
-  .player-row { padding: 8px 10px; margin: 4px 0; border-radius: 6px; border: 1px solid #333; font-size: 13px; }
-  .player-row.current-player { border-color: #facc15; background: rgba(250,204,21,0.1); }
+  .player-row { padding: 8px 10px; margin: 5px 0; border-radius: var(--radius-sm); border: 1px solid var(--hairline-soft); font-size: 13px; background: var(--glass-light); transition: background var(--ease), border-color var(--ease); }
+  .player-row.current-player { border-color: var(--gold); background: rgba(251,204,21,0.12); box-shadow: var(--glow-gold); }
   .player-row.dead { opacity: 0.4; }
   .chip-stack { display:flex; align-items:center; gap:2px; flex-wrap:wrap; margin-top:2px; }
   .chip-img { width:16px; height:16px; object-fit:contain; image-rendering:pixelated; }
@@ -98,17 +144,19 @@ const css = `
   #actionCardPopup {
     position: absolute; top: calc(50% + 24px); left: 50%; transform: translate(-50%, -50%);
     width: 320px;
-    background: #1a1a2e; border: 2px solid #f97316; border-radius: 10px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--hairline); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop), var(--top-hi);
+    overflow: hidden;
     z-index: 100;
   }
   #actionCardPopup .ac-header {
-    background: #f97316; color: #fff; font-weight: bold; font-size: 15px;
-    padding: 10px 16px; border-radius: 8px 8px 0 0;
+    background: linear-gradient(135deg, var(--gold-deep), var(--gold)); color: #2a1c02; font-weight: 700; font-size: 15px;
+    padding: 12px 16px;
     text-align: center;
   }
   #actionCardPopup .ac-body {
-    padding: 16px; color: #eee; font-size: 14px; line-height: 1.5;
+    padding: 16px; color: var(--text); font-size: 14px; line-height: 1.5;
     text-align: center;
   }
   #actionCardPopup .ac-footer {
@@ -117,18 +165,20 @@ const css = `
   #buyOfferPanel {
     position: absolute; bottom: 100px; right: 16px;
     width: 260px;
-    background: rgba(10,10,30,0.95); border: 2px solid #facc15;
-    border-radius: 10px; padding: 0;
-    color: #eee; overflow: hidden;
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--gold);
+    border-radius: var(--radius); padding: 0;
+    color: var(--text); overflow: hidden;
+    box-shadow: var(--shadow), var(--glow-gold);
   }
   #buyOfferPanel .buy-header {
-    background: #facc15; color: #1a1a2e;
-    font-weight: bold; font-size: 13px;
-    padding: 8px 14px;
+    background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color: #2a1c02;
+    font-weight: 700; font-size: 13px;
+    padding: 9px 14px;
   }
-  #buyOfferPanel .buy-body { padding: 10px 14px; }
-  #buyOfferPanel h3 { color: #facc15; margin: 0 0 6px; font-size: 14px; display: none; }
-  #buyOfferPanel .buy-detail { font-size: 12px; color: #ccc; margin: 3px 0; }
+  #buyOfferPanel .buy-body { padding: 12px 14px; }
+  #buyOfferPanel h3 { color: var(--gold); margin: 0 0 6px; font-size: 14px; display: none; }
+  #buyOfferPanel .buy-detail { font-size: 12px; color: var(--text-dim); margin: 3px 0; }
   #buyOfferPanel .buy-btns { display:flex; gap:8px; margin-top:10px; }
   #eventLogPanel {
     position: absolute; bottom: 16px; left: 16px;
@@ -136,13 +186,14 @@ const css = `
   }
   #eventLog {
     height: 150px; overflow-y: auto;
-    background: rgba(0,0,0,0.5);
-    border-radius: 4px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--radius-sm);
     padding: 8px;
     font-size: 12px;
     line-height: 1.5;
   }
-  .event-line { margin: 2px 0; }
+  .event-line { margin: 2px 0; color: var(--text-dim); }
   #chatRow { display: flex; gap: 4px; margin-top: 6px; }
   #chatInput { flex: 1; }
   #chatSendBtn { width: auto; }
@@ -157,33 +208,39 @@ const css = `
   #gameHud > * { pointer-events: auto; }
   #gameOverBanner {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.75);
+    background: radial-gradient(ellipse at center, rgba(40,20,60,0.7), rgba(0,0,0,0.85));
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
     align-items: center; justify-content: center;
     flex-direction: column; gap: 16px;
   }
-  #gameOverBanner h1 { font-size: 2.5rem; color: #facc15; }
+  #gameOverBanner h1 { font-size: 2.75rem; color: var(--gold); text-shadow: var(--glow-gold), 0 2px 12px rgba(0,0,0,0.6); letter-spacing: 1px; }
   #spectatorBanner {
     position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(100,0,0,0.7); padding: 8px 20px; border-radius: 8px;
-    font-size: 14px;
+    background: rgba(159,18,57,0.55); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid rgba(244,63,94,0.4);
+    padding: 8px 20px; border-radius: var(--radius-sm);
+    font-size: 14px; box-shadow: var(--shadow);
   }
   #versionBadge {
     position: absolute; bottom: 4px; right: 8px;
-    font-size: 11px; color: #555;
+    font-size: 11px; color: var(--text-mute);
   }
   #errorBanner {
     position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    background: rgba(180,0,0,0.85); padding: 8px 20px; border-radius: 6px;
-    font-size: 13px; max-width: 400px; text-align: center;
+    background: rgba(159,18,57,0.92); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid rgba(244,63,94,0.5);
+    padding: 9px 20px; border-radius: var(--radius-sm);
+    font-size: 13px; max-width: 400px; text-align: center; box-shadow: var(--shadow);
   }
   #specialEventBanner {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    background: rgba(20, 10, 40, 0.88);
-    border: 1px solid #a855f7;
-    border-radius: 8px;
-    padding: 6px 18px;
+    background: rgba(20, 10, 40, 0.7); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--magenta);
+    border-radius: var(--radius-sm);
+    padding: 7px 18px;
     font-size: 13px;
-    color: #e9d5ff;
+    color: #f0d5ff;
+    box-shadow: var(--glow-magenta);
     pointer-events: none;
     white-space: nowrap;
     max-width: 480px;
@@ -196,12 +253,12 @@ const css = `
     max-height: calc(70vh - 48px);
     overflow-y: auto;
   }
-  .prop-row { padding: 8px; border: 1px solid #333; border-radius: 4px; margin: 4px 0; font-size: 12px; }
-  .prop-row .prop-name { font-weight: bold; color: #eee; }
-  .prop-row .prop-detail { color: #aaa; font-size: 11px; margin: 2px 0; }
-  .prop-btn { font-size: 11px; padding: 3px 8px; margin: 2px 1px; }
-  .prop-btn.danger { background: #991b1b; }
-  .prop-btn.danger:hover { background: #7f1d1d; }
+  .prop-row { padding: 9px 10px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 5px 0; font-size: 12px; background: var(--glass-light); }
+  .prop-row .prop-name { font-weight: 600; color: var(--text); }
+  .prop-row .prop-detail { color: var(--text-dim); font-size: 11px; margin: 2px 0; }
+  .prop-btn { font-size: 11px; padding: 4px 9px; margin: 2px 1px; }
+  .prop-btn.danger { background: linear-gradient(135deg, var(--danger-deep), var(--danger)); box-shadow: 0 2px 8px rgba(244,63,94,0.25); }
+  .prop-btn.danger:hover { box-shadow: 0 4px 14px rgba(244,63,94,0.4), 0 0 16px rgba(244,63,94,0.3); }
   #travelPanel {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: 260px;
@@ -216,52 +273,56 @@ const css = `
     position: absolute; bottom: 80px; right: 16px;
     width: 300px;
   }
-  .swap-section { margin: 8px 0; padding: 6px; background: rgba(255,255,255,0.05); border-radius: 4px; }
-  .swap-label { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+  .swap-section { margin: 8px 0; padding: 8px; background: var(--glass-light); border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); }
+  .swap-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
   .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
   #gameHeader {
     position: absolute; top: 0; left: 0; width: 100%; min-height: 48px;
-    background: linear-gradient(to bottom, #c2410c, #ea580c);
-    border-bottom: 2px solid #f97316;
+    background: linear-gradient(180deg, rgba(18,16,34,0.92), rgba(12,10,24,0.82));
+    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border-bottom: 1px solid var(--hairline);
+    box-shadow: 0 2px 18px rgba(0,0,0,0.45), inset 0 -2px 0 rgba(251,191,36,0.55);
     display: flex; align-items: center; justify-content: space-between;
     padding: 4px 12px;
     box-sizing: border-box;
     z-index: 50;
     pointer-events: none;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    font-family: var(--font);
   }
   #gameHeader > * { pointer-events: auto; }
   #headerLeft { display: flex; flex-direction: column; gap: 1px; min-width: 160px; }
-  #headerLeft .room-label { font-size: 13px; font-weight: bold; color: #fff; line-height: 1.2; }
-  #headerLeft .board-label { font-size: 11px; color: rgba(255,255,255,0.75); line-height: 1.2; }
+  #headerLeft .room-label { font-size: 13px; font-weight: 700; color: var(--gold); line-height: 1.2; letter-spacing: 0.3px; }
+  #headerLeft .board-label { font-size: 11px; color: var(--text-dim); line-height: 1.2; }
   #headerCenter { flex: 1; text-align: center; padding: 0 8px; }
   #headerTurnStatus {
-    font-size: 15px; font-weight: bold; color: #fff;
+    font-size: 15px; font-weight: 700; color: var(--text);
     text-shadow: 0 1px 3px rgba(0,0,0,0.5);
     line-height: 1.2;
   }
-  #headerRound { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 1px; }
-  #headerEvent { font-size: 11px; color: #fde68a; margin-top: 1px; }
+  #headerRound { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+  #headerEvent { font-size: 11px; color: var(--gold); margin-top: 1px; }
   #headerRight { display: flex; align-items: center; gap: 6px; min-width: 200px; justify-content: flex-end; }
   .hdr-btn {
-    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3);
-    color: #fff; border-radius: 5px; padding: 4px 8px;
+    background: var(--glass-light); border: 1px solid var(--hairline);
+    color: var(--text); border-radius: var(--radius-sm); padding: 5px 9px;
     font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    font-family: var(--font);
+    transition: background var(--ease), border-color var(--ease);
   }
-  .hdr-btn:hover { background: rgba(0,0,0,0.45); }
-  #headerVersion { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 4px; }
+  .hdr-btn:hover { background: rgba(255,255,255,0.14); border-color: var(--gold); }
+  #headerVersion { font-size: 10px; color: var(--text-mute); margin-left: 4px; }
   #turnToast {
     position: absolute; bottom: 140px; right: 16px;
-    background: rgba(15, 15, 35, 0.92);
-    border: 1px solid #f97316;
-    border-radius: 8px;
-    padding: 8px 14px;
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--gold);
+    border-radius: var(--radius-sm);
+    padding: 9px 14px;
     font-size: 13px;
-    color: #fff;
+    color: var(--text);
     max-width: 240px;
     pointer-events: none;
     opacity: 0;
+    box-shadow: var(--shadow), var(--glow-gold);
     transition: opacity 0.3s ease;
     z-index: 60;
   }
@@ -269,28 +330,33 @@ const css = `
   #helpOverlay {
     position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     width: 320px;
-    background: rgba(10,10,30,0.95); border: 1px solid #f97316;
-    border-radius: 8px; padding: 16px;
-    color: #eee; font-size: 13px; line-height: 1.6;
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg); padding: 18px;
+    color: var(--text); font-size: 13px; line-height: 1.6;
+    box-shadow: var(--shadow-pop), var(--top-hi);
     z-index: 80;
   }
-  #helpOverlay h3 { color: #f97316; margin: 0 0 10px; font-size: 14px; }
+  #helpOverlay h3 { color: var(--gold); margin: 0 0 10px; font-size: 14px; }
   #helpOverlay ul { margin: 0; padding-left: 18px; }
-  #helpOverlay li { margin: 4px 0; }
+  #helpOverlay li { margin: 4px 0; color: var(--text-dim); }
   #settingsOverlay {
     position: absolute; top: 80px; right: 12px;
     width: 200px;
-    background: rgba(10,10,30,0.95); border: 1px solid #444;
-    border-radius: 8px; padding: 12px;
-    color: #eee; font-size: 13px;
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg); padding: 14px;
+    color: var(--text); font-size: 13px;
+    box-shadow: var(--shadow-pop), var(--top-hi);
     z-index: 80;
   }
-  #settingsOverlay label { color: #aaa; font-size: 12px; margin-top: 6px; }
+  #settingsOverlay label { color: var(--text-dim); font-size: 12px; margin-top: 6px; }
   #deedCardPopup {
     position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     width: 300px;
-    background: #1a1a2e; border: 2px solid #facc15; border-radius: 10px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--gold); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop), var(--glow-gold);
     z-index: 90;
     overflow: hidden;
   }
@@ -298,43 +364,44 @@ const css = `
     height: 8px; width: 100%;
   }
   #deedCardPopup .dc-header {
-    padding: 10px 16px 6px; font-weight: bold; font-size: 15px; color: #facc15;
+    padding: 12px 16px 6px; font-weight: 700; font-size: 15px; color: var(--gold);
     display: flex; justify-content: space-between; align-items: flex-start;
   }
   #deedCardPopup .dc-close {
-    background: none; border: none; color: #aaa; font-size: 18px;
-    cursor: pointer; padding: 0 0 0 8px; line-height: 1;
+    background: none; border: none; color: var(--text-dim); font-size: 18px;
+    cursor: pointer; padding: 0 0 0 8px; line-height: 1; box-shadow: none;
   }
-  #deedCardPopup .dc-close:hover { color: #fff; }
+  #deedCardPopup .dc-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
   #deedCardPopup .dc-body {
-    padding: 8px 16px 14px; color: #eee; font-size: 12px; line-height: 1.6;
+    padding: 8px 16px 14px; color: var(--text); font-size: 12px; line-height: 1.6;
   }
-  #deedCardPopup .dc-row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 2px 0; }
+  #deedCardPopup .dc-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--hairline-soft); padding: 3px 0; }
   #deedCardPopup .dc-row:last-child { border-bottom: none; }
-  #deedCardPopup .dc-label { color: #aaa; }
-  #deedCardPopup .dc-value { color: #fff; text-align: right; }
-  #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: #60a5fa; }
-  #deedCardPopup .dc-status { font-size: 11px; color: #f87171; margin-top: 2px; }
+  #deedCardPopup .dc-label { color: var(--text-dim); }
+  #deedCardPopup .dc-value { color: var(--text); text-align: right; }
+  #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: var(--info); }
+  #deedCardPopup .dc-status { font-size: 11px; color: var(--danger); margin-top: 2px; }
   #specialEventToast {
     position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(88, 28, 135, 0.95);
-    border: 1px solid #a855f7;
-    border-radius: 10px;
-    padding: 10px 16px 10px 16px;
+    background: rgba(67, 20, 110, 0.78); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--magenta);
+    border-radius: var(--radius);
+    padding: 11px 16px;
     font-size: 13px;
-    color: #e9d5ff;
+    color: #f0d5ff;
     max-width: 500px;
     text-align: center;
     line-height: 1.5;
+    box-shadow: var(--shadow), var(--glow-magenta);
     z-index: 85;
     display: flex; align-items: flex-start; gap: 10px;
   }
   #specialEventToast .set-text { flex: 1; }
   #specialEventToast .set-close {
     background: none; border: none; color: #c4b5fd; font-size: 16px;
-    cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0;
+    cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0; box-shadow: none;
   }
-  #specialEventToast .set-close:hover { color: #fff; }
+  #specialEventToast .set-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
   #paymentToast {
     position: absolute; bottom: 185px; right: 16px;
     border-radius: 8px;
@@ -362,7 +429,7 @@ const css = `
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     font-size: 11px; color: #fff; font-weight: bold;
   }
-  .fp-swatch.selected { border-color: #facc15; }
+  .fp-swatch.selected { border-color: var(--gold); box-shadow: var(--glow-gold); }
   .fp-swatch.taken { opacity: 0.35; cursor: default; }
   .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
   #turnTimer {
@@ -398,46 +465,49 @@ const css = `
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 8px;
   }
-  #playerInspector .pi-title { font-size: 13px; color: #facc15; font-weight: bold; }
+  #playerInspector .pi-title { font-size: 13px; color: var(--gold); font-weight: 700; }
   #playerInspector .pi-close {
-    background: none; border: none; color: #aaa; font-size: 18px;
-    cursor: pointer; padding: 0; line-height: 1;
+    background: none; border: none; color: var(--text-dim); font-size: 18px;
+    cursor: pointer; padding: 0; line-height: 1; box-shadow: none;
   }
-  #playerInspector .pi-close:hover { color: #fff; }
-  #playerInspector .pi-stat { font-size: 12px; color: #ccc; margin: 2px 0; }
-  #playerInspector .pi-worth { font-size: 13px; color: #86efac; font-weight: bold; margin: 4px 0; }
+  #playerInspector .pi-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
+  #playerInspector .pi-stat { font-size: 12px; color: var(--text-dim); margin: 2px 0; }
+  #playerInspector .pi-worth { font-size: 13px; color: var(--success); font-weight: 700; margin: 4px 0; }
   #playerInspector .pi-group { margin-top: 8px; }
-  #playerInspector .pi-group-title { font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 4px; }
-  #playerInspector .pi-prop { font-size: 11px; color: #eee; padding: 2px 0; border-bottom: 1px solid #2a2a4a; }
+  #playerInspector .pi-group-title { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  #playerInspector .pi-prop { font-size: 11px; color: var(--text); padding: 2px 0; border-bottom: 1px solid var(--hairline-soft); }
   /* Net worth rank badge */
-  .nw-rank { font-size: 10px; font-weight: bold; color: #1a1a2e; background: #facc15; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
-  .nw-worth { font-size: 10px; color: #86efac; margin-left: 4px; }
+  .nw-rank { font-size: 10px; font-weight: 700; color: #2a1c02; background: var(--gold); border-radius: 4px; padding: 0 5px; margin-left: 4px; }
+  .nw-worth { font-size: 10px; color: var(--success); margin-left: 4px; }
   /* Player row clickable hint */
   .player-row { cursor: pointer; }
   .player-row:hover { background: rgba(255,255,255,0.04); }
   /* Surrender button */
   #surrenderBtn {
-    background: rgba(153,27,27,0.7); border: 1px solid rgba(239,68,68,0.5);
-    color: #fff; border-radius: 5px; padding: 4px 8px;
+    background: rgba(159,18,57,0.55); border: 1px solid rgba(244,63,94,0.5);
+    color: #fff; border-radius: var(--radius-sm); padding: 5px 9px;
     font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    font-family: var(--font); box-shadow: none;
+    transition: background var(--ease), box-shadow var(--ease);
   }
-  #surrenderBtn:hover { background: rgba(153,27,27,0.95); }
+  #surrenderBtn:hover { background: rgba(159,18,57,0.85); box-shadow: 0 0 14px rgba(244,63,94,0.35); transform: none; filter: none; }
   /* Room ready UI (feature 3) */
   .rp-player-row { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 0; }
   .rp-ready-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .rp-ready-dot.ready { background: #22c55e; }
-  .rp-ready-dot.not-ready { background: #6b7280; }
+  .rp-ready-dot.ready { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,0.6); }
+  .rp-ready-dot.not-ready { background: var(--text-mute); }
   /* Room settings (feature 6) */
-  #roomSettingsPanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; }
-  #roomSettingsPanel .rs-title { font-size: 12px; color: #facc15; font-weight: bold; margin-bottom: 6px; }
-  #roomSettingsPanel label { font-size: 11px; color: #aaa; margin-top: 6px; display: block; }
-  #roomSettingsPanel select { font-size: 12px; padding: 4px 6px; margin-top: 2px; }
-  #roomSettingsPanel .rs-readonly { font-size: 11px; color: #888; margin-top: 4px; }
+  #roomSettingsPanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline-soft); }
+  #roomSettingsPanel .rs-title { font-size: 12px; color: var(--gold); font-weight: 700; margin-bottom: 6px; }
+  #roomSettingsPanel label { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: block; }
+  #roomSettingsPanel select { font-size: 12px; padding: 5px 8px; margin-top: 2px; }
+  #roomSettingsPanel .rs-readonly { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
   /* Confirm overlay (non-modal, inline) */
   .confirm-overlay {
-    background: rgba(10,10,30,0.97); border: 1px solid #ef4444;
-    border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #eee;
+    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius); padding: 14px 16px; font-size: 13px; color: var(--text);
+    box-shadow: var(--shadow-pop);
     position: absolute; z-index: 200;
   }
   .confirm-overlay .co-btns { display: flex; gap: 8px; margin-top: 10px; }
@@ -974,7 +1044,7 @@ export class UI {
     lobby.className = "panel";
     lobby.innerHTML = `
       <button id="lobbySettingsBtn" class="hdr-btn" title="${t("header.settings")}" style="position:absolute;top:12px;right:12px;">${t("header.settingsTitle")}</button>
-      <h2 id="lobbyTitle" style="margin-bottom:12px;color:#facc15;">${t("lobby.title")}</h2>
+      <h2 id="lobbyTitle" style="margin-bottom:12px;color:var(--gold);">${t("lobby.title")}</h2>
       <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
       <input id="nickname" type="text" placeholder="Your name" value="Player" />
       <label id="lobbyBoardLabel">${t("lobby.board")}</label>
@@ -1037,7 +1107,7 @@ export class UI {
     panel.className = "panel";
     hide(panel);
     panel.innerHTML = `
-      <h2 id="roomPanelTitle" style="margin-bottom:12px;color:#facc15;">${t("room.title")}</h2>
+      <h2 id="roomPanelTitle" style="margin-bottom:12px;color:var(--gold);">${t("room.title")}</h2>
       <div id="roomInfo" style="margin-bottom:12px;font-size:13px;color:#ccc;"></div>
       <div id="roomPlayerList" style="margin-bottom:8px;"></div>
       <div id="roomReadyRow" style="margin:8px 0;"></div>
@@ -1048,7 +1118,7 @@ export class UI {
       <div id="figurePicker"></div>
       <div id="roomSettingsPanel"></div>
       <button id="startGame" style="width:100%;margin-top:8px;">${t("room.startGame")}</button>
-      <button id="leaveRoom" style="width:100%;background:#6b7280;margin-top:4px;">${t("room.leaveRoom")}</button>
+      <button id="leaveRoom" style="width:100%;background:rgba(255,255,255,0.1);margin-top:4px;">${t("room.leaveRoom")}</button>
     `;
     this.root.appendChild(panel);
     this.roomPanel = panel;
@@ -1344,7 +1414,7 @@ export class UI {
     const settings = document.createElement("div");
     settings.id = "settingsOverlay";
     const buildSettingsContent = () => `
-      <div id="settingsTitle" style="font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;">${t("settings.title")}</div>
+      <div id="settingsTitle" style="font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;">${t("settings.title")}</div>
       <label id="settingsLocaleLabel">${t("settings.locale")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
         <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'de' ? 'rgba(255,255,255,0.35)' : ''};">🇩🇪 DE</button>
@@ -1626,7 +1696,7 @@ export class UI {
     const textEl = document.getElementById("actionCardText");
     if (textEl) {
       // Layout (bug 9): card title, then what must be done, then Confirm (in footer).
-      const titleHtml = `<div style="font-weight:bold;font-size:16px;color:#facc15;margin-bottom:8px;">${title}</div>`;
+      const titleHtml = `<div style="font-weight:bold;font-size:16px;color:var(--gold);margin-bottom:8px;">${title}</div>`;
       const effectHtml = effect
         ? `<div style="font-size:13px;color:#eee;line-height:1.5;">${effect}</div>`
         : "";
@@ -1649,7 +1719,7 @@ export class UI {
     panel.innerHTML = `
       <div class="buy-header">${t("buy.header")}</div>
       <div class="buy-body">
-        <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:#facc15;margin-bottom:6px;font-size:13px;">—</div>
+        <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:var(--gold);margin-bottom:6px;font-size:13px;">—</div>
         <div class="buy-detail" id="buyPrice">${t("buy.price")} —</div>
         <div class="buy-detail" id="buyBalance">${t("buy.balance")} —</div>
         <div class="buy-btns">
@@ -1763,7 +1833,7 @@ export class UI {
       if (active) {
         r.style.cssText = "background:rgba(250,204,21,0.2);border-radius:3px;font-weight:bold;border-bottom:1px solid #333;padding:2px 0;";
       }
-      r.innerHTML = `<span class="dc-label" style="${active ? 'color:#facc15;' : ''}">${label}</span><span class="dc-value" style="${active ? 'color:#facc15;' : ''}">${value}</span>`;
+      r.innerHTML = `<span class="dc-label" style="${active ? 'color:var(--gold);' : ''}">${label}</span><span class="dc-value" style="${active ? 'color:var(--gold);' : ''}">${value}</span>`;
       body.appendChild(r);
     };
 
@@ -2826,7 +2896,7 @@ export class UI {
     header.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-bottom:8px;";
     const headerRow = document.createElement("div");
     headerRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;";
-    headerRow.innerHTML = `<span style="font-size:13px;color:#facc15;font-weight:bold;">${t("props.title")}</span>`;
+    headerRow.innerHTML = `<span style="font-size:13px;color:var(--gold);font-weight:bold;">${t("props.title")}</span>`;
     const tradeBtn = document.createElement("button");
     tradeBtn.className = "prop-btn";
     tradeBtn.textContent = t("props.trade");
@@ -2992,7 +3062,7 @@ export class UI {
     const stationPositions = [5, 15, 25, 35];
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
+    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;";
     title.textContent = t("travel.title");
     panel.appendChild(title);
 
@@ -3019,7 +3089,7 @@ export class UI {
     }
 
     const closeBtn = document.createElement("button");
-    closeBtn.style.cssText = "display:block;width:100%;margin-top:8px;background:#555;";
+    closeBtn.style.cssText = "display:block;width:100%;margin-top:8px;background:rgba(255,255,255,0.1);";
     closeBtn.textContent = t("travel.close");
     closeBtn.addEventListener("click", () => hide(panel));
     panel.appendChild(closeBtn);
@@ -3033,7 +3103,7 @@ export class UI {
     const alivePlayers = state.players.filter((p) => p.alive && p.id !== myId);
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:10px;";
+    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:10px;";
     title.textContent = t("trade.title");
     panel.appendChild(title);
 
@@ -3179,7 +3249,7 @@ export class UI {
     });
 
     const cancelBtn = document.createElement("button");
-    cancelBtn.style.cssText = "background:#555;";
+    cancelBtn.style.cssText = "background:rgba(255,255,255,0.1);";
     cancelBtn.textContent = t("trade.cancel");
     cancelBtn.addEventListener("click", () => hide(panel));
 
@@ -3202,7 +3272,7 @@ export class UI {
     const from = state.players.find((p) => p.id === swap.fromId);
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;color:#facc15;font-weight:bold;margin-bottom:8px;";
+    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;";
     title.textContent = `${t("swap.from")} ${from?.name ?? "?"}`;
     panel.appendChild(title);
 

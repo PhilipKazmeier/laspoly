@@ -6,7 +6,10 @@
     <title>LasPoly</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden;
+        background: radial-gradient(ellipse at 50% 0%, #1b1430 0%, #0a0913 60%);
+      }
       #renderCanvas {
         position: absolute;
         top: 0; left: 0;
@@ -18,8 +21,9 @@
         top: 0; left: 0;
         width: 100%; height: 100%;
         pointer-events: none;
-        font-family: 'Segoe UI', sans-serif;
-        color: #fff;
+        font-family: 'Segoe UI', system-ui, -apple-system, 'Inter', Roboto, sans-serif;
+        color: #f3f1fb;
+        -webkit-font-smoothing: antialiased;
       }
       #ui * { pointer-events: auto; }
     </style>
