@@ -20,6 +20,7 @@ import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
+import { getTheme, setTheme, type Theme } from "./theme.js";
 
 const css = `
   /* ── Neon-Vegas glass design system ─────────────────────────────── */
@@ -512,6 +513,58 @@ const css = `
   }
   .confirm-overlay .co-btns { display: flex; gap: 8px; margin-top: 10px; }
   .confirm-overlay .co-msg { margin-bottom: 6px; }
+
+  /* ── Classic theme (original look) ──────────────────────────────────
+     Overriding the tokens reverts the token-driven rules (glass, radii,
+     shadows, blur, accents); the block below only re-adds the few bits that
+     the neon rules hardcode (button/header/popup gradients). */
+  body.theme-classic {
+    --glass: rgba(10, 10, 30, 0.85);
+    --glass-strong: #1a1a2e;
+    --glass-light: rgba(255, 255, 255, 0.03);
+    --hairline: #444;
+    --hairline-soft: #333;
+    --text: #eee;
+    --text-dim: #aaa;
+    --text-mute: #888;
+    --gold: #facc15;
+    --gold-deep: #eab308;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --muted: #555;
+    --radius-lg: 8px;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --shadow: none;
+    --shadow-pop: 0 4px 24px rgba(0, 0, 0, 0.7);
+    --glow-gold: none;
+    --glow-magenta: none;
+    --top-hi: none;
+    --blur: none;
+    --font: 'Segoe UI', Arial, sans-serif;
+    background: #1a1a2e;
+  }
+  body.theme-classic button {
+    background: #2563eb; font-weight: normal; letter-spacing: normal;
+    box-shadow: none;
+  }
+  body.theme-classic button:hover { background: #1d4ed8; transform: none; filter: none; box-shadow: none; }
+  body.theme-classic button:active { transform: none; filter: none; }
+  body.theme-classic input:focus, body.theme-classic select:focus { box-shadow: none; }
+  body.theme-classic #gameHeader {
+    background: linear-gradient(to bottom, #c2410c, #ea580c);
+    border-bottom: 2px solid #f97316;
+    box-shadow: none;
+  }
+  body.theme-classic #headerLeft .room-label { color: #fff; }
+  body.theme-classic #actionCardPopup .ac-header { background: #f97316; color: #fff; }
+  body.theme-classic #buyOfferPanel .buy-header { background: #facc15; color: #1a1a2e; }
+  body.theme-classic .prop-btn.danger { background: #991b1b; box-shadow: none; }
+  body.theme-classic .prop-btn.danger:hover { background: #7f1d1d; box-shadow: none; }
+  body.theme-classic #gameOverBanner { background: rgba(0, 0, 0, 0.75); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body.theme-classic #gameOverBanner h1 { text-shadow: none; }
+  body.theme-classic #specialEventToast { background: rgba(88, 28, 135, 0.95); }
+  body.theme-classic #surrenderBtn:hover { box-shadow: none; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -573,6 +626,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Einstellungen",
     "settings.locale": "Sprache / Locale",
     "settings.localeNote": "Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.",
+    "settings.theme": "Design",
+    "settings.themeNeon": "Neon-Vegas",
+    "settings.themeClassic": "Klassisch",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
@@ -765,6 +821,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Settings",
     "settings.locale": "Language / Locale",
     "settings.localeNote": "Note: Local display language – game events come from the server.",
+    "settings.theme": "Design",
+    "settings.themeNeon": "Neon Vegas",
+    "settings.themeClassic": "Classic",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
@@ -1421,6 +1480,11 @@ export class UI {
         <button id="localeENBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'en' ? 'rgba(255,255,255,0.35)' : ''};">🇬🇧 EN</button>
       </div>
       <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
+      <label id="settingsThemeLabel" style="margin-top:10px;">${t("settings.theme")}</label>
+      <div style="display:flex;gap:6px;margin-top:4px;">
+        <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;background:${getTheme() === 'neon' ? 'rgba(255,255,255,0.35)' : ''};">${t("settings.themeNeon")}</button>
+        <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;background:${getTheme() === 'classic' ? 'rgba(255,255,255,0.35)' : ''};">${t("settings.themeClassic")}</button>
+      </div>
       <label id="settingsSfxLabel" style="margin-top:10px;">${t("settings.sfxVolume")}</label>
       <input id="sfxVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentSfxVolume * 100)}" style="width:100%;margin-top:2px;" />
       <label id="settingsMusicLabel" style="margin-top:6px;">${t("settings.musicVolume")}</label>
@@ -1444,11 +1508,13 @@ export class UI {
       settings.innerHTML = buildSettingsContent();
       this.wireLocaleButtons(settings, applyLocale);
       this.wireVolumeSliders(settings);
+      this.wireThemeButtons(settings);
       // Re-render all static UI text
       this.relabelUI();
     };
     this.wireLocaleButtons(settings, applyLocale);
     this.wireVolumeSliders(settings);
+    this.wireThemeButtons(settings);
     const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
     setTimeout(() => applyLocale(savedLocale), 0);
@@ -1457,6 +1523,18 @@ export class UI {
   private wireLocaleButtons(settings: HTMLElement, applyLocale: (locale: Locale) => void) {
     settings.querySelector("#localeDEBtn")?.addEventListener("click", () => applyLocale("de"));
     settings.querySelector("#localeENBtn")?.addEventListener("click", () => applyLocale("en"));
+  }
+
+  private wireThemeButtons(settings: HTMLElement) {
+    // Switching theme reloads so the 3D scene rebuilds under the new palette;
+    // a mid-game reload resumes via the saved session.
+    const apply = (theme: Theme) => {
+      if (getTheme() === theme) return;
+      setTheme(theme);
+      location.reload();
+    };
+    settings.querySelector("#themeNeonBtn")?.addEventListener("click", () => apply("neon"));
+    settings.querySelector("#themeClassicBtn")?.addEventListener("click", () => apply("classic"));
   }
 
   private wireVolumeSliders(settings: HTMLElement) {

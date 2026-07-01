@@ -22,6 +22,60 @@ import {
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
+import { getTheme } from "./theme.js";
+
+// ---------------------------------------------------------------------------
+// Per-theme 3D palette. "neon" = Neon-Vegas glass; "classic" = the original
+// warm wood + green board. Read once at construction; switching reloads.
+// ---------------------------------------------------------------------------
+interface ThemePalette {
+  clear: Color4;
+  ambientDiffuse: Color3 | null; // null → leave the light's default white
+  tableWood: boolean;            // true → procedural wood texture; false → flat colour
+  tableDiffuse: Color3;          // used when tableWood is false
+  tableSpecular: Color3;
+  boardBase: Color3;
+  boardEmissive: Color3;
+  feltTint: Color3 | null;       // null → no diffuseColor (full-brightness texture)
+  tile: Color3;
+  cupDiffuse: Color3;
+  cupEmissive: Color3;
+  cupSpecular: Color3;
+  tokenOutline: boolean;
+}
+
+const THEMES: Record<"neon" | "classic", ThemePalette> = {
+  neon: {
+    clear: new Color4(0.039, 0.035, 0.075, 1),
+    ambientDiffuse: new Color3(0.85, 0.83, 0.95),
+    tableWood: false,
+    tableDiffuse: new Color3(0.1, 0.085, 0.15),
+    tableSpecular: new Color3(0.05, 0.04, 0.09),
+    boardBase: new Color3(0.09, 0.07, 0.14),
+    boardEmissive: new Color3(0.12, 0.09, 0.02),
+    feltTint: new Color3(0.42, 0.4, 0.55),
+    tile: new Color3(0.95, 0.95, 0.97),
+    cupDiffuse: new Color3(0.14, 0.11, 0.2),
+    cupEmissive: new Color3(0.22, 0.16, 0.03),
+    cupSpecular: new Color3(0.3, 0.24, 0.1),
+    tokenOutline: true,
+  },
+  classic: {
+    clear: new Color4(0.2, 0.2, 0.3, 1),
+    ambientDiffuse: null,
+    tableWood: true,
+    tableDiffuse: new Color3(0.42, 0.24, 0.07),
+    tableSpecular: new Color3(0.18, 0.12, 0.06),
+    boardBase: new Color3(0.32, 0.54, 0.28),
+    boardEmissive: new Color3(0, 0, 0),
+    feltTint: null,
+    tile: new Color3(0.97, 0.95, 0.88),
+    cupDiffuse: new Color3(0.22, 0.13, 0.05),
+    cupEmissive: new Color3(0.08, 0.04, 0.01),
+    cupSpecular: new Color3(0.35, 0.22, 0.12),
+    tokenOutline: false,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches FieldConfiguration.loadGroupColors from Java)
@@ -199,6 +253,7 @@ export class Board3D {
   private tokenMeshes: Map<string, AbstractMesh> = new Map();
   private buildingMeshes: Map<number, AbstractMesh> = new Map();
   private currentBoardId: string | null = null;
+  private readonly palette: ThemePalette = THEMES[getTheme()];
   // Car OBJ models (player tokens): one merged template mesh per car index 1-5
   private carModels: Map<number, Mesh> = new Map();
   private carsLoaded = false;
@@ -247,7 +302,7 @@ export class Board3D {
 
     // Neon-Vegas: midnight scene background so any edge beyond the table reads
     // as the same dark world as the HUD (matches --bg-0 #0a0913).
-    this.scene.clearColor = new Color4(0.039, 0.035, 0.075, 1);
+    this.scene.clearColor = this.palette.clear;
 
     // ---- Camera ------------------------------------------------------------
     this.camera = new ArcRotateCamera(
@@ -277,8 +332,8 @@ export class Board3D {
     const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
     fill.intensity = 0.25;
     fill.specular = new Color3(0, 0, 0);
-    // Cool the ambient slightly toward the violet world tone (vs. neutral white).
-    ambient.diffuse = new Color3(0.85, 0.83, 0.95);
+    // Cool the ambient toward the violet world tone (neon); classic leaves it white.
+    if (this.palette.ambientDiffuse) ambient.diffuse = this.palette.ambientDiffuse;
 
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
@@ -304,11 +359,14 @@ export class Board3D {
     );
     table.position.y = -0.45;
     const tableMat = new StandardMaterial("tableMat", this.scene);
-    // Neon-Vegas: uniform dark surround (was a tiled wood texture whose 5×5 repeat
-    // showed seams). Flat colour = one continuous surface; the overhead point
-    // light gives it a soft radial highlight.
-    tableMat.diffuseColor = new Color3(0.1, 0.085, 0.15);
-    tableMat.specularColor = new Color3(0.05, 0.04, 0.09); // cool, low sheen
+    // Classic: procedural wood texture. Neon: flat dark colour (one continuous
+    // surface; the tiled wood showed seams and clashed with the glass HUD).
+    if (this.palette.tableWood) {
+      tableMat.diffuseTexture = this.makeWoodTexture();
+    } else {
+      tableMat.diffuseColor = this.palette.tableDiffuse;
+    }
+    tableMat.specularColor = this.palette.tableSpecular;
     table.material = tableMat;
 
     // ---- Initial board -------------------------------------------------------
@@ -325,6 +383,75 @@ export class Board3D {
 
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  // -------------------------------------------------------------------------
+  // Wood texture (procedural planks/grain for the classic-theme table)
+  // -------------------------------------------------------------------------
+  private makeWoodTexture(): DynamicTexture {
+    const W = 512, H = 512;
+    const tex = new DynamicTexture("woodTex", { width: W, height: H }, this.scene, true);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+
+    // Base warm brown
+    ctx.fillStyle = "#6b3d12";
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw horizontal wood planks (lighter grain lines)
+    const PLANK_H = 64; // px per plank
+    const NUM_PLANKS = Math.ceil(H / PLANK_H);
+    for (let p = 0; p < NUM_PLANKS; p++) {
+      const py = p * PLANK_H;
+      // Slight shade variation per plank
+      const shade = 0.85 + Math.sin(p * 1.7) * 0.1;
+      const r = Math.round(107 * shade);
+      const g = Math.round(61 * shade);
+      const b = Math.round(18 * shade);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, py, W, PLANK_H - 2);
+
+      // Grain lines within each plank
+      for (let gl = 0; gl < 8; gl++) {
+        const gy = py + (gl / 8) * (PLANK_H - 2);
+        const brightness = 0.9 + Math.sin(gl * 2.1 + p * 0.9) * 0.08;
+        const gr = Math.round(130 * brightness);
+        const gg = Math.round(74 * brightness);
+        const gb = Math.round(22 * brightness);
+        ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        // Slightly wavy grain line
+        ctx.moveTo(0, gy);
+        for (let x = 0; x <= W; x += 16) {
+          const waver = Math.sin((x / W) * Math.PI * 6 + p * 1.3 + gl * 0.8) * 2;
+          ctx.lineTo(x, gy + waver);
+        }
+        ctx.stroke();
+      }
+
+      // Plank gap (dark line between planks)
+      ctx.fillStyle = "#3a1e07";
+      ctx.fillRect(0, py + PLANK_H - 2, W, 2);
+    }
+
+    // Knot holes (circular dark spots)
+    const knots = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15], [W * 0.45, H * 0.65], [W * 0.85, H * 0.55]];
+    for (const [kx, ky] of knots) {
+      const grad = ctx.createRadialGradient(kx, ky, 2, kx, ky, 14);
+      grad.addColorStop(0, "rgba(30,12,3,0.85)");
+      grad.addColorStop(0.6, "rgba(60,28,8,0.5)");
+      grad.addColorStop(1, "rgba(107,61,18,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(kx, ky, 14, 10, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    tex.update();
+    // Tile the texture across the large table surface (scale factor on UV)
+    tex.uScale = 5;
+    tex.vScale = 5;
+    return tex;
   }
 
   // -------------------------------------------------------------------------
@@ -386,11 +513,10 @@ export class Board3D {
     );
     boardBase.position.y = -0.04;
     const boardMat = new StandardMaterial("boardMat", this.scene);
-    // Neon-Vegas: dark glass board frame (was classic Monopoly green); the thin
-    // border showing between/around the cream tiles now reads as dark, with a
-    // faint gold self-lit edge so it ties to the HUD's gold accent.
-    boardMat.diffuseColor = new Color3(0.09, 0.07, 0.14);
-    boardMat.emissiveColor = new Color3(0.12, 0.09, 0.02);
+    // Neon: dark glass board frame with a faint gold self-lit edge; classic:
+    // the original Monopoly green (palette carries both).
+    boardMat.diffuseColor = this.palette.boardBase;
+    boardMat.emissiveColor = this.palette.boardEmissive;
     boardMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     boardBase.material = boardMat;
 
@@ -404,9 +530,9 @@ export class Board3D {
     felt.position.y = 0.01;
     const feltMat = new StandardMaterial("feltMat", this.scene);
     feltMat.diffuseTexture = new Texture("/assets/tex_felt.png", this.scene);
-    // Tint the felt texture darker + cooler so the centre matches the dark world
-    // (diffuseColor multiplies the texture).
-    feltMat.diffuseColor = new Color3(0.42, 0.4, 0.55);
+    // Neon tints the felt darker/cooler to match the dark world; classic leaves
+    // the texture at full brightness (feltTint null).
+    if (this.palette.feltTint) feltMat.diffuseColor = this.palette.feltTint;
     feltMat.specularColor = new Color3(0, 0, 0); // flat, no glare from above
     felt.material = feltMat;
 
@@ -449,7 +575,7 @@ export class Board3D {
       tileMesh.isPickable = true; // tile-click hook (setTileClickHandler)
 
       const tileMat = new StandardMaterial(`tileMat_${tile.pos}`, this.scene);
-      tileMat.diffuseColor = new Color3(0.95, 0.95, 0.97); // bright, slightly cool (was warm cream)
+      tileMat.diffuseColor = this.palette.tile; // neon: cool white · classic: warm cream
       tileMesh.material = tileMat;
 
       // ---- Colour bar (inner-edge, facing board centre) --------------------
@@ -734,17 +860,21 @@ export class Board3D {
     mat.specularColor = new Color3(0.4, 0.4, 0.4);
     mat.emissiveColor = bright.scale(0.7);
     clone.material = mat;
-    // Dark contour outline so the figure separates cleanly from the board
-    // surface it sits on, whatever the player colour (bug: low figure/board contrast).
-    clone.renderOutline = true;
-    clone.outlineColor = new Color3(0.03, 0.02, 0.06);
-    clone.outlineWidth = 0.03;
+    // Neon: dark contour outline so the figure separates cleanly from the dark
+    // board, whatever the player colour. Classic keeps the plain look.
+    if (this.palette.tokenOutline) {
+      clone.renderOutline = true;
+      clone.outlineColor = new Color3(0.03, 0.02, 0.06);
+      clone.outlineWidth = 0.03;
+    }
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
     clone.getChildMeshes().forEach((c) => {
       c.material = mat;
-      c.renderOutline = true;
-      c.outlineColor = new Color3(0.03, 0.02, 0.06);
-      c.outlineWidth = 0.03;
+      if (this.palette.tokenOutline) {
+        c.renderOutline = true;
+        c.outlineColor = new Color3(0.03, 0.02, 0.06);
+        c.outlineWidth = 0.03;
+      }
     });
     return clone;
   }
@@ -760,10 +890,12 @@ export class Board3D {
     mat.diffuseColor = color;
     mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
     mesh.material = mat;
-    // Dark contour so the token separates from the board surface (contrast fix).
-    mesh.renderOutline = true;
-    mesh.outlineColor = new Color3(0.03, 0.02, 0.06);
-    mesh.outlineWidth = 0.03;
+    // Neon: dark contour so the token separates from the dark board (contrast fix).
+    if (this.palette.tokenOutline) {
+      mesh.renderOutline = true;
+      mesh.outlineColor = new Color3(0.03, 0.02, 0.06);
+      mesh.outlineWidth = 0.03;
+    }
     return mesh;
   }
 
@@ -1561,10 +1693,10 @@ export class Board3D {
     cup.isPickable = true; // click-to-roll
 
     const cupMat = new StandardMaterial("cupMat", this.scene);
-    // Neon-Vegas: dark cup with a gold self-lit rim glow (was leather brown).
-    cupMat.diffuseColor = new Color3(0.14, 0.11, 0.2);
-    cupMat.emissiveColor = new Color3(0.22, 0.16, 0.03); // gold sheen, blooms via GlowLayer
-    cupMat.specularColor = new Color3(0.3, 0.24, 0.1);
+    // Neon: dark cup with a gold self-lit rim. Classic: leather brown (palette).
+    cupMat.diffuseColor = this.palette.cupDiffuse;
+    cupMat.emissiveColor = this.palette.cupEmissive;
+    cupMat.specularColor = this.palette.cupSpecular;
     cupMat.backFaceCulling = false; // double-sided so interior shows
     cup.material = cupMat;
     this.diceCupMesh = cup;
