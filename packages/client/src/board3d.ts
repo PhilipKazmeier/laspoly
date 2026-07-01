@@ -41,7 +41,6 @@ interface ThemePalette {
   cupDiffuse: Color3;
   cupEmissive: Color3;
   cupSpecular: Color3;
-  tokenOutline: boolean;
 }
 
 const THEMES: Record<"neon" | "classic", ThemePalette> = {
@@ -58,7 +57,6 @@ const THEMES: Record<"neon" | "classic", ThemePalette> = {
     cupDiffuse: new Color3(0.14, 0.11, 0.2),
     cupEmissive: new Color3(0.22, 0.16, 0.03),
     cupSpecular: new Color3(0.3, 0.24, 0.1),
-    tokenOutline: true,
   },
   classic: {
     clear: new Color4(0.2, 0.2, 0.3, 1),
@@ -73,7 +71,6 @@ const THEMES: Record<"neon" | "classic", ThemePalette> = {
     cupDiffuse: new Color3(0.22, 0.13, 0.05),
     cupEmissive: new Color3(0.08, 0.04, 0.01),
     cupSpecular: new Color3(0.35, 0.22, 0.12),
-    tokenOutline: false,
   },
 };
 
@@ -860,22 +857,8 @@ export class Board3D {
     mat.specularColor = new Color3(0.4, 0.4, 0.4);
     mat.emissiveColor = bright.scale(0.7);
     clone.material = mat;
-    // Neon: dark contour outline so the figure separates cleanly from the dark
-    // board, whatever the player colour. Classic keeps the plain look.
-    if (this.palette.tokenOutline) {
-      clone.renderOutline = true;
-      clone.outlineColor = new Color3(0.03, 0.02, 0.06);
-      clone.outlineWidth = 0.03;
-    }
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
-    clone.getChildMeshes().forEach((c) => {
-      c.material = mat;
-      if (this.palette.tokenOutline) {
-        c.renderOutline = true;
-        c.outlineColor = new Color3(0.03, 0.02, 0.06);
-        c.outlineWidth = 0.03;
-      }
-    });
+    clone.getChildMeshes().forEach((c) => { c.material = mat; });
     return clone;
   }
 
@@ -890,12 +873,6 @@ export class Board3D {
     mat.diffuseColor = color;
     mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
     mesh.material = mat;
-    // Neon: dark contour so the token separates from the dark board (contrast fix).
-    if (this.palette.tokenOutline) {
-      mesh.renderOutline = true;
-      mesh.outlineColor = new Color3(0.03, 0.02, 0.06);
-      mesh.outlineWidth = 0.03;
-    }
     return mesh;
   }
 

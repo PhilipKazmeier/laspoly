@@ -1472,18 +1472,24 @@ export class UI {
     // Settings overlay (non-modal, toggled)
     const settings = document.createElement("div");
     settings.id = "settingsOverlay";
+    // Selected toggle → solid blue + white text (clearly the active choice);
+    // unselected → muted glass. `sel(true)` also wins over the .hdr-btn/base rules.
+    const sel = (on: boolean) =>
+      on
+        ? "background:#2563eb;border-color:#3b82f6;color:#fff;font-weight:bold;"
+        : "background:rgba(255,255,255,0.06);color:var(--text-dim);";
     const buildSettingsContent = () => `
       <div id="settingsTitle" style="font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;">${t("settings.title")}</div>
       <label id="settingsLocaleLabel">${t("settings.locale")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
-        <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'de' ? 'rgba(255,255,255,0.35)' : ''};">🇩🇪 DE</button>
-        <button id="localeENBtn" class="hdr-btn" style="font-size:12px;background:${_locale === 'en' ? 'rgba(255,255,255,0.35)' : ''};">🇬🇧 EN</button>
+        <button id="localeDEBtn" class="hdr-btn" style="font-size:12px;${sel(_locale === 'de')}">🇩🇪 DE</button>
+        <button id="localeENBtn" class="hdr-btn" style="font-size:12px;${sel(_locale === 'en')}">🇬🇧 EN</button>
       </div>
       <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
       <label id="settingsThemeLabel" style="margin-top:10px;">${t("settings.theme")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
-        <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;background:${getTheme() === 'neon' ? 'rgba(255,255,255,0.35)' : ''};">${t("settings.themeNeon")}</button>
-        <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;background:${getTheme() === 'classic' ? 'rgba(255,255,255,0.35)' : ''};">${t("settings.themeClassic")}</button>
+        <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'neon')}">${t("settings.themeNeon")}</button>
+        <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'classic')}">${t("settings.themeClassic")}</button>
       </div>
       <label id="settingsSfxLabel" style="margin-top:10px;">${t("settings.sfxVolume")}</label>
       <input id="sfxVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentSfxVolume * 100)}" style="width:100%;margin-top:2px;" />
