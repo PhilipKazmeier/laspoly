@@ -2,6 +2,7 @@ import { Net, loadSession, clearSession } from "./net.js";
 import { Board3D } from "./board3d.js";
 import { UI } from "./ui.js";
 import { audio } from "./audio.js";
+import { getBoard } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 
 const JAIL_POS = 40;
@@ -156,14 +157,42 @@ class StateQueue {
       ]);
     }
 
+    // Position of the "Go To Jail" field on this board (for the jail walk below).
+    const goToJailPos =
+      getBoard(state.boardId).tiles.find((t) => t.type === "gotojail")?.pos ?? null;
+
     // (b) Movers ONE AT A TIME so bots animate sequentially, never simultaneously.
     //    Safety timeout: 15 s per mover (12 tiles × 120 ms + margin).
     for (const { id, from, to } of movers) {
       this.board.ensureTokenExists(id, state, myId);
-      await Promise.race([
-        this.board.animateMoveAsync(id, from, to),
-        timeout(15_000),
-      ]);
+
+      // Jail via the Go-To-Jail field: if this move ends in jail AND the player's
+      // roll lands them exactly on that field, walk the roll onto the field first,
+      // then slide from there into the cage (two steps) instead of teleporting
+      // straight into the cage. Other jail entries (3 doubles, action card) still
+      // do a single slide.
+      const landedOnJailField =
+        to === JAIL_POS &&
+        goToJailPos !== null &&
+        rolledD1 > 0 &&
+        (from + rolledD1 + rolledD2) % 40 === goToJailPos;
+
+      if (landedOnJailField) {
+        await Promise.race([
+          this.board.animateMoveAsync(id, from, goToJailPos!),
+          timeout(15_000),
+        ]);
+        await timeout(250); // brief beat on the field before being hauled off
+        await Promise.race([
+          this.board.animateMoveAsync(id, goToJailPos!, to),
+          timeout(15_000),
+        ]);
+      } else {
+        await Promise.race([
+          this.board.animateMoveAsync(id, from, to),
+          timeout(15_000),
+        ]);
+      }
     }
 
     // (c) After animation: apply visuals, show action-card popup, update HUD.

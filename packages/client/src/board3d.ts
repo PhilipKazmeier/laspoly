@@ -1274,6 +1274,18 @@ export class Board3D {
 
   private enqueueMove(playerId: string, from: number, to: number) {
     const RING = 40;
+
+    // Into jail: the cage sits at the felt centre and JAIL_POS (40) is not a real
+    // ring tile, so slide straight to the cage instead of walking tiles (walking
+    // toward 40 never terminates on the ring). Callers that want the "walk onto
+    // the Go-To-Jail field first" effect pass that as a separate prior move.
+    if (to === JAIL_POS) {
+      const existing = this.moveQueues.get(playerId) ?? [];
+      this.moveQueues.set(playerId, [...existing, [0, 0]]);
+      if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+      return;
+    }
+
     const forwardDist = (((to - from) % RING) + RING) % RING;
 
     // A forward distance > 12 can't be a dice roll (max 6+6). It's an action-card
