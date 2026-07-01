@@ -18,7 +18,6 @@ import {
   AbstractMesh,
   Mesh,
   SceneLoader,
-  GlowLayer,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
@@ -281,11 +280,6 @@ export class Board3D {
     // Cool the ambient slightly toward the violet world tone (vs. neutral white).
     ambient.diffuse = new Color3(0.85, 0.83, 0.95);
 
-    // Neon-Vegas: bloom on emissive elements (player tokens, active-turn marker,
-    // dice pips). Moderate intensity so it glows without washing out tile labels.
-    const glow = new GlowLayer("glow", this.scene);
-    glow.intensity = 0.55;
-
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
       if (pointerInfo.type !== 1) return; // POINTERDOWN
@@ -310,7 +304,10 @@ export class Board3D {
     );
     table.position.y = -0.45;
     const tableMat = new StandardMaterial("tableMat", this.scene);
-    tableMat.diffuseTexture = this.makeWoodTexture();
+    // Neon-Vegas: uniform dark surround (was a tiled wood texture whose 5×5 repeat
+    // showed seams). Flat colour = one continuous surface; the overhead point
+    // light gives it a soft radial highlight.
+    tableMat.diffuseColor = new Color3(0.1, 0.085, 0.15);
     tableMat.specularColor = new Color3(0.05, 0.04, 0.09); // cool, low sheen
     table.material = tableMat;
 
@@ -328,76 +325,6 @@ export class Board3D {
 
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
-  }
-
-  // -------------------------------------------------------------------------
-  // Wood texture (procedural planks/grain for the table)
-  // -------------------------------------------------------------------------
-  private makeWoodTexture(): DynamicTexture {
-    const W = 512, H = 512;
-    const tex = new DynamicTexture("woodTex", { width: W, height: H }, this.scene, true);
-    const ctx = tex.getContext() as CanvasRenderingContext2D;
-
-    // Neon-Vegas: dark charcoal-violet surround (was warm brown wood) so the
-    // table reads as the same dark-glass world as the HUD.
-    ctx.fillStyle = "#15121f";
-    ctx.fillRect(0, 0, W, H);
-
-    // Draw horizontal planks (subtle cool grain lines)
-    const PLANK_H = 64; // px per plank
-    const NUM_PLANKS = Math.ceil(H / PLANK_H);
-    for (let p = 0; p < NUM_PLANKS; p++) {
-      const py = p * PLANK_H;
-      // Slight shade variation per plank
-      const shade = 0.85 + Math.sin(p * 1.7) * 0.1;
-      const r = Math.round(28 * shade);
-      const g = Math.round(24 * shade);
-      const b = Math.round(40 * shade);
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(0, py, W, PLANK_H - 2);
-
-      // Grain lines within each plank
-      for (let gl = 0; gl < 8; gl++) {
-        const gy = py + (gl / 8) * (PLANK_H - 2);
-        const brightness = 0.9 + Math.sin(gl * 2.1 + p * 0.9) * 0.08;
-        const gr = Math.round(46 * brightness);
-        const gg = Math.round(40 * brightness);
-        const gb = Math.round(66 * brightness);
-        ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        // Slightly wavy grain line
-        ctx.moveTo(0, gy);
-        for (let x = 0; x <= W; x += 16) {
-          const waver = Math.sin((x / W) * Math.PI * 6 + p * 1.3 + gl * 0.8) * 2;
-          ctx.lineTo(x, gy + waver);
-        }
-        ctx.stroke();
-      }
-
-      // Plank gap (dark line between planks)
-      ctx.fillStyle = "#0c0a14";
-      ctx.fillRect(0, py + PLANK_H - 2, W, 2);
-    }
-
-    // Knot holes (circular dark spots)
-    const knots = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15], [W * 0.45, H * 0.65], [W * 0.85, H * 0.55]];
-    for (const [kx, ky] of knots) {
-      const grad = ctx.createRadialGradient(kx, ky, 2, kx, ky, 14);
-      grad.addColorStop(0, "rgba(8,6,14,0.85)");
-      grad.addColorStop(0.6, "rgba(20,16,30,0.5)");
-      grad.addColorStop(1, "rgba(40,34,58,0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.ellipse(kx, ky, 14, 10, 0.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    tex.update();
-    // Tile the texture across the large table surface (scale factor on UV)
-    tex.uScale = 5;
-    tex.vScale = 5;
-    return tex;
   }
 
   // -------------------------------------------------------------------------
@@ -807,8 +734,18 @@ export class Board3D {
     mat.specularColor = new Color3(0.4, 0.4, 0.4);
     mat.emissiveColor = bright.scale(0.7);
     clone.material = mat;
+    // Dark contour outline so the figure separates cleanly from the board
+    // surface it sits on, whatever the player colour (bug: low figure/board contrast).
+    clone.renderOutline = true;
+    clone.outlineColor = new Color3(0.03, 0.02, 0.06);
+    clone.outlineWidth = 0.03;
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
-    clone.getChildMeshes().forEach((c) => { c.material = mat; });
+    clone.getChildMeshes().forEach((c) => {
+      c.material = mat;
+      c.renderOutline = true;
+      c.outlineColor = new Color3(0.03, 0.02, 0.06);
+      c.outlineWidth = 0.03;
+    });
     return clone;
   }
 
@@ -823,6 +760,10 @@ export class Board3D {
     mat.diffuseColor = color;
     mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
     mesh.material = mat;
+    // Dark contour so the token separates from the board surface (contrast fix).
+    mesh.renderOutline = true;
+    mesh.outlineColor = new Color3(0.03, 0.02, 0.06);
+    mesh.outlineWidth = 0.03;
     return mesh;
   }
 
