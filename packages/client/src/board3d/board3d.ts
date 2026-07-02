@@ -25,6 +25,7 @@ import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 import { getTheme } from "../theme.js";
+import { getQuality } from "../quality.js";
 import {
   ThemePalette,
   THEMES,
@@ -43,6 +44,7 @@ import {
 import { drawBoard, makeWoodTexture } from "./tiles.js";
 import { DiceRig } from "./dice.js";
 import { BuildingRenderer } from "./buildings.js";
+import { Effects } from "./effects.js";
 
 export class Board3D {
   private engine: Engine;
@@ -62,6 +64,7 @@ export class Board3D {
   private prevPositions: Map<string, number> = new Map();
   private dice: DiceRig;
   private buildings: BuildingRenderer;
+  private effects: Effects;
   private camera!: ArcRotateCamera;
   private tokenRings: Map<string, AbstractMesh> = new Map();
   // Interaction hooks
@@ -117,10 +120,19 @@ export class Board3D {
     key.specular = new Color3(0.1, 0.1, 0.1);
     // Soft fill from straight above so the board is evenly lit when viewed top-down.
     const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
-    fill.intensity = 0.25;
     fill.specular = new Color3(0, 0, 0);
     // Cool the ambient toward the violet world tone (neon); classic leaves it white.
     if (this.palette.ambientDiffuse) ambient.diffuse = this.palette.ambientDiffuse;
+
+    // ---- Post-processing / glow / shadows (quality-gated) -------------------
+    this.effects = new Effects(this.scene, getTheme(), getQuality());
+    this.effects.initPipeline(this.camera);
+    this.effects.initGlow();
+    this.effects.initShadows();
+    // The shadow light adds ~0.35 directional intensity, so dim the flat fill
+    // to keep overall board brightness unchanged. Low quality keeps the
+    // original fill (no shadow light exists there).
+    fill.intensity = getQuality() === "high" ? 0.1 : 0.25;
 
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
@@ -155,6 +167,7 @@ export class Board3D {
     }
     tableMat.specularColor = this.palette.tableSpecular;
     table.material = tableMat;
+    this.effects.addShadowReceiver(table);
 
     // ---- Initial board -------------------------------------------------------
     const boards = listBoards();
@@ -166,9 +179,9 @@ export class Board3D {
     this.preloadCarModels();
 
     // Dice cup + dice
-    this.dice = new DiceRig(this.scene, this.palette);
+    this.dice = new DiceRig(this.scene, this.palette, this.effects);
     // Buildings + ownership markers
-    this.buildings = new BuildingRenderer(this.scene);
+    this.buildings = new BuildingRenderer(this.scene, this.effects);
 
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
@@ -179,6 +192,12 @@ export class Board3D {
     if (this.currentBoardId === boardId) return;
     this.currentBoardId = boardId;
     drawBoard(this.scene, this.palette, getBoard(boardId));
+    // Large static surfaces receive token/building shadows (no-op on low quality).
+    for (const m of this.scene.meshes) {
+      if (m.name === "boardBase" || m.name === "felt" || m.name.startsWith("tile_")) {
+        this.effects.addShadowReceiver(m);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -246,6 +265,7 @@ export class Board3D {
     clone.material = mat;
     // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
     clone.getChildMeshes().forEach((c) => { c.material = mat; });
+    this.effects.addShadowCaster(clone);
     return clone;
   }
 
@@ -260,6 +280,7 @@ export class Board3D {
     mat.diffuseColor = color;
     mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
     mesh.material = mat;
+    this.effects.addShadowCaster(mesh);
     return mesh;
   }
 
@@ -307,6 +328,7 @@ export class Board3D {
       ringMat.specularColor = new Color3(0, 0, 0);
       ring.material = ringMat;
       ring.isPickable = false;
+      this.effects.addGlowMesh(ring as Mesh);
       this.tokenRings.set(playerId, ring);
     }
     return ring;

@@ -25,6 +25,7 @@ import {
   DIE_SIZE,
   DICE_SAFETY_MS,
 } from "./constants.js";
+import type { Effects } from "./effects.js";
 
 export class DiceRig {
   private diceCupMesh: AbstractMesh | null = null;
@@ -32,7 +33,7 @@ export class DiceRig {
   private dieMesh2: AbstractMesh | null = null;
   private diceAnimating = false;
 
-  constructor(private scene: Scene, private palette: ThemePalette) {
+  constructor(private scene: Scene, private palette: ThemePalette, private effects?: Effects) {
     this.initDice();
   }
 
@@ -77,6 +78,8 @@ export class DiceRig {
     cupMat.specularColor = this.palette.cupSpecular;
     cupMat.backFaceCulling = false; // double-sided so interior shows
     cup.material = cupMat;
+    this.effects?.addShadowCaster(cup);
+    this.effects?.addGlowMesh(cup);
     this.diceCupMesh = cup;
 
     // Pip dice — atlas-textured cubes with distinct faces for 1–6.
@@ -86,6 +89,7 @@ export class DiceRig {
       const dz = CZ + (d === 0 ? -0.14 : 0.14);
       const die = this.createPipDie(`die_${d}`, DIE_SIZE);
       die.isPickable = false;
+      this.effects?.addShadowCaster(die);
       die.position.set(dx, -2, dz);  // hidden below felt
       if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
     }

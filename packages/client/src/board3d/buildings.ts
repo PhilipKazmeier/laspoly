@@ -20,12 +20,13 @@ import {
   outerDirection,
   playerColor3,
 } from "./constants.js";
+import type { Effects } from "./effects.js";
 
 export class BuildingRenderer {
   private buildingMeshes: Map<number, AbstractMesh> = new Map();
   private ownershipMarkers: Map<number, AbstractMesh> = new Map();
 
-  constructor(private scene: Scene) {}
+  constructor(private scene: Scene, private effects?: Effects) {}
 
   /** Rebuild building + ownership-marker meshes from state. */
   update(state: GameState): void {
@@ -74,6 +75,7 @@ export class BuildingRenderer {
       }
 
       mesh.material = mat;
+      this.effects?.addShadowCaster(mesh);
       // Offset slightly toward the board centre from the tile
       const [, odz] = outerDirection(pos);
       mesh.position.set(x, 0.35, z + odz * 0.5);

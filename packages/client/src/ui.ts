@@ -21,6 +21,7 @@ import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
 import { getTheme, setTheme, type Theme } from "./theme.js";
+import { getQuality, setQuality, type Quality } from "./quality.js";
 
 const css = `
   /* ── Neon-Vegas glass design system ─────────────────────────────── */
@@ -629,6 +630,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.theme": "Design",
     "settings.themeNeon": "Neon-Vegas",
     "settings.themeClassic": "Klassisch",
+    "settings.quality": "Grafik",
+    "settings.qualityHigh": "Hoch",
+    "settings.qualityLow": "Niedrig",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
@@ -824,6 +828,9 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.theme": "Design",
     "settings.themeNeon": "Neon Vegas",
     "settings.themeClassic": "Classic",
+    "settings.quality": "Graphics",
+    "settings.qualityHigh": "High",
+    "settings.qualityLow": "Low",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
@@ -1491,6 +1498,11 @@ export class UI {
         <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'neon')}">${t("settings.themeNeon")}</button>
         <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'classic')}">${t("settings.themeClassic")}</button>
       </div>
+      <label id="settingsQualityLabel" style="margin-top:10px;">${t("settings.quality")}</label>
+      <div style="display:flex;gap:6px;margin-top:4px;">
+        <button id="qualityHighBtn" class="hdr-btn" style="font-size:12px;${sel(getQuality() === 'high')}">${t("settings.qualityHigh")}</button>
+        <button id="qualityLowBtn" class="hdr-btn" style="font-size:12px;${sel(getQuality() === 'low')}">${t("settings.qualityLow")}</button>
+      </div>
       <label id="settingsSfxLabel" style="margin-top:10px;">${t("settings.sfxVolume")}</label>
       <input id="sfxVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentSfxVolume * 100)}" style="width:100%;margin-top:2px;" />
       <label id="settingsMusicLabel" style="margin-top:6px;">${t("settings.musicVolume")}</label>
@@ -1515,12 +1527,14 @@ export class UI {
       this.wireLocaleButtons(settings, applyLocale);
       this.wireVolumeSliders(settings);
       this.wireThemeButtons(settings);
+      this.wireQualityButtons(settings);
       // Re-render all static UI text
       this.relabelUI();
     };
     this.wireLocaleButtons(settings, applyLocale);
     this.wireVolumeSliders(settings);
     this.wireThemeButtons(settings);
+    this.wireQualityButtons(settings);
     const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
     setTimeout(() => applyLocale(savedLocale), 0);
@@ -1541,6 +1555,18 @@ export class UI {
     };
     settings.querySelector("#themeNeonBtn")?.addEventListener("click", () => apply("neon"));
     settings.querySelector("#themeClassicBtn")?.addEventListener("click", () => apply("classic"));
+  }
+
+  private wireQualityButtons(settings: HTMLElement) {
+    // Switching quality reloads so the Babylon effect pipeline (bloom, glow,
+    // shadows, particles) rebuilds cleanly; mid-game reload resumes via session.
+    const apply = (quality: Quality) => {
+      if (getQuality() === quality) return;
+      setQuality(quality);
+      location.reload();
+    };
+    settings.querySelector("#qualityHighBtn")?.addEventListener("click", () => apply("high"));
+    settings.querySelector("#qualityLowBtn")?.addEventListener("click", () => apply("low"));
   }
 
   private wireVolumeSliders(settings: HTMLElement) {
