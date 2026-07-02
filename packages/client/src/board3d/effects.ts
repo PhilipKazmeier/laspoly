@@ -158,6 +158,52 @@ export class Effects {
     return tex;
   }
 
+  /** Celebration confetti burst at a world position (win). Skipped on low quality. */
+  confettiBurst(x: number, y: number, z: number): void {
+    if (this.quality === "low") return;
+    const T = 8;
+    const tex = new DynamicTexture("confettiTex", { width: T, height: T }, this.scene, false);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, T, T);
+    tex.update();
+
+    const palette: Color4[] = [
+      new Color4(0.94, 0.27, 0.27, 1), // red
+      new Color4(0.23, 0.51, 0.96, 1), // blue
+      new Color4(0.13, 0.77, 0.37, 1), // green
+      new Color4(0.92, 0.7, 0.03, 1),  // gold
+      new Color4(0.66, 0.33, 0.97, 1), // purple
+    ];
+    for (let burst = 0; burst < 2; burst++) {
+      const ps = new ParticleSystem(`confetti_${burst}`, 300, this.scene);
+      ps.particleTexture = tex;
+      ps.emitter = new Vector3(x, y + 0.3, z);
+      ps.minEmitBox = new Vector3(-0.2, 0, -0.2);
+      ps.maxEmitBox = new Vector3(0.2, 0.2, 0.2);
+      ps.minSize = 0.05;
+      ps.maxSize = 0.12;
+      ps.minLifeTime = 1.4;
+      ps.maxLifeTime = 2.6;
+      ps.emitRate = 220;
+      // Cone upward with spread; gravity pulls the streamers back down.
+      ps.direction1 = new Vector3(-1, 2.2, -1);
+      ps.direction2 = new Vector3(1, 3.2, 1);
+      ps.minEmitPower = 2.2;
+      ps.maxEmitPower = 4.2;
+      ps.gravity = new Vector3(0, -4, 0);
+      ps.minAngularSpeed = -6;
+      ps.maxAngularSpeed = 6;
+      ps.color1 = palette[(burst * 2) % palette.length]!;
+      ps.color2 = palette[(burst * 2 + 1) % palette.length]!;
+      ps.colorDead = new Color4(1, 1, 1, 0);
+      ps.targetStopDuration = 2.5;
+      ps.disposeOnStop = true;
+      ps.start();
+    }
+  }
+
   /** One-shot grey dust puff at a world position (building placement). */
   dustPuff(x: number, y: number, z: number): void {
     if (this.quality === "low") return;

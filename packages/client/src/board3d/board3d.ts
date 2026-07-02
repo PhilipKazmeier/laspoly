@@ -1029,6 +1029,45 @@ export class Board3D {
   }
 
   // -------------------------------------------------------------------------
+  // Win celebration: confetti at the winner token + a slow camera orbit.
+  // Fire-and-forget; any pointer input aborts the orbit so the user regains
+  // camera control instantly.
+  // -------------------------------------------------------------------------
+  playWinCelebration(winnerId: string): void {
+    const token = this.tokenMeshes.get(winnerId);
+    const pos = token ? token.position : Vector3.Zero();
+    this.effects.confettiBurst(pos.x, pos.y + 0.4, pos.z);
+
+    const ORBIT_MS = 8000;
+    const startAlpha = this.camera.alpha;
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const stop = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      this.scene.onPointerObservable.remove(pointerObs);
+      clearTimeout(safety);
+    };
+    const safety = setTimeout(stop, ORBIT_MS + 1000);
+    // Abort the orbit the moment the user touches the scene.
+    const pointerObs = this.scene.onPointerObservable.add((pi) => {
+      if (pi.type === 1) stop(); // POINTERDOWN
+    });
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / ORBIT_MS, 1);
+      this.camera.alpha = startAlpha + Math.PI * 2 * t;
+      if (t >= 1) stop();
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Active-player highlight (feature #3)
   // A hovering marker placed ABOVE the active token to make the current
   // player unmistakable. This is purely additive — it never touches existing
@@ -1054,6 +1093,10 @@ export class Board3D {
 
     this.activeHighlightPlayerId = playerId;
     if (!playerId) return;
+
+    // One-shot pulse on the new active player's halo ring so the turn change
+    // is felt on the board itself (not just in the HUD).
+    this.pulseRing(playerId);
 
     // Floating downward-pointing cone hovering ABOVE the active token (bug 2-7).
     // (Replaces the old flat disc under the token, which also showed under jailed
@@ -1085,6 +1128,37 @@ export class Board3D {
       elapsed += now - lastTime;
       lastTime = now;
       this._updateActiveHighlightPosition(elapsed);
+    });
+  }
+
+  /** Quick scale pulse on a player's halo ring (turn start). Own safety reset. */
+  private pulseRing(playerId: string): void {
+    const ring = this.tokenRings.get(playerId);
+    if (!ring) return;
+    const PULSE_MS = 500;
+    const orig = ring.scaling.clone();
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      if (!ring.isDisposed()) ring.scaling.copyFrom(orig);
+    };
+    const safety = setTimeout(finish, PULSE_MS + 200);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      if (ring.isDisposed()) { finish(); return; }
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / PULSE_MS, 1);
+      const s = 1 + 0.45 * 4 * t * (1 - t); // swell to 1.45 mid-pulse
+      ring.scaling.set(orig.x * s, orig.y, orig.z * s);
+      if (t >= 1) finish();
     });
   }
 

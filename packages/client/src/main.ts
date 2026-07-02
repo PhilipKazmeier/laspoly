@@ -354,6 +354,9 @@ net.onMessage((msg) => {
       clearSession();
       audio.play("gameover");
       audio.stopBgm();
+      // Confetti + slow orbit around the winner (fire-and-forget; any pointer
+      // input aborts the orbit). The banner shows immediately on top.
+      board3d.playWinCelebration(msg.winnerId);
       ui.showGameOver(msg.winnerName);
       break;
     case "turnTimer":
