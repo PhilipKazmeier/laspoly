@@ -1,8 +1,11 @@
 // ---------------------------------------------------------------------------
 // board3d/buildings.ts — building meshes (houses/hotel/factory) and per-tile
-// ownership markers, rebuilt from state on every update. (Mesh caching lands
-// in a later phase; this module currently preserves the dispose/recreate
-// behaviour of the original board3d.ts verbatim.)
+// ownership frames, with signature-based caching: a tile's meshes are only
+// rebuilt when its building/ownership state actually changes (previously every
+// state update disposed and recreated everything).
+//
+// update() returns the positions whose buildings changed this update — the
+// drop-in placement animation consumes that list.
 // ---------------------------------------------------------------------------
 import {
   MeshBuilder,
@@ -11,6 +14,7 @@ import {
   DynamicTexture,
   AbstractMesh,
   Mesh,
+  SceneLoader,
   Scene,
 } from "@babylonjs/core";
 import type { GameState } from "@laspoly/shared";
@@ -25,65 +29,192 @@ import {
 } from "./constants.js";
 import type { Effects } from "./effects.js";
 
+interface CachedEntry {
+  sig: string;
+  meshes: AbstractMesh[];
+}
+
 export class BuildingRenderer {
-  private buildingMeshes: Map<number, AbstractMesh> = new Map();
-  private ownershipMarkers: Map<number, AbstractMesh> = new Map();
+  private buildingCache: Map<number, CachedEntry> = new Map();
+  private ownershipCache: Map<number, CachedEntry> = new Map();
+  // Lazy-built templates, cloned per tile.
+  private templates: Map<string, Mesh> = new Map();
+  private materials: Map<string, StandardMaterial> = new Map();
+  private houseObjTemplate: Mesh | null = null;
 
-  constructor(private scene: Scene, private effects?: Effects) {}
-
-  /** Rebuild building + ownership-marker meshes from state. */
-  update(state: GameState): void {
-    this.updateBuildings(state);
-    this.updateOwnershipMarkers(state);
+  constructor(private scene: Scene, private effects?: Effects) {
+    // Best-effort: a nicer house model exists in assets; swap it in when it
+    // loads (cache cleared so tiles rebuild with the upgraded template).
+    void this.tryLoadHouseObj();
   }
 
-  private updateBuildings(state: GameState) {
-    // Dispose buildings that no longer exist
-    for (const [pos, mesh] of this.buildingMeshes) {
-      const b = state.buildings[pos];
-      if (!b || (!b.houses && !b.hotel && !b.factory)) {
-        mesh.dispose();
-        this.buildingMeshes.delete(pos);
+  private async tryLoadHouseObj(): Promise<void> {
+    try {
+      const result = await SceneLoader.ImportMeshAsync("", "/assets/", "house.obj", this.scene);
+      const real = result.meshes.filter(
+        (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
+      );
+      if (real.length === 0) return;
+      const merged = real.length === 1
+        ? real[0]!
+        : Mesh.MergeMeshes(real, true, true, undefined, false, false);
+      if (!merged) return;
+      const bounds = merged.getBoundingInfo().boundingBox.extendSize;
+      const maxDim = Math.max(bounds.x, bounds.y, bounds.z) * 2 || 1;
+      merged.scaling.setAll(0.34 / maxDim);
+      merged.setEnabled(false);
+      merged.isPickable = false;
+      merged.name = "houseObjTemplate";
+      this.houseObjTemplate = merged;
+      // Rebuild any tiles currently showing procedural houses.
+      for (const [pos, entry] of this.buildingCache) {
+        if (entry.sig.split("|")[0] !== "0") {
+          entry.meshes.forEach((m) => m.dispose());
+          this.buildingCache.delete(pos);
+        }
       }
+    } catch {
+      // Procedural fallback stays.
     }
+  }
+
+  private getMaterial(key: string, make: (mat: StandardMaterial) => void): StandardMaterial {
+    let mat = this.materials.get(key);
+    if (!mat) {
+      mat = new StandardMaterial(`bldg_${key}`, this.scene);
+      mat.specularColor = new Color3(0.1, 0.1, 0.1);
+      make(mat);
+      this.materials.set(key, mat);
+    }
+    return mat;
+  }
+
+  /** Merged prism-roof house / stacked hotel / chimney factory templates. */
+  private getTemplate(kind: "house" | "hotel" | "factory"): Mesh {
+    if (kind === "house" && this.houseObjTemplate) return this.houseObjTemplate;
+    let tpl = this.templates.get(kind);
+    if (tpl) return tpl;
+
+    const parts: Mesh[] = [];
+    if (kind === "house") {
+      const body = MeshBuilder.CreateBox("h_body", { width: 0.26, height: 0.2, depth: 0.26 }, this.scene);
+      body.position.y = 0.1;
+      const roof = MeshBuilder.CreateCylinder("h_roof", { tessellation: 3, diameter: 0.36, height: 0.28 }, this.scene);
+      roof.rotation.z = Math.PI / 2;
+      roof.rotation.y = Math.PI / 2;
+      roof.position.y = 0.25;
+      parts.push(body, roof);
+    } else if (kind === "hotel") {
+      const base = MeshBuilder.CreateBox("ht_base", { width: 0.42, height: 0.32, depth: 0.42 }, this.scene);
+      base.position.y = 0.16;
+      const upper = MeshBuilder.CreateBox("ht_upper", { width: 0.32, height: 0.26, depth: 0.32 }, this.scene);
+      upper.position.y = 0.45;
+      const roof = MeshBuilder.CreateCylinder("ht_roof", { tessellation: 3, diameter: 0.4, height: 0.34 }, this.scene);
+      roof.rotation.z = Math.PI / 2;
+      roof.rotation.y = Math.PI / 2;
+      roof.position.y = 0.64;
+      parts.push(base, upper, roof);
+    } else {
+      const hall = MeshBuilder.CreateBox("f_hall", { width: 0.55, height: 0.3, depth: 0.55 }, this.scene);
+      hall.position.y = 0.15;
+      const chimney = MeshBuilder.CreateCylinder("f_chimney", { diameter: 0.11, height: 0.38, tessellation: 8 }, this.scene);
+      chimney.position.set(0.18, 0.4, 0.18);
+      parts.push(hall, chimney);
+    }
+    tpl = Mesh.MergeMeshes(parts, true, true, undefined, false, false)!;
+    tpl.name = `tpl_${kind}`;
+    tpl.setEnabled(false);
+    tpl.isPickable = false;
+    this.templates.set(kind, tpl);
+    return tpl;
+  }
+
+  private cloneBuilding(kind: "house" | "hotel" | "factory", name: string, mortgaged: boolean): AbstractMesh {
+    const tpl = this.getTemplate(kind);
+    const clone = tpl.clone(name)!;
+    clone.setEnabled(true);
+    clone.isPickable = false;
+    const colors: Record<string, Color3> = {
+      house: new Color3(0.15, 0.65, 0.2),
+      hotel: new Color3(0.8, 0.12, 0.12),
+      factory: new Color3(0.62, 0.58, 0.3),
+    };
+    const base = colors[kind]!;
+    const matKey = `${kind}_${mortgaged ? "m" : "n"}`;
+    clone.material = this.getMaterial(matKey, (mat) => {
+      mat.diffuseColor = mortgaged ? base.scale(0.4) : base;
+    });
+    this.effects?.addShadowCaster(clone);
+    return clone;
+  }
+
+  /**
+   * Rebuild changed building/ownership meshes from state.
+   * @returns board positions whose buildings changed (used for drop animation).
+   */
+  update(state: GameState): number[] {
+    const changed = this.updateBuildings(state);
+    this.updateOwnershipMarkers(state);
+    return changed;
+  }
+
+  private updateBuildings(state: GameState): number[] {
+    const changedPositions: number[] = [];
+    const seen = new Set<number>();
 
     for (const [posStr, b] of Object.entries(state.buildings)) {
       const pos = Number(posStr);
       if (!b || (!b.houses && !b.hotel && !b.factory)) continue;
+      seen.add(pos);
+
+      const mortgaged = !!state.mortgaged[pos];
+      const sig = `${b.houses}|${b.hotel ? 1 : 0}|${b.factory ? 1 : 0}|${mortgaged ? 1 : 0}`;
+      const cached = this.buildingCache.get(pos);
+      if (cached?.sig === sig) continue; // unchanged — keep existing meshes
+
+      cached?.meshes.forEach((m) => m.dispose());
+      const meshes: AbstractMesh[] = [];
       const [x, z] = tileXZ(pos);
-
-      const existing = this.buildingMeshes.get(pos);
-      if (existing) existing.dispose();
-
-      let mesh: AbstractMesh;
-      const mat = new StandardMaterial(`bldgMat_${pos}`, this.scene);
+      const [odx, odz] = outerDirection(pos);
+      // Buildings sit toward the INNER edge (opposite the outer direction),
+      // in a row along the tile's cross axis (perpendicular to inner-outer).
+      const innerX = x - odx * (TILE_D / 2 - 0.35);
+      const innerZ = z - odz * (TILE_D / 2 - 0.35);
+      const perpX = odz, perpZ = -odx;
+      const angleRad = (getFieldAngle(pos) * Math.PI) / 180;
 
       if (b.hotel) {
-        mesh = MeshBuilder.CreateBox(`bldg_${pos}`, { width: 0.4, height: 0.6, depth: 0.4 }, this.scene);
-        mat.diffuseColor = new Color3(0.8, 0.1, 0.1);
+        const m = this.cloneBuilding("hotel", `bldg_${pos}`, mortgaged);
+        m.position.set(innerX, 0.1, innerZ);
+        m.rotation.y = angleRad;
+        meshes.push(m);
       } else if (b.factory) {
-        mesh = MeshBuilder.CreateBox(`bldg_${pos}`, { width: 0.6, height: 0.35, depth: 0.6 }, this.scene);
-        mat.diffuseColor = new Color3(0.6, 0.6, 0.2);
+        const m = this.cloneBuilding("factory", `bldg_${pos}`, mortgaged);
+        m.position.set(innerX, 0.1, innerZ);
+        m.rotation.y = angleRad;
+        meshes.push(m);
       } else {
-        mesh = MeshBuilder.CreateBox(
-          `bldg_${pos}`,
-          { width: Math.max(0.1, 0.2 * b.houses), height: 0.25, depth: 0.2 },
-          this.scene
-        );
-        mat.diffuseColor = new Color3(0.1, 0.7, 0.1);
+        const SPACING = 0.3;
+        for (let i = 0; i < b.houses; i++) {
+          const m = this.cloneBuilding("house", `bldg_${pos}_${i}`, mortgaged);
+          const off = (i - (b.houses - 1) / 2) * SPACING;
+          m.position.set(innerX + perpX * off, 0.1, innerZ + perpZ * off);
+          m.rotation.y = angleRad;
+          meshes.push(m);
+        }
       }
-
-      if (state.mortgaged[pos]) {
-        mat.diffuseColor = mat.diffuseColor.scale(0.4);
-      }
-
-      mesh.material = mat;
-      this.effects?.addShadowCaster(mesh);
-      // Offset slightly toward the board centre from the tile
-      const [, odz] = outerDirection(pos);
-      mesh.position.set(x, 0.35, z + odz * 0.5);
-      this.buildingMeshes.set(pos, mesh);
+      this.buildingCache.set(pos, { sig, meshes });
+      changedPositions.push(pos);
     }
+
+    // Tiles whose buildings vanished entirely.
+    for (const [pos, entry] of this.buildingCache) {
+      if (!seen.has(pos)) {
+        entry.meshes.forEach((m) => m.dispose());
+        this.buildingCache.delete(pos);
+      }
+    }
+    return changedPositions;
   }
 
   // ---------------------------------------------------------------------------
@@ -103,7 +234,6 @@ export class BuildingRenderer {
     ctx.clearRect(0, 0, S, S);
     ctx.strokeStyle = "rgba(0,0,0,0.55)";
     ctx.lineWidth = 18;
-    // Diagonal stripes across the tile face.
     for (let d = -S; d < S * 2; d += 56) {
       ctx.beginPath();
       ctx.moveTo(d, 0);
@@ -120,16 +250,13 @@ export class BuildingRenderer {
     const [cx, cz] = tileXZ(pos);
     const BW = 0.06;  // border thickness
     const BH = 0.1;   // border height
-    // Local-space tile footprint (W along X, D along Z), rotated afterwards.
     const w = TILE_W, d = TILE_D;
     const parts: Mesh[] = [];
-    // Long edges (along X at ±z)
     for (const sz of [-1, 1]) {
       const box = MeshBuilder.CreateBox(`ownEdge_${pos}_${sz}`, { width: w, height: BH, depth: BW }, this.scene);
       box.position.set(0, 0, sz * (d / 2 - BW / 2));
       parts.push(box);
     }
-    // Short edges (along Z at ±x)
     for (const sx of [-1, 1]) {
       const box = MeshBuilder.CreateBox(`ownSide_${pos}_${sx}`, { width: BW, height: BH, depth: d - 2 * BW }, this.scene);
       box.position.set(sx * (w / 2 - BW / 2), 0, 0);
@@ -145,13 +272,7 @@ export class BuildingRenderer {
   }
 
   private updateOwnershipMarkers(state: GameState) {
-    // Dispose markers for tiles that are no longer owned.
-    for (const [pos, mesh] of this.ownershipMarkers) {
-      if (!state.ownership[pos]) {
-        mesh.dispose();
-        this.ownershipMarkers.delete(pos);
-      }
-    }
+    const seen = new Set<number>();
 
     for (const [posStr, playerId] of Object.entries(state.ownership)) {
       const pos = Number(posStr);
@@ -160,19 +281,20 @@ export class BuildingRenderer {
 
       const isCorner = pos === 0 || pos === 10 || pos === 20 || pos === 30;
       if (isCorner) continue; // corners aren't ownable properties
+      seen.add(pos);
 
-      // Recreate each update so owner colour + mortgage state always match.
-      const existing = this.ownershipMarkers.get(pos);
-      if (existing) { existing.dispose(); this.ownershipMarkers.delete(pos); }
+      const isMortgaged = !!state.mortgaged[pos];
+      const sig = `${playerId}|${isMortgaged ? 1 : 0}`;
+      const cached = this.ownershipCache.get(pos);
+      if (cached?.sig === sig) continue; // unchanged
 
+      cached?.meshes.forEach((m) => m.dispose());
       const frame = this.buildOwnershipFrame(pos);
       if (!frame) continue;
-      const isMortgaged = !!state.mortgaged[pos];
 
       const mat = new StandardMaterial(`ownMat_${pos}`, this.scene);
       const baseColor = brighten(playerColor3(player.color));
       if (isMortgaged) {
-        // Mortgaged → dull grey frame so it reads distinctly from an active deed.
         mat.diffuseColor = new Color3(0.35, 0.35, 0.35);
         mat.emissiveColor = new Color3(0.08, 0.08, 0.08);
       } else {
@@ -183,7 +305,6 @@ export class BuildingRenderer {
       frame.material = mat;
       if (!isMortgaged) this.effects?.addGlowMesh(frame);
 
-      // Diagonal-stripe overlay on top of the tile face while mortgaged.
       if (isMortgaged) {
         const [cx, cz] = tileXZ(pos);
         const overlay = MeshBuilder.CreatePlane(`ownStripes_${pos}`, { width: TILE_W * 0.9, height: TILE_D * 0.8 }, this.scene);
@@ -200,7 +321,15 @@ export class BuildingRenderer {
         overlay.setParent(frame); // keeps world transform; disposed with the frame
       }
 
-      this.ownershipMarkers.set(pos, frame);
+      this.ownershipCache.set(pos, { sig, meshes: [frame] });
+    }
+
+    // Frames for tiles no longer owned.
+    for (const [pos, entry] of this.ownershipCache) {
+      if (!seen.has(pos)) {
+        entry.meshes.forEach((m) => m.dispose());
+        this.ownershipCache.delete(pos);
+      }
     }
   }
 }
