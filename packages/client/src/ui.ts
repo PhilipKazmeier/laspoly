@@ -143,6 +143,10 @@ const css = `
     border:1px solid rgba(255,255,255,0.15);
   }
   .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
+  @keyframes cardPopIn {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
   #actionCardPopup {
     position: absolute; top: calc(50% + 24px); left: 50%; transform: translate(-50%, -50%);
     width: 320px;
@@ -151,6 +155,7 @@ const css = `
     box-shadow: var(--shadow-pop), var(--top-hi);
     overflow: hidden;
     z-index: 100;
+    animation: cardPopIn 0.25s ease-out;
   }
   #actionCardPopup .ac-header {
     background: linear-gradient(135deg, var(--gold-deep), var(--gold)); color: #2a1c02; font-weight: 700; font-size: 15px;

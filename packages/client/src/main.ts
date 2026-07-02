@@ -196,6 +196,16 @@ class StateQueue {
       }
     }
 
+    // (b2) 3D card draw for ANY player's action card — the card flies from the
+    //      deck and flips to its title after the mover lands, before visuals.
+    //      (The HTML popup below stays local-player-only.)
+    const anyCardEv = events.find((ev) => ev.key === "actionCard");
+    if (anyCardEv) {
+      const title =
+        anyCardEv.text.split(": ").slice(1).join(": ").replace(/\.\s*$/, "") || anyCardEv.text;
+      await Promise.race([this.board.animateCardDrawAsync(title), timeout(3_000)]);
+    }
+
     // (c) After animation: apply visuals, show action-card popup, update HUD.
     //     Everything in this block is strictly after dice + movement.
 

@@ -45,6 +45,7 @@ import { drawBoard, makeWoodTexture } from "./tiles.js";
 import { DiceRig } from "./dice.js";
 import { BuildingRenderer } from "./buildings.js";
 import { Effects } from "./effects.js";
+import { animateCardDrawAsync } from "./cards.js";
 
 export class Board3D {
   private engine: Engine;
@@ -653,6 +654,14 @@ export class Board3D {
    */
   playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
     return this.dice.playDiceAnimationAsync(d1, d2);
+  }
+
+  /**
+   * Action-card draw: a card rises from the deck, flips to reveal `title`,
+   * hovers, fades. Internal safety timeout — safe to await from the queue.
+   */
+  animateCardDrawAsync(title: string): Promise<void> {
+    return animateCardDrawAsync(this.scene, title);
   }
 
   // -------------------------------------------------------------------------

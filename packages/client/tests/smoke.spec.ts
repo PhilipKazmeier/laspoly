@@ -26,6 +26,11 @@ test("lobby → create room → start game → roll turn", async ({ page }) => {
   await expect(page.locator("#rollBtn")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("#rollBtn")).toBeEnabled({ timeout: 30_000 });
 
+  // Roll: the host is always the first player (engine currentPlayerIndex 0),
+  // so without this click the log stays empty until the 60s turn timer —
+  // longer than the assertion below waits (the historical flake in this spec).
+  await page.locator("#rollBtn").click();
+
   // Log has German text
   const log = page.locator("#eventLog");
   await expect(log).toContainText(/würfelt|bewegt|ist an der Reihe|LPD/, { timeout: 30_000 });
