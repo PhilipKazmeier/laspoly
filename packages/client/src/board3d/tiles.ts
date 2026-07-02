@@ -32,7 +32,7 @@ import {
 // Wood texture (procedural planks/grain for the classic-theme table)
 // ---------------------------------------------------------------------------
 export function makeWoodTexture(scene: Scene): DynamicTexture {
-  const W = 512, H = 512;
+  const W = 1024, H = 1024;
   const tex = new DynamicTexture("woodTex", { width: W, height: H }, scene, true);
   const ctx = tex.getContext() as CanvasRenderingContext2D;
 

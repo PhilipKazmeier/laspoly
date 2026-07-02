@@ -116,8 +116,9 @@ export class Board3D {
     ambient.intensity = 0.8;
     ambient.specular = new Color3(0, 0, 0);
     const key = new PointLight("key", new Vector3(0, 20, -5), this.scene);
-    key.intensity = 0.3;
+    key.intensity = this.palette.keyIntensity;
     key.specular = new Color3(0.1, 0.1, 0.1);
+    if (this.palette.keyDiffuse) key.diffuse = this.palette.keyDiffuse;
     // Soft fill from straight above so the board is evenly lit when viewed top-down.
     const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
     fill.specular = new Color3(0, 0, 0);
@@ -129,6 +130,7 @@ export class Board3D {
     this.effects.initPipeline(this.camera);
     this.effects.initGlow();
     this.effects.initShadows();
+    this.effects.initEnvironment();
     // The shadow light adds ~0.35 directional intensity, so dim the flat fill
     // to keep overall board brightness unchanged. Low quality keeps the
     // original fill (no shadow light exists there).
@@ -162,12 +164,40 @@ export class Board3D {
     // surface; the tiled wood showed seams and clashed with the glass HUD).
     if (this.palette.tableWood) {
       tableMat.diffuseTexture = makeWoodTexture(this.scene);
+      // Tight specular highlights read as varnish on the wood.
+      tableMat.specularPower = 64;
     } else {
       tableMat.diffuseColor = this.palette.tableDiffuse;
     }
     tableMat.specularColor = this.palette.tableSpecular;
     table.material = tableMat;
     this.effects.addShadowReceiver(table);
+
+    // Neon: faint self-lit gold rim around the table edge (glow-registered).
+    if (!this.palette.tableWood) {
+      const RIM_W = 0.35, RIM_H = 0.1, T = 48;
+      const rimParts: Mesh[] = [];
+      for (const sz of [-1, 1]) {
+        const strip = MeshBuilder.CreateBox(`tableRim_z${sz}`, { width: T, height: RIM_H, depth: RIM_W }, this.scene);
+        strip.position.set(0, -0.2, sz * (T / 2 - RIM_W / 2));
+        rimParts.push(strip);
+      }
+      for (const sx of [-1, 1]) {
+        const strip = MeshBuilder.CreateBox(`tableRim_x${sx}`, { width: RIM_W, height: RIM_H, depth: T - 2 * RIM_W }, this.scene);
+        strip.position.set(sx * (T / 2 - RIM_W / 2), -0.2, 0);
+        rimParts.push(strip);
+      }
+      const rim = Mesh.MergeMeshes(rimParts, true, true, undefined, false, false);
+      if (rim) {
+        const rimMat = new StandardMaterial("tableRimMat", this.scene);
+        rimMat.diffuseColor = new Color3(0.2, 0.16, 0.05);
+        rimMat.emissiveColor = new Color3(0.35, 0.28, 0.08);
+        rimMat.specularColor = new Color3(0, 0, 0);
+        rim.material = rimMat;
+        rim.isPickable = false;
+        this.effects.addGlowMesh(rim);
+      }
+    }
 
     // ---- Initial board -------------------------------------------------------
     const boards = listBoards();

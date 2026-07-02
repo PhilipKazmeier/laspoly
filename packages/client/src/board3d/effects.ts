@@ -20,6 +20,11 @@ import {
   ShadowGenerator,
   Vector3,
   Color3,
+  Color4,
+  MeshBuilder,
+  StandardMaterial,
+  DynamicTexture,
+  ParticleSystem,
   AbstractMesh,
   Mesh,
 } from "@babylonjs/core";
@@ -99,5 +104,92 @@ export class Effects {
   /** Mark a mesh as receiving shadows (safe to call when shadows are off). */
   addShadowReceiver(mesh: AbstractMesh): void {
     if (this.shadows) mesh.receiveShadows = true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Environment: neon starfield skybox + drifting dust motes. Classic gets its
+  // warm room feel from the palette (clear colour + key light) instead.
+  // ---------------------------------------------------------------------------
+  initEnvironment(): void {
+    if (this.theme !== "neon") return;
+
+    // Inside-out box with an emissive night-sky texture. infiniteDistance keeps
+    // it glued to the camera so it always fills the horizon.
+    const sky = MeshBuilder.CreateBox(
+      "sky",
+      { size: 400, sideOrientation: Mesh.BACKSIDE },
+      this.scene
+    );
+    const mat = new StandardMaterial("skyMat", this.scene);
+    mat.disableLighting = true;
+    mat.emissiveTexture = this.makeStarfieldTexture();
+    mat.backFaceCulling = false;
+    mat.specularColor = new Color3(0, 0, 0);
+    sky.material = mat;
+    sky.infiniteDistance = true;
+    sky.isPickable = false;
+
+    if (this.quality === "high") this.initDust();
+  }
+
+  /** 1024² night sky: vertical midnight gradient + scattered stars. */
+  private makeStarfieldTexture(): DynamicTexture {
+    const S = 1024;
+    const tex = new DynamicTexture("skyTex", { width: S, height: S }, this.scene, true);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const grad = ctx.createLinearGradient(0, 0, 0, S);
+    grad.addColorStop(0, "#1a1230");
+    grad.addColorStop(1, "#0a0913");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, S, S);
+    // Stars: client-side Math.random is fine (visual only — determinism binds
+    // the engine, not the renderer).
+    for (let i = 0; i < 400; i++) {
+      const x = Math.random() * S;
+      const y = Math.random() * S;
+      const r = 0.5 + Math.random() * 1.0;
+      const a = 0.3 + Math.random() * 0.7;
+      ctx.fillStyle = Math.random() < 0.15 ? `rgba(255,220,150,${a})` : `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    tex.update();
+    return tex;
+  }
+
+  /** Slow-drifting golden dust motes above the board (neon + high only). */
+  private initDust(): void {
+    const T = 16;
+    const tex = new DynamicTexture("dustTex", { width: T, height: T }, this.scene, false);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const grad = ctx.createRadialGradient(T / 2, T / 2, 0, T / 2, T / 2, T / 2);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.clearRect(0, 0, T, T);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, T, T);
+    tex.update();
+
+    const ps = new ParticleSystem("dust", 150, this.scene);
+    ps.particleTexture = tex;
+    ps.emitter = new Vector3(0, 0, 0);
+    ps.minEmitBox = new Vector3(-11, 0.5, -11);
+    ps.maxEmitBox = new Vector3(11, 6, 11);
+    ps.minSize = 0.02;
+    ps.maxSize = 0.06;
+    ps.minLifeTime = 6;
+    ps.maxLifeTime = 12;
+    ps.emitRate = 12;
+    ps.direction1 = new Vector3(-0.02, 0.05, -0.02);
+    ps.direction2 = new Vector3(0.02, 0.08, 0.02);
+    ps.minEmitPower = 0.4;
+    ps.maxEmitPower = 1;
+    ps.blendMode = ParticleSystem.BLENDMODE_ADD;
+    ps.color1 = new Color4(1, 0.9, 0.6, 0.5);
+    ps.color2 = new Color4(0.9, 0.9, 1, 0.35);
+    ps.colorDead = new Color4(1, 1, 1, 0);
+    ps.start();
   }
 }

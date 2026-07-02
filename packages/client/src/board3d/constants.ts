@@ -13,6 +13,8 @@ import { JAIL_POS } from "@laspoly/shared";
 export interface ThemePalette {
   clear: Color4;
   ambientDiffuse: Color3 | null; // null → leave the light's default white
+  keyIntensity: number;          // point-light strength (classic warms up the "room lamp")
+  keyDiffuse: Color3 | null;     // null → default white key light
   tableWood: boolean;            // true → procedural wood texture; false → flat colour
   tableDiffuse: Color3;          // used when tableWood is false
   tableSpecular: Color3;
@@ -31,6 +33,8 @@ export const THEMES: Record<"neon" | "classic", ThemePalette> = {
   neon: {
     clear: new Color4(0.039, 0.035, 0.075, 1),
     ambientDiffuse: new Color3(0.85, 0.83, 0.95),
+    keyIntensity: 0.3,
+    keyDiffuse: null,
     tableWood: false,
     tableDiffuse: new Color3(0.1, 0.085, 0.15),
     tableSpecular: new Color3(0.05, 0.04, 0.09),
@@ -44,8 +48,12 @@ export const THEMES: Record<"neon" | "classic", ThemePalette> = {
     cupSpecular: new Color3(0.3, 0.24, 0.1),
   },
   classic: {
-    clear: new Color4(0.2, 0.2, 0.3, 1),
+    // Warm dark room instead of the old blue-grey void — the table now reads
+    // as sitting in a lamp-lit den.
+    clear: new Color4(0.16, 0.12, 0.09, 1),
     ambientDiffuse: null,
+    keyIntensity: 0.4,
+    keyDiffuse: new Color3(1, 0.9, 0.75),
     tableWood: true,
     tableDiffuse: new Color3(0.42, 0.24, 0.07),
     tableSpecular: new Color3(0.18, 0.12, 0.06),
