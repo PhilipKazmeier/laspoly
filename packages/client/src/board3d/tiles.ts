@@ -12,7 +12,8 @@ import {
   DynamicTexture,
   Scene,
 } from "@babylonjs/core";
-import type { BoardDefinition } from "@laspoly/shared";
+import { tilePrice } from "@laspoly/shared";
+import type { BoardDefinition, Tile } from "@laspoly/shared";
 import {
   ThemePalette,
   GROUP_COLORS,
@@ -183,10 +184,18 @@ export function drawBoard(scene: Scene, palette: ThemePalette, board: BoardDefin
       }
     }
 
-    // ---- Label (DynamicTexture on a flat plane) --------------------------
-    addTileLabel(scene, cx, cz, tile.pos, tile.name, tile.type as string, isCorner, tileD, angle);
+    // ---- Face (DynamicTexture on a flat plane: border, icon, name, price) --
+    drawTileFace(scene, palette, board, tile, cx, cz, isCorner, tileD, angle);
   }
 }
+
+/** Emoji icon per non-street tile type (emoji-in-canvas is proven by the 🚔 corner). */
+const TYPE_ICONS: Record<string, string> = {
+  station: "🚉",
+  attraction: "🎡",
+  tax: "💰",
+  action: "❓",
+};
 
 /** Adds the group-coloured bar on the INNER edge (toward board centre) of a property tile. */
 function addColorBar(
@@ -232,22 +241,43 @@ function addColorBar(
   bar.material = barMat;
 }
 
-/** Adds a DynamicTexture label plane on top of a tile. */
-function addTileLabel(
+/** Word-wrap `text` into at most `maxLines` lines that fit `maxWidth`. */
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const w of words) {
+    const test = current ? `${current} ${w}` : w;
+    if (ctx.measureText(test).width > maxWidth && current) {
+      lines.push(current);
+      current = w;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.slice(0, maxLines);
+}
+
+/**
+ * Draws the complete tile face (rounded border, type icon, name, price — or
+ * the corner art) into a DynamicTexture on a flat plane covering the tile.
+ */
+function drawTileFace(
   scene: Scene,
+  palette: ThemePalette,
+  board: BoardDefinition,
+  tile: Tile,
   cx: number,
   cz: number,
-  pos: number,
-  name: string,
-  type: string,
   isCorner: boolean,
   tileD: number,
   angleDeg: number
 ) {
+  const pos = tile.pos;
   // For non-corner tiles: texture is wide (along the tile's long axis) and
-  // short (across the label region). 512×256 gives generous pixel density at
-  // the plane size used — bigger than this doesn't help since the plane itself
-  // is only ~1.5 × 1.8 Babylon units wide.
+  // short (across the label region). Bigger than this doesn't help since the
+  // plane itself is only ~1.5 × 1.8 Babylon units wide.
   const TEX_W = 1024;
   const TEX_H = isCorner ? 1024 : 512;
 
@@ -260,51 +290,66 @@ function addTileLabel(
   ctx.fillStyle = "#f7f2df";
   ctx.fillRect(0, 0, TEX_W, TEX_H);
 
-  // For corner tiles draw a short special label centred
+  // Rounded-rect border framing the face (theme-tinted, subtle).
+  ctx.strokeStyle = palette.tileBorder;
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.roundRect(14, 14, TEX_W - 28, TEX_H - 28, 28);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
   if (isCorner) {
-    const label = cornerLabel(pos, type);
-    ctx.fillStyle = "#111";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "bold 300px Arial";
-    ctx.fillText(label, TEX_W / 2, TEX_H / 2);
-  } else {
-    // Street / station / attraction: uniform font size across ALL tiles.
-    // All tile names use the same font size (slightly smaller than before),
-    // wrapping to 2 lines at that size if needed. This ensures consistent
-    // visual weight across the board.
-    ctx.fillStyle = "#111";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    // Corner art: big glyph on top, tile name (from board data, so it follows
+    // the board's language) beneath it.
+    const glyph = cornerLabel(pos, tile.type);
+    const isGo = tile.type === "go" || pos === 0;
+    ctx.fillStyle = isGo ? "#b91c1c" : "#111";
+    ctx.font = "bold 280px Arial";
+    ctx.fillText(glyph, TEX_W / 2, TEX_H * 0.36);
 
-    // Single uniform font size for all non-corner tiles — slightly smaller
-    // than the old LARGE size so all names look the same scale on the board.
-    const FONT_SIZE = 74; // px — uniform for all tiles, 50% smaller (bug 2-1)
-    const LINE_H = 86;    // px line height matching this font size
-    const MAX_W = TEX_W - 32;
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 92px Arial";
+    const nameLines = wrapLines(ctx, tile.name, TEX_W - 120, 2);
+    nameLines.forEach((line, i) => {
+      ctx.fillText(line, TEX_W / 2, TEX_H * 0.62 + i * 104);
+    });
 
-    ctx.font = `bold ${FONT_SIZE}px Arial`;
-    const words = name.split(" ");
-    const lines: string[] = [];
-    let current = "";
-    for (const w of words) {
-      const test = current ? `${current} ${w}` : w;
-      if (ctx.measureText(test).width > MAX_W && current) {
-        lines.push(current);
-        current = w;
-      } else {
-        current = test;
-      }
+    // GO also advertises its landing bonus.
+    if (isGo) {
+      ctx.fillStyle = "#b91c1c";
+      ctx.font = "bold 88px Arial";
+      ctx.fillText(`⟲ +${board.rules.goLandMoney}`, TEX_W / 2, TEX_H * 0.85);
     }
-    if (current) lines.push(current);
+  } else {
+    const icon = tile.type === "street" ? null : TYPE_ICONS[tile.type];
+    const price = tilePrice(board, tile);
 
-    // Cap at 2 lines (same font size for all); if a name needs 3+ lines
-    // the second line simply carries the remainder (truncated by texture edge).
-    const shown = Math.min(lines.length, 2);
-    const totalH = shown * LINE_H;
-    const startY = (TEX_H - totalH) / 2 + LINE_H / 2;
-    for (let i = 0; i < shown; i++) {
-      ctx.fillText(lines[i]!, TEX_W / 2, startY + i * LINE_H);
+    // Name: uniform font size across ALL tiles, wrapping to 2 lines.
+    const FONT_SIZE = 74;
+    const LINE_H = 86;
+    ctx.font = `bold ${FONT_SIZE}px Arial`;
+    ctx.fillStyle = "#111";
+    const lines = wrapLines(ctx, tile.name, TEX_W - 64, 2);
+
+    if (icon) {
+      // Icon above the name (both nudged up to leave room for the price line).
+      ctx.font = "140px Arial";
+      ctx.fillText(icon, TEX_W / 2, TEX_H * 0.26);
+      ctx.font = `bold ${FONT_SIZE}px Arial`;
+      const startY = TEX_H * 0.56 - ((lines.length - 1) * LINE_H) / 2;
+      lines.forEach((line, i) => ctx.fillText(line, TEX_W / 2, startY + i * LINE_H));
+    } else {
+      const startY = TEX_H * 0.4 - ((lines.length - 1) * LINE_H) / 2;
+      lines.forEach((line, i) => ctx.fillText(line, TEX_W / 2, startY + i * LINE_H));
+    }
+
+    // Price line for purchasable tiles (streets/stations/attractions).
+    if (price > 0) {
+      ctx.fillStyle = "#4a4436";
+      ctx.font = "bold 60px Arial";
+      ctx.fillText(`LPD ${price}`, TEX_W / 2, TEX_H * 0.85);
     }
   }
 

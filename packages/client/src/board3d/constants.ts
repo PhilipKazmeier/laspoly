@@ -20,6 +20,8 @@ export interface ThemePalette {
   boardEmissive: Color3;
   feltTint: Color3 | null;       // null → no diffuseColor (full-brightness texture)
   tile: Color3;
+  /** Canvas stroke colour for the rounded border drawn on each tile face. */
+  tileBorder: string;
   cupDiffuse: Color3;
   cupEmissive: Color3;
   cupSpecular: Color3;
@@ -36,6 +38,7 @@ export const THEMES: Record<"neon" | "classic", ThemePalette> = {
     boardEmissive: new Color3(0.12, 0.09, 0.02),
     feltTint: new Color3(0.42, 0.4, 0.55),
     tile: new Color3(0.95, 0.95, 0.97),
+    tileBorder: "#5b5680",
     cupDiffuse: new Color3(0.14, 0.11, 0.2),
     cupEmissive: new Color3(0.22, 0.16, 0.03),
     cupSpecular: new Color3(0.3, 0.24, 0.1),
@@ -50,6 +53,7 @@ export const THEMES: Record<"neon" | "classic", ThemePalette> = {
     boardEmissive: new Color3(0, 0, 0),
     feltTint: null,
     tile: new Color3(0.97, 0.95, 0.88),
+    tileBorder: "#c9c2a8",
     cupDiffuse: new Color3(0.22, 0.13, 0.05),
     cupEmissive: new Color3(0.08, 0.04, 0.01),
     cupSpecular: new Color3(0.35, 0.22, 0.12),

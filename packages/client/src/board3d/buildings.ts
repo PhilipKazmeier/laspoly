@@ -8,7 +8,9 @@ import {
   MeshBuilder,
   StandardMaterial,
   Color3,
+  DynamicTexture,
   AbstractMesh,
+  Mesh,
   Scene,
 } from "@babylonjs/core";
 import type { GameState } from "@laspoly/shared";
@@ -19,6 +21,7 @@ import {
   getFieldAngle,
   outerDirection,
   playerColor3,
+  brighten,
 } from "./constants.js";
 import type { Effects } from "./effects.js";
 
@@ -84,8 +87,63 @@ export class BuildingRenderer {
   }
 
   // ---------------------------------------------------------------------------
-  // Ownership markers (on-board, owner-coloured stripe per property tile)
+  // Ownership markers: a glowing border frame around the tile perimeter in the
+  // owner's colour. Mortgaged: the frame goes grey AND a diagonal-stripe
+  // overlay reads instantly as "closed".
   // ---------------------------------------------------------------------------
+
+  /** Shared diagonal-stripe texture for mortgaged tiles (built lazily once). */
+  private mortgageStripeTex: DynamicTexture | null = null;
+  private getMortgageStripeTex(): DynamicTexture {
+    if (this.mortgageStripeTex) return this.mortgageStripeTex;
+    const S = 256;
+    const tex = new DynamicTexture("mortgageStripes", { width: S, height: S }, this.scene, true);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.clearRect(0, 0, S, S);
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 18;
+    // Diagonal stripes across the tile face.
+    for (let d = -S; d < S * 2; d += 56) {
+      ctx.beginPath();
+      ctx.moveTo(d, 0);
+      ctx.lineTo(d + S, S);
+      ctx.stroke();
+    }
+    tex.update();
+    this.mortgageStripeTex = tex;
+    return tex;
+  }
+
+  /** Build the 4-box border frame around a (non-corner) tile, merged into one mesh. */
+  private buildOwnershipFrame(pos: number): Mesh | null {
+    const [cx, cz] = tileXZ(pos);
+    const BW = 0.06;  // border thickness
+    const BH = 0.1;   // border height
+    // Local-space tile footprint (W along X, D along Z), rotated afterwards.
+    const w = TILE_W, d = TILE_D;
+    const parts: Mesh[] = [];
+    // Long edges (along X at ±z)
+    for (const sz of [-1, 1]) {
+      const box = MeshBuilder.CreateBox(`ownEdge_${pos}_${sz}`, { width: w, height: BH, depth: BW }, this.scene);
+      box.position.set(0, 0, sz * (d / 2 - BW / 2));
+      parts.push(box);
+    }
+    // Short edges (along Z at ±x)
+    for (const sx of [-1, 1]) {
+      const box = MeshBuilder.CreateBox(`ownSide_${pos}_${sx}`, { width: BW, height: BH, depth: d - 2 * BW }, this.scene);
+      box.position.set(sx * (w / 2 - BW / 2), 0, 0);
+      parts.push(box);
+    }
+    const merged = Mesh.MergeMeshes(parts, true, true, undefined, false, false);
+    if (!merged) return null;
+    merged.name = `own_${pos}`;
+    merged.position.set(cx, 0.12, cz);
+    merged.rotation.y = (getFieldAngle(pos) * Math.PI) / 180;
+    merged.isPickable = false;
+    return merged;
+  }
+
   private updateOwnershipMarkers(state: GameState) {
     // Dispose markers for tiles that are no longer owned.
     for (const [pos, mesh] of this.ownershipMarkers) {
@@ -107,32 +165,42 @@ export class BuildingRenderer {
       const existing = this.ownershipMarkers.get(pos);
       if (existing) { existing.dispose(); this.ownershipMarkers.delete(pos); }
 
-      const [cx, cz] = tileXZ(pos);
-      const [odx, odz] = outerDirection(pos);
+      const frame = this.buildOwnershipFrame(pos);
+      if (!frame) continue;
       const isMortgaged = !!state.mortgaged[pos];
 
-      // A raised owner-coloured stripe at the OUTER edge of the tile (the inner
-      // edge now carries the group colour bar, so the owner marker lives outside
-      // it to stay distinct). Raised a little so it reads as a "deed flag".
-      const marker = MeshBuilder.CreateBox(
-        `own_${pos}`,
-        { width: TILE_W * 0.7, height: 0.18, depth: 0.16 },
-        this.scene
-      );
-      const outerEdgeX = cx + odx * (TILE_D / 2 - 0.12);
-      const outerEdgeZ = cz + odz * (TILE_D / 2 - 0.12);
-      marker.position.set(outerEdgeX, 0.13, outerEdgeZ);
-      marker.rotation.y = (getFieldAngle(pos) * Math.PI) / 180;
-
       const mat = new StandardMaterial(`ownMat_${pos}`, this.scene);
-      const baseColor = playerColor3(player.color);
-      // Mortgaged → dull grey so it reads distinctly from an active deed.
-      mat.diffuseColor = isMortgaged ? new Color3(0.3, 0.3, 0.3) : baseColor;
-      mat.emissiveColor = isMortgaged ? new Color3(0.1, 0.1, 0.1) : baseColor.scale(0.5);
+      const baseColor = brighten(playerColor3(player.color));
+      if (isMortgaged) {
+        // Mortgaged → dull grey frame so it reads distinctly from an active deed.
+        mat.diffuseColor = new Color3(0.35, 0.35, 0.35);
+        mat.emissiveColor = new Color3(0.08, 0.08, 0.08);
+      } else {
+        mat.diffuseColor = baseColor.scale(0.3);
+        mat.emissiveColor = baseColor;
+      }
       mat.specularColor = new Color3(0, 0, 0);
-      marker.material = mat;
-      marker.isPickable = false;
-      this.ownershipMarkers.set(pos, marker);
+      frame.material = mat;
+      if (!isMortgaged) this.effects?.addGlowMesh(frame);
+
+      // Diagonal-stripe overlay on top of the tile face while mortgaged.
+      if (isMortgaged) {
+        const [cx, cz] = tileXZ(pos);
+        const overlay = MeshBuilder.CreatePlane(`ownStripes_${pos}`, { width: TILE_W * 0.9, height: TILE_D * 0.8 }, this.scene);
+        overlay.rotation.x = Math.PI / 2;
+        overlay.rotation.y = (getFieldAngle(pos) * Math.PI) / 180;
+        overlay.position.set(cx, 0.135, cz);
+        overlay.isPickable = false;
+        const oMat = new StandardMaterial(`ownStripesMat_${pos}`, this.scene);
+        oMat.diffuseTexture = this.getMortgageStripeTex();
+        oMat.opacityTexture = this.getMortgageStripeTex();
+        oMat.specularColor = new Color3(0, 0, 0);
+        oMat.backFaceCulling = false;
+        overlay.material = oMat;
+        overlay.setParent(frame); // keeps world transform; disposed with the frame
+      }
+
+      this.ownershipMarkers.set(pos, frame);
     }
   }
 }

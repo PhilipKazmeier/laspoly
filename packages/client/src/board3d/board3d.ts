@@ -328,7 +328,9 @@ export class Board3D {
       ringMat.specularColor = new Color3(0, 0, 0);
       ring.material = ringMat;
       ring.isPickable = false;
-      this.effects.addGlowMesh(ring as Mesh);
+      // NOT glow-registered: the halo glow bleeds over the car token and makes
+      // it unreadable (verified by screenshot). The emissive material already
+      // makes the ring pop; glow stays reserved for cup + ownership frames.
       this.tokenRings.set(playerId, ring);
     }
     return ring;
