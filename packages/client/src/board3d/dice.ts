@@ -1,0 +1,282 @@
+// ---------------------------------------------------------------------------
+// board3d/dice.ts — the dice cup + two pip dice and the roll animation.
+// The `playDiceAnimationAsync` promise contract is consumed by the serial
+// state queue in main.ts: it resolves EXACTLY when the dice have settled and
+// are visible, with an internal safety timeout so the queue can never
+// deadlock when the render loop is throttled (headless e2e).
+// ---------------------------------------------------------------------------
+import {
+  MeshBuilder,
+  StandardMaterial,
+  Color3,
+  Vector4,
+  Quaternion,
+  Axis,
+  DynamicTexture,
+  AbstractMesh,
+  Mesh,
+  Scene,
+} from "@babylonjs/core";
+import {
+  ThemePalette,
+  CUP_LIFT,
+  SHAKE_CYCLES,
+  SHAKE_AMP,
+  DIE_SIZE,
+  DICE_SAFETY_MS,
+} from "./constants.js";
+
+export class DiceRig {
+  private diceCupMesh: AbstractMesh | null = null;
+  private dieMesh1: AbstractMesh | null = null;
+  private dieMesh2: AbstractMesh | null = null;
+  private diceAnimating = false;
+
+  constructor(private scene: Scene, private palette: ThemePalette) {
+    this.initDice();
+  }
+
+  showCup(): void {
+    if (this.diceCupMesh) this.diceCupMesh.setEnabled(true);
+    // Hide the previous roll's dice below the felt so a turn awaiting a roll shows
+    // the CUP, not leftover dice.
+    if (this.dieMesh1) this.dieMesh1.position.y = -2;
+    if (this.dieMesh2) this.dieMesh2.position.y = -2;
+  }
+
+  hideCup(): void {
+    if (this.diceCupMesh) this.diceCupMesh.setEnabled(false);
+  }
+
+  private initDice(): void {
+    // Place the dice area in the felt corner opposite the card deck.
+    // CZ = +3.5 puts it in the near (camera-facing) half of the felt.
+    const CX = -3.5, CZ = 3.5;
+    // Cup base Y so the bottom rim sits on the felt surface.
+    const CUP_BASE_Y = 0.02;
+    const CUP_HEIGHT = 2.2;  // clearly bigger than a single die
+    const CUP_R_TOP = 0.85;
+    const CUP_R_BOT = 0.65;
+
+    // Procedural cup: open-top truncated cone.
+    // Use backFaceCulling=false so both the outside and inside of the shell are
+    // visible (fixes the "half-rendered" bug where the interior was invisible).
+    const cup = MeshBuilder.CreateCylinder(
+      "diceCup",
+      { diameterTop: CUP_R_TOP * 2, diameterBottom: CUP_R_BOT * 2, height: CUP_HEIGHT, tessellation: 20, sideOrientation: Mesh.DOUBLESIDE },
+      this.scene
+    );
+    // Centre of the cylinder is at its mid-height, so shift up by half-height to rest on felt.
+    cup.position.set(CX, CUP_BASE_Y + CUP_HEIGHT / 2, CZ);
+    cup.isPickable = true; // click-to-roll
+
+    const cupMat = new StandardMaterial("cupMat", this.scene);
+    // Neon: dark cup with a gold self-lit rim. Classic: leather brown (palette).
+    cupMat.diffuseColor = this.palette.cupDiffuse;
+    cupMat.emissiveColor = this.palette.cupEmissive;
+    cupMat.specularColor = this.palette.cupSpecular;
+    cupMat.backFaceCulling = false; // double-sided so interior shows
+    cup.material = cupMat;
+    this.diceCupMesh = cup;
+
+    // Pip dice — atlas-textured cubes with distinct faces for 1–6.
+    // They start hidden below the felt and only surface after the cup lifts.
+    for (let d = 0; d < 2; d++) {
+      const dx = CX + (d === 0 ? -0.32 : 0.32);
+      const dz = CZ + (d === 0 ? -0.14 : 0.14);
+      const die = this.createPipDie(`die_${d}`, DIE_SIZE);
+      die.isPickable = false;
+      die.position.set(dx, -2, dz);  // hidden below felt
+      if (d === 0) this.dieMesh1 = die; else this.dieMesh2 = die;
+    }
+  }
+
+  /** Draw a standard Western die pip pattern for `value` (1–6) onto a W×H canvas. */
+  private drawPipFace(ctx: CanvasRenderingContext2D, value: number, W: number, H: number) {
+    ctx.fillStyle = "#f4f4ee";
+    ctx.fillRect(0, 0, W, H);
+    // Thin border so adjacent faces read as separate.
+    ctx.strokeStyle = "#ccccc4";
+    ctx.lineWidth = W * 0.03;
+    ctx.strokeRect(0, 0, W, H);
+    ctx.fillStyle = "#161616";
+    const r = W * 0.1;   // pip radius
+    const m = W * 0.27;  // margin from edge to pip centre
+    const c = W / 2;     // centre
+    const dots: Array<[number, number]> = [];
+    if (value === 1) { dots.push([c, c]); }
+    if (value === 2) { dots.push([m, m], [W - m, H - m]); }
+    if (value === 3) { dots.push([m, m], [c, c], [W - m, H - m]); }
+    if (value === 4) { dots.push([m, m], [W - m, m], [m, H - m], [W - m, H - m]); }
+    if (value === 5) { dots.push([m, m], [W - m, m], [c, c], [m, H - m], [W - m, H - m]); }
+    if (value === 6) { dots.push([m, m], [W - m, m], [m, c], [W - m, c], [m, H - m], [W - m, H - m]); }
+    for (const [px, py] of dots) {
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /**
+   * Build a die cube using a 6-column texture atlas so every face shows distinct pips.
+   * BabylonJS CreateBox with faceUV maps each of the 6 cube faces to a 1/6-width
+   * strip of the atlas texture — this is the reliable multi-face approach.
+   *
+   * Babylon faceUV index → geometric face: 0=front(−Z), 1=back(+Z), 2=right(+X),
+   * 3=left(−X), 4=top(+Y), 5=bottom(−Y). We assign values so opposites sum to 7:
+   * top=1, bottom=6, front=2, back=5, right=3, left=4. orientDie() then rotates the
+   * die so the rolled value faces up. (Face index i shows value faceValues[i].)
+   */
+  private createPipDie(name: string, size: number): Mesh {
+    const COLS = 6;
+    const CELL = 128;
+    const ATLAS_W = COLS * CELL;
+    const ATLAS_H = CELL;
+
+    // pip value per faceUV index [front,back,right,left,top,bottom]
+    const faceValues = [2, 5, 3, 4, 1, 6];
+
+    // Draw the atlas (6 pip faces side by side)
+    const atlas = new DynamicTexture(`dieAtlas_${name}`, { width: ATLAS_W, height: ATLAS_H }, this.scene, false);
+    const actx = atlas.getContext() as CanvasRenderingContext2D;
+    for (let col = 0; col < COLS; col++) {
+      const pipValue = faceValues[col]!;
+      // Sub-region: col * CELL .. (col+1) * CELL wide
+      actx.save();
+      actx.translate(col * CELL, 0);
+      this.drawPipFace(actx, pipValue, CELL, CELL);
+      actx.restore();
+    }
+    atlas.update();
+
+    // Map each face to its column in the atlas via faceUV
+    // Vector4(u0, v0, u1, v1) in UV space; each column is 1/6 wide.
+    const faceUV: Vector4[] = [];
+    for (let i = 0; i < COLS; i++) {
+      const u0 = i / COLS;
+      const u1 = (i + 1) / COLS;
+      faceUV.push(new Vector4(u0, 0, u1, 1));
+    }
+
+    const box = MeshBuilder.CreateBox(name, { size, faceUV, wrap: true }, this.scene);
+
+    const mat = new StandardMaterial(`dieMat_${name}`, this.scene);
+    mat.diffuseTexture = atlas;
+    mat.specularColor = new Color3(0.12, 0.12, 0.12);
+    mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
+    box.material = mat;
+    return box;
+  }
+
+  /**
+   * Orient a die so `value` pips face up, lying flat on the felt. Base pose
+   * (faceValues above): +Y=1, -Y=6, -Z=2, +Z=5, +X=3, -X=4.
+   */
+  private orientDie(mesh: AbstractMesh, value: number) {
+    const H = Math.PI / 2;
+    // Babylon is left-handed: X-axis rotations are inverted vs the right-handed
+    // derivation, so the -Z/+Z (values 2/5) signs are flipped (verified on board).
+    let q: Quaternion;
+    switch (value) {
+      case 6: q = Quaternion.RotationAxis(Axis.X, Math.PI); break; // -Y=6 → up
+      case 2: q = Quaternion.RotationAxis(Axis.X, -H); break;      // -Z=2 → up
+      case 5: q = Quaternion.RotationAxis(Axis.X, H); break;       // +Z=5 → up
+      case 3: q = Quaternion.RotationAxis(Axis.Z, H); break;       // +X=3 → up
+      case 4: q = Quaternion.RotationAxis(Axis.Z, -H); break;      // -X=4 → up
+      default: q = Quaternion.Identity(); break;                   // +Y=1 already up
+    }
+    mesh.rotationQuaternion = q;
+  }
+
+  /** Cup lift / shake / descend / settle (reproduces DiceCup.playAnimation).
+   *  `onDone` fires the instant the dice have settled and are visible on the felt. */
+  private playDiceAnimation(d1: number, d2: number, onDone?: () => void) {
+    if (this.diceAnimating) return;
+    const cup = this.diceCupMesh;
+    if (!cup) { onDone?.(); return; }
+    this.diceAnimating = true;
+
+    const die1 = this.dieMesh1;
+    const die2 = this.dieMesh2;
+
+    // Fixed XZ position of the cup — the cup ONLY moves up/down, never sideways.
+    const fixedCupX = cup.position.x;
+    const fixedCupZ = cup.position.z;
+    // baseY is the resting Y (bottom of cup on the felt).
+    const baseY = cup.position.y;
+
+    let phase: "lift" | "shake" | "descend" | "settle" = "lift";
+    let elapsed = 0;
+    let lastTime = performance.now();
+
+    // Keep dice hidden below the felt while the cup is up.
+    if (die1) die1.position.y = -2;
+    if (die2) die2.position.y = -2;
+
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      const dt = now - lastTime;
+      lastTime = now;
+
+      if (phase === "lift") {
+        elapsed += dt;
+        const t = Math.min(elapsed / 300, 1);
+        // Only Y changes — X/Z stay fixed at the cup's rest spot.
+        cup.position.set(fixedCupX, baseY + CUP_LIFT * t, fixedCupZ);
+        cup.rotation.z = Math.sin(t * Math.PI * 2) * SHAKE_AMP * 0.5;
+        if (t >= 1) { elapsed = 0; phase = "shake"; }
+      } else if (phase === "shake") {
+        elapsed += dt;
+        const t = elapsed / (100 * SHAKE_CYCLES);
+        cup.position.set(fixedCupX, baseY + CUP_LIFT, fixedCupZ); // stay at peak Y, no drift
+        cup.rotation.z = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_AMP;
+        if (elapsed >= 100 * SHAKE_CYCLES) { elapsed = 0; phase = "descend"; }
+      } else if (phase === "descend") {
+        elapsed += dt;
+        const t = Math.min(elapsed / 300, 1);
+        cup.position.set(fixedCupX, baseY + CUP_LIFT * (1 - t), fixedCupZ); // Y only, X/Z fixed
+        cup.rotation.z = 0;
+        if (t >= 1) {
+          elapsed = 0;
+          phase = "settle";
+          // Cup vanishes; the two pip dice are revealed lying on the felt,
+          // oriented so the rolled value faces up — dice were hidden until now.
+          this.hideCup();
+        }
+      } else {
+        // "settle" phase: dice drop onto the felt and bounce to a stop.
+        // Dice appear at the cup's fixed XZ, spread slightly apart.
+        if (die1) { die1.position.set(fixedCupX - 0.3, 0.25, fixedCupZ - 0.12); this.orientDie(die1, d1); }
+        if (die2) { die2.position.set(fixedCupX + 0.3, 0.25, fixedCupZ + 0.12); this.orientDie(die2, d2); }
+        elapsed += dt;
+        const decay = 1 - Math.min(elapsed / 300, 1);
+        const bounce = Math.abs(Math.sin((elapsed / 80) * Math.PI)) * 0.15 * decay;
+        if (die1) die1.position.y = 0.25 + bounce;
+        if (die2) die2.position.y = 0.25 + bounce;
+        if (elapsed >= 400) {
+          // Dice have settled — pips show the rolled value (no number overlay).
+          this.scene.onBeforeRenderObservable.remove(obs);
+          this.diceAnimating = false;
+          onDone?.();
+        }
+      }
+    });
+  }
+
+  /**
+   * Plays the dice animation and resolves EXACTLY when the dice have settled and
+   * are visible on the felt — so the caller (the serial state queue) starts the
+   * token move only after the cup animation finished AND the dice are shown. A
+   * safety timeout guarantees the queue never deadlocks if rAF is throttled.
+   */
+  playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
+    // Force any stale animation to end so we always start a fresh, full sequence.
+    this.diceAnimating = false;
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      this.playDiceAnimation(d1, d2, finish);
+      setTimeout(finish, DICE_SAFETY_MS); // safety net only
+    });
+  }
+}

@@ -1,4 +1,11 @@
 import { defineConfig } from "@playwright/test";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+// Resolve repo paths relative to this config file so the suite runs on any
+// checkout (the paths were previously hardcoded to a developer machine).
+const clientDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(clientDir, "../..");
 
 export default defineConfig({
   testDir: "./tests",
@@ -6,10 +13,10 @@ export default defineConfig({
   use: { baseURL: "http://localhost:4173" },
   webServer: [
     {
-      command: "npx tsx /Users/philip/Work/Other/laspoly/packages/server/src/index.ts",
+      command: "npx tsx packages/server/src/index.ts",
       port: 8080,
       reuseExistingServer: true,
-      cwd: "/Users/philip/Work/Other/laspoly",
+      cwd: repoRoot,
       timeout: 30_000,
     },
     {
@@ -17,7 +24,7 @@ export default defineConfig({
       command: "VITE_WS_URL=ws://localhost:8080 npm run build && npm run preview",
       port: 4173,
       reuseExistingServer: true,
-      cwd: "/Users/philip/Work/Other/laspoly/packages/client",
+      cwd: clientDir,
       timeout: 90_000,
     },
   ],
