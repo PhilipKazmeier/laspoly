@@ -209,9 +209,20 @@ export class DiceRig {
     // baseY is the resting Y (bottom of cup on the felt).
     const baseY = cup.position.y;
 
-    let phase: "lift" | "shake" | "descend" | "settle" = "lift";
+    let phase: "lift" | "shake" | "descend" | "toss" | "settle" = "lift";
     let elapsed = 0;
     let lastTime = performance.now();
+
+    // Toss parameters: each die falls from above with a random tumble before
+    // snapping to its rolled face (visual-only randomness — Math.random is
+    // fine client-side; determinism binds the engine).
+    const TOSS_MS = 300;
+    const TOSS_FROM_Y = 1.1;
+    const tumble = [0, 1].map(() => ({
+      yaw: (2 + Math.random() * 2) * Math.PI * (Math.random() < 0.5 ? -1 : 1),
+      pitch: (2 + Math.random() * 2) * Math.PI * (Math.random() < 0.5 ? -1 : 1),
+      roll: (2 + Math.random() * 2) * Math.PI * (Math.random() < 0.5 ? -1 : 1),
+    }));
 
     // Keep dice hidden below the felt while the cup is up.
     if (die1) die1.position.y = -2;
@@ -234,24 +245,46 @@ export class DiceRig {
         const t = elapsed / (100 * SHAKE_CYCLES);
         cup.position.set(fixedCupX, baseY + CUP_LIFT, fixedCupZ); // stay at peak Y, no drift
         cup.rotation.z = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_AMP;
+        // Cross-axis wobble makes the shake read as a real rattle, not a metronome.
+        cup.rotation.x = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES * 0.7) * SHAKE_AMP * 0.6;
         if (elapsed >= 100 * SHAKE_CYCLES) { elapsed = 0; phase = "descend"; }
       } else if (phase === "descend") {
         elapsed += dt;
         const t = Math.min(elapsed / 300, 1);
         cup.position.set(fixedCupX, baseY + CUP_LIFT * (1 - t), fixedCupZ); // Y only, X/Z fixed
         cup.rotation.z = 0;
+        cup.rotation.x = 0;
         if (t >= 1) {
           elapsed = 0;
-          phase = "settle";
-          // Cup vanishes; the two pip dice are revealed lying on the felt,
-          // oriented so the rolled value faces up — dice were hidden until now.
+          phase = "toss";
+          // Cup vanishes; the dice are revealed mid-air and tumble down.
           this.hideCup();
+          if (die1) die1.position.set(fixedCupX - 0.3, TOSS_FROM_Y, fixedCupZ - 0.12);
+          if (die2) die2.position.set(fixedCupX + 0.3, TOSS_FROM_Y, fixedCupZ + 0.12);
+        }
+      } else if (phase === "toss") {
+        // Dice fall under ease-in gravity while tumbling randomly; the rolled
+        // face snaps up the instant they land (settle bounce follows).
+        elapsed += dt;
+        const t = Math.min(elapsed / TOSS_MS, 1);
+        const fall = t * t; // ease-in
+        const y = TOSS_FROM_Y + (0.25 - TOSS_FROM_Y) * fall;
+        const dice = [die1, die2];
+        for (let i = 0; i < 2; i++) {
+          const die = dice[i];
+          if (!die) continue;
+          die.position.y = y;
+          const tw = tumble[i]!;
+          die.rotationQuaternion = Quaternion.RotationYawPitchRoll(tw.yaw * t, tw.pitch * t, tw.roll * t);
+        }
+        if (t >= 1) {
+          if (die1) this.orientDie(die1, d1);
+          if (die2) this.orientDie(die2, d2);
+          elapsed = 0;
+          phase = "settle";
         }
       } else {
-        // "settle" phase: dice drop onto the felt and bounce to a stop.
-        // Dice appear at the cup's fixed XZ, spread slightly apart.
-        if (die1) { die1.position.set(fixedCupX - 0.3, 0.25, fixedCupZ - 0.12); this.orientDie(die1, d1); }
-        if (die2) { die2.position.set(fixedCupX + 0.3, 0.25, fixedCupZ + 0.12); this.orientDie(die2, d2); }
+        // "settle" phase: dice bounce on the felt to a stop, faces already up.
         elapsed += dt;
         const decay = 1 - Math.min(elapsed / 300, 1);
         const bounce = Math.abs(Math.sin((elapsed / 80) * Math.PI)) * 0.15 * decay;

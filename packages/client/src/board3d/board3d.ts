@@ -848,6 +848,9 @@ export class Board3D {
       this.moveAnimating.delete(playerId);
       const res = this.moveResolvers.get(playerId);
       if (res) { this.moveResolvers.delete(playerId); res(); }
+      // Resolve FIRST, then squash — the landing bounce is pure garnish and
+      // must never delay the serial state queue.
+      this.playLandingSquash(mesh);
       return;
     }
 
@@ -856,6 +859,11 @@ export class Board3D {
     const targetX = next[0];
     const targetZ = next[1];
     this.moveQueues.set(playerId, queue);
+
+    // Speed ramp: long moves accelerate mid-run (the safety cap in
+    // animateMoveAsync assumes HOP_DURATION_MS per hop, so ramping only ever
+    // makes hops FASTER — the cap stays valid).
+    const hopMs = queue.length >= 5 ? 85 : HOP_DURATION_MS;
 
     const startX = mesh.position.x;
     const startZ = mesh.position.z;
@@ -878,15 +886,18 @@ export class Board3D {
     };
 
     // Safety timer: advance to the next hop even if rAF is throttled.
-    const hopTimer = setTimeout(finish, HOP_DURATION_MS + 80);
+    const hopTimer = setTimeout(finish, hopMs + 80);
 
     const obs = this.scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
       elapsed += now - lastTime;
       lastTime = now;
-      const t = Math.min(elapsed / HOP_DURATION_MS, 1);
-      mesh.position.x = startX + (targetX - startX) * t;
-      mesh.position.z = startZ + (targetZ - startZ) * t;
+      const t = Math.min(elapsed / hopMs, 1);
+      // Ease-in-out on the horizontal glide; the vertical arc keeps raw t so
+      // the hop peaks mid-stride.
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      mesh.position.x = startX + (targetX - startX) * e;
+      mesh.position.z = startZ + (targetZ - startZ) * e;
       mesh.position.y = startY + HOP_HEIGHT * 4 * t * (1 - t);
 
       const lbl = this.tokenLabels.get(playerId);
@@ -894,6 +905,38 @@ export class Board3D {
       const ring = this.tokenRings.get(playerId);
       if (ring) ring.position.set(mesh.position.x, RING_Y, mesh.position.z);
 
+      if (t >= 1) finish();
+    });
+  }
+
+  /**
+   * Landing squash: a quick scale dip when a token finishes its walk.
+   * Fire-and-forget garnish with its own safety reset — never awaited.
+   */
+  private playLandingSquash(mesh: AbstractMesh): void {
+    const SQUASH_MS = 140;
+    const origY = mesh.scaling.y; // car tokens carry a normalization scale
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      mesh.scaling.y = origY;
+    };
+    const safety = setTimeout(finish, SQUASH_MS + 200);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / SQUASH_MS, 1);
+      // Dip to 0.82 at mid-squash, back to 1 (parabolic).
+      const dip = 1 - 0.18 * 4 * t * (1 - t);
+      mesh.scaling.y = origY * dip;
       if (t >= 1) finish();
     });
   }
