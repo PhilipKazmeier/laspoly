@@ -409,23 +409,26 @@ const css = `
     cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0; box-shadow: none;
   }
   #specialEventToast .set-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #paymentToast {
+  #paymentToasts {
     position: absolute; bottom: 185px; right: 16px;
+    display: flex; flex-direction: column-reverse; gap: 6px;
+    pointer-events: none;
+    z-index: 65;
+  }
+  .payment-toast {
     border-radius: 8px;
     padding: 8px 14px;
     font-size: 13px;
     font-weight: bold;
     color: #fff;
     max-width: 280px;
-    pointer-events: none;
     opacity: 0;
     transition: opacity 0.3s ease;
-    z-index: 65;
     line-height: 1.4;
   }
-  #paymentToast.visible { opacity: 1; }
-  #paymentToast.paying { background: rgba(153,27,27,0.92); border: 1px solid #ef4444; }
-  #paymentToast.receiving { background: rgba(20,83,45,0.92); border: 1px solid #22c55e; }
+  .payment-toast.visible { opacity: 1; }
+  .payment-toast.paying { background: rgba(153,27,27,0.92); border: 1px solid #ef4444; }
+  .payment-toast.receiving { background: rgba(20,83,45,0.92); border: 1px solid #22c55e; }
   #roomLinkRow { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
   #roomLinkRow input { flex:1; font-size:12px; color:#aaa; background:#111; border:1px solid #444; border-radius:4px; padding:4px 8px; }
   #figurePicker { margin-top: 12px; }
@@ -1054,7 +1057,6 @@ export class UI {
   private currentLocale: Locale = _locale;
   // Payment toast (feature #4)
   private paymentToast!: HTMLDivElement;
-  private paymentToastTimer: ReturnType<typeof setTimeout> | null = null;
   // Mute button ref (feature #1)
   private muteBtn!: HTMLButtonElement;
   // Current room id for share link (feature #6)
@@ -2065,23 +2067,63 @@ export class UI {
   // Feature #4: Payment toast
   // -------------------------------------------------------------------------
   private buildPaymentToast() {
+    // Stacking container: rapid payments each get their own self-dismissing
+    // toast instead of overwriting one shared element.
     const el = document.createElement("div");
-    el.id = "paymentToast";
-    hide(el);
+    el.id = "paymentToasts";
     this.gameHud.appendChild(el);
     this.paymentToast = el;
   }
 
+  // Last cash value shown per player (drives the count-up tween).
+  private lastShownMoney: Map<string, number> = new Map();
+
+  /**
+   * Count-up tween on the freshly rendered ".money-val" spans. A 500ms
+   * force-write guarantees the final value even when rAF is throttled
+   * (headless e2e); a span replaced mid-tween just becomes a detached node.
+   */
+  private animateMoneyValues(state: GameState) {
+    for (const span of Array.from(this.playerList.querySelectorAll<HTMLElement>(".money-val"))) {
+      const pid = span.dataset["pid"];
+      if (!pid) continue;
+      const target = state.players.find((p) => p.id === pid)?.money ?? 0;
+      const from = this.lastShownMoney.get(pid);
+      this.lastShownMoney.set(pid, target);
+      if (from === undefined || from === target) continue; // already rendered as target
+      const DUR = 400;
+      const start = performance.now();
+      let raf = 0;
+      const force = setTimeout(() => {
+        cancelAnimationFrame(raf);
+        span.textContent = `LPD ${target}`;
+      }, 500);
+      const step = (now: number) => {
+        const t = Math.min((now - start) / DUR, 1);
+        span.textContent = `LPD ${Math.round(from + (target - from) * t)}`;
+        if (t < 1) raf = requestAnimationFrame(step);
+        else clearTimeout(force);
+      };
+      raf = requestAnimationFrame(step);
+    }
+  }
+
   showPaymentToast(text: string, type: "paying" | "receiving") {
-    const el = this.paymentToast;
-    el.textContent = type === "paying" ? `↑ ${text}` : `↓ ${text}`;
-    el.className = `visible ${type}`;
-    el.style.display = "block";
-    if (this.paymentToastTimer) clearTimeout(this.paymentToastTimer);
-    this.paymentToastTimer = setTimeout(() => {
-      el.classList.remove("visible");
-      this.paymentToastTimer = null;
-    }, 3500);
+    const container = this.paymentToast;
+    // Cap the stack at 4 — drop the oldest (last in column-reverse DOM order).
+    while (container.children.length >= 4) {
+      container.firstChild?.remove();
+    }
+    const toast = document.createElement("div");
+    toast.className = `payment-toast ${type}`;
+    toast.textContent = type === "paying" ? `↑ ${text}` : `↓ ${text}`;
+    container.appendChild(toast);
+    // Fade in on the next frame so the CSS transition fires.
+    requestAnimationFrame(() => toast.classList.add("visible"));
+    setTimeout(() => {
+      toast.classList.remove("visible");
+      setTimeout(() => toast.remove(), 350);
+    }, 3000);
   }
 
   // -------------------------------------------------------------------------
@@ -2804,7 +2846,7 @@ export class UI {
       // without them). LPD amount + net-worth badge remain.
       // Cash on its own line below (bug 3): "LPD <money>" sits next to the amount,
       // not glued to the "NW" net-worth badge above it.
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span style="display:block;color:#aaa;font-size:11px;margin-top:2px;">LPD ${p.money}</span>`;
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span class="money-val" data-pid="${p.id}" style="display:block;color:#aaa;font-size:11px;margin-top:2px;">LPD ${p.money}</span>`;
 
       // Feature 1: clicking row opens inspector
       row.addEventListener("click", () => {
@@ -2817,6 +2859,9 @@ export class UI {
       });
       this.playerList.appendChild(row);
     }
+
+    // Animate changed cash values (count-up tween on the fresh spans).
+    this.animateMoneyValues(state);
 
     // Refresh inspector if open
     if (this.inspectedPlayerId && this.playerInspector.style.display !== "none") {

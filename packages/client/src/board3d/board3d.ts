@@ -571,12 +571,16 @@ export class Board3D {
   // -------------------------------------------------------------------------
 
   /** Apply all non-animation visual updates (buildings, ownership, HUD, board). Called after animation resolves. */
-  applyVisuals(state: GameState, myId: string | null): void {
+  applyVisuals(state: GameState, myId: string | null, animate = true): void {
+    const firstState = this.lastState === null;
     this.lastState = state;
     this.lastMyId = myId;
     this.drawBoardOnce(state.boardId);
     this.rebuildTokens(state, myId);
-    this.buildings.update(state);
+    const changedBuildings = this.buildings.update(state);
+    // Drop-in placement animation for freshly built positions — skipped on
+    // reconnect snaps and on the very first render (everything is "new" then).
+    if (animate && !firstState) this.buildings.animateDropIn(changedBuildings);
     this.updatePlayerDisplays(state);
   }
 
@@ -590,7 +594,81 @@ export class Board3D {
       const pos = p.inJail ? JAIL_POS : p.position;
       this.prevPositions.set(p.id, pos);
     }
-    this.applyVisuals(state, myId);
+    this.applyVisuals(state, myId, false);
+  }
+
+  // -------------------------------------------------------------------------
+  // Money floats: "+LPD 120" / "−LPD 80" billboards rising above a token.
+  // -------------------------------------------------------------------------
+  private activeFloatCount: Map<string, number> = new Map();
+
+  /** Fire-and-forget floating money text above a player's token. */
+  showMoneyFloat(playerId: string, delta: number): void {
+    if (delta === 0) return;
+    const token = this.tokenMeshes.get(playerId);
+    if (!token) return;
+
+    // Stack multiple floats for the same player with a vertical offset.
+    const stackIdx = this.activeFloatCount.get(playerId) ?? 0;
+    this.activeFloatCount.set(playerId, stackIdx + 1);
+
+    const W = 256, H = 64;
+    const tex = new DynamicTexture(`floatTex_${playerId}_${stackIdx}`, { width: W, height: H }, this.scene, false);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.clearRect(0, 0, W, H);
+    const text = `${delta > 0 ? "+" : "−"}LPD ${Math.abs(delta).toLocaleString()}`;
+    ctx.font = "bold 44px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // Soft dark halo for legibility on any background.
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = "rgba(0,0,0,0.75)";
+    ctx.strokeText(text, W / 2, H / 2);
+    ctx.fillStyle = delta > 0 ? "#22c55e" : "#ef4444";
+    ctx.fillText(text, W / 2, H / 2);
+    tex.update();
+
+    const plane = MeshBuilder.CreatePlane(`float_${playerId}_${stackIdx}`, { width: 1.1, height: 0.28 }, this.scene);
+    plane.billboardMode = 7;
+    plane.isPickable = false;
+    const startY = token.position.y + 1.35 + stackIdx * 0.3;
+    plane.position.set(token.position.x, startY, token.position.z);
+    const mat = new StandardMaterial(`floatMat_${playerId}_${stackIdx}`, this.scene);
+    mat.diffuseTexture = tex;
+    mat.opacityTexture = tex;
+    mat.emissiveColor = new Color3(1, 1, 1);
+    mat.specularColor = new Color3(0, 0, 0);
+    mat.backFaceCulling = false;
+    plane.material = mat;
+
+    const RISE_MS = 1400;
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      plane.dispose();
+      tex.dispose();
+      const n = (this.activeFloatCount.get(playerId) ?? 1) - 1;
+      if (n <= 0) this.activeFloatCount.delete(playerId);
+      else this.activeFloatCount.set(playerId, n);
+    };
+    const safety = setTimeout(finish, RISE_MS + 200);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / RISE_MS, 1);
+      plane.position.y = startY + 0.9 * t;
+      plane.visibility = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
+      if (t >= 1) finish();
+    });
   }
 
   /** Register a callback invoked when the player clicks the dice cup to roll. */

@@ -158,6 +158,44 @@ export class Effects {
     return tex;
   }
 
+  /** One-shot grey dust puff at a world position (building placement). */
+  dustPuff(x: number, y: number, z: number): void {
+    if (this.quality === "low") return;
+    const T = 16;
+    const tex = new DynamicTexture(`puffTex_${Date.now()}`, { width: T, height: T }, this.scene, false);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const grad = ctx.createRadialGradient(T / 2, T / 2, 0, T / 2, T / 2, T / 2);
+    grad.addColorStop(0, "rgba(200,200,200,0.9)");
+    grad.addColorStop(1, "rgba(200,200,200,0)");
+    ctx.clearRect(0, 0, T, T);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, T, T);
+    tex.update();
+
+    const ps = new ParticleSystem(`puff_${Date.now()}`, 20, this.scene);
+    ps.particleTexture = tex;
+    ps.emitter = new Vector3(x, y, z);
+    ps.minEmitBox = new Vector3(-0.15, 0, -0.15);
+    ps.maxEmitBox = new Vector3(0.15, 0.05, 0.15);
+    ps.minSize = 0.06;
+    ps.maxSize = 0.16;
+    ps.minLifeTime = 0.25;
+    ps.maxLifeTime = 0.45;
+    ps.emitRate = 120;
+    ps.direction1 = new Vector3(-0.6, 0.4, -0.6);
+    ps.direction2 = new Vector3(0.6, 0.9, 0.6);
+    ps.minEmitPower = 0.4;
+    ps.maxEmitPower = 1.0;
+    ps.color1 = new Color4(0.75, 0.72, 0.65, 0.7);
+    ps.color2 = new Color4(0.6, 0.6, 0.6, 0.5);
+    ps.colorDead = new Color4(0.6, 0.6, 0.6, 0);
+    ps.targetStopDuration = 0.3;
+    ps.disposeOnStop = true;
+    ps.onDisposeObservable.add(() => tex.dispose());
+    ps.start();
+  }
+
   /** Slow-drifting golden dust motes above the board (neon + high only). */
   private initDust(): void {
     const T = 16;

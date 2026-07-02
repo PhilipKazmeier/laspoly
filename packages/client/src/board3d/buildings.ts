@@ -158,6 +158,55 @@ export class BuildingRenderer {
     return changed;
   }
 
+  /**
+   * Drop-in placement animation for freshly (re)built positions: meshes fall
+   * from above with a small bounce + a dust puff. Fire-and-forget garnish
+   * with its own safety snap — never awaited by the state queue.
+   */
+  animateDropIn(positions: number[]): void {
+    for (const pos of positions) {
+      const entry = this.buildingCache.get(pos);
+      if (!entry) continue;
+      for (const mesh of entry.meshes) this.dropMesh(mesh);
+      const [x, z] = tileXZ(pos);
+      this.effects?.dustPuff(x, 0.15, z);
+    }
+  }
+
+  private dropMesh(mesh: AbstractMesh): void {
+    const FALL_MS = 260;
+    const BOUNCE_MS = 140;
+    const targetY = mesh.position.y;
+    mesh.position.y = targetY + 1.4;
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      if (!mesh.isDisposed()) mesh.position.y = targetY;
+    };
+    const safety = setTimeout(finish, FALL_MS + BOUNCE_MS + 300);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      if (mesh.isDisposed()) { finish(); return; }
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      if (elapsed <= FALL_MS) {
+        const t = elapsed / FALL_MS;
+        mesh.position.y = targetY + 1.4 * (1 - t * t); // ease-in fall
+      } else {
+        const t2 = Math.min((elapsed - FALL_MS) / BOUNCE_MS, 1);
+        mesh.position.y = targetY + 0.12 * Math.sin(Math.PI * t2) * (1 - t2);
+        if (t2 >= 1) finish();
+      }
+    });
+  }
+
   private updateBuildings(state: GameState): number[] {
     const changedPositions: number[] = [];
     const seen = new Set<number>();

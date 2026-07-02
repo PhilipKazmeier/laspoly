@@ -206,6 +206,18 @@ class StateQueue {
       await Promise.race([this.board.animateCardDrawAsync(title), timeout(3_000)]);
     }
 
+    // (b3) Money floats: diff each player's cash vs the previously rendered
+    //      state and float "+/−LPD" text above their token. State-diff based —
+    //      FormattedEvent text is localized and must never be parsed.
+    if (prev) {
+      for (const p of state.players) {
+        const pp = prev.players.find((pl) => pl.id === p.id);
+        if (!pp || !p.alive) continue;
+        const delta = p.money - pp.money;
+        if (delta !== 0) this.board.showMoneyFloat(p.id, delta);
+      }
+    }
+
     // (c) After animation: apply visuals, show action-card popup, update HUD.
     //     Everything in this block is strictly after dice + movement.
 
