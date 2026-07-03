@@ -2819,9 +2819,10 @@ export class UI {
       this.headerRound.textContent = `${t("turn.round")} ${state.round}`;
 
       // Special event label in header
-      if (state.activeEvent) {
-        const eventKey = `event.${state.activeEvent.id}`;
-        this.headerEvent.textContent = t(eventKey) || state.activeEvent.id;
+      if (state.activeEvents.length > 0) {
+        this.headerEvent.textContent = state.activeEvents
+          .map((e) => t(`event.${e.id}`) || e.id)
+          .join(" · ");
       } else {
         this.headerEvent.textContent = '';
       }
@@ -3059,7 +3060,7 @@ export class UI {
     // Building cost multiplier from special event (buildingSale halves costs)
     // state.buildingCostMult is the base multiplier (from settings)
     // When buildingSale is active, the engine halves costs. We show the halved cost in the panel.
-    const eventMult = state.activeEvent?.id === "buildingSale" ? 0.5 : 1.0;
+    const eventMult = state.activeEvents.some((e) => e.id === "buildingSale") ? 0.5 : 1.0;
     const costMult = (state.buildingCostMult ?? 1.0) * eventMult;
 
     // Header with capital + trade button
@@ -3090,7 +3091,7 @@ export class UI {
     header.appendChild(cashLine);
 
     // buildingSale indicator
-    if (state.activeEvent?.id === "buildingSale") {
+    if (state.activeEvents.some((e) => e.id === "buildingSale")) {
       const saleLabel = document.createElement("div");
       saleLabel.style.cssText = "font-size:11px;color:#f97316;";
       saleLabel.textContent = t("props.buildingSaleActive");

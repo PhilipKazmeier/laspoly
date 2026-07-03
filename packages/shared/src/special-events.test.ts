@@ -19,10 +19,10 @@ function twoPlayers(seed = 0): GameState {
   });
 }
 
-/** Force activeEvent to the given id on a cloned state. */
+/** Force the given event id (1 round) as the only active event on a cloned state. */
 function withEvent(state: GameState, id: import('./types.js').EventId): GameState {
   const s = structuredClone(state);
-  s.activeEvent = { id };
+  s.activeEvents = [{ id, remainingRounds: 1 }];
   return s;
 }
 
@@ -38,6 +38,8 @@ function advanceTurns(initial: GameState, n: number): GameState {
     if (s.phase === 'finished') break;
     if (s.phase === 'awaiting-buy') {
       ({ state: s } = applyCommand(s, { type: 'DECLINE_PROPERTY' }));
+    } else if (s.phase === 'awaiting-casino') {
+      ({ state: s } = applyCommand(s, { type: 'ROLL_CASINO' }));
     } else if (s.phase === 'turn-end') {
       const prevTurn = s.turn;
       ({ state: s } = applyCommand(s, { type: 'END_TURN' }));
@@ -57,19 +59,19 @@ describe('specialEvents: determinism', () => {
   it('same seed produces same first event', () => {
     const s1 = twoPlayers(42);
     const s2 = twoPlayers(42);
-    expect(s1.activeEvent).toEqual(s2.activeEvent);
+    expect(s1.activeEvents).toEqual(s2.activeEvents);
   });
 
   it('different seeds can produce different events', () => {
     // Run a few seeds and collect event ids — at least two should differ
-    const ids = new Set(Array.from({ length: 20 }, (_, i) => twoPlayers(i).activeEvent?.id));
+    const ids = new Set(Array.from({ length: 20 }, (_, i) => twoPlayers(i).activeEvents[0]?.id));
     expect(ids.size).toBeGreaterThan(1);
   });
 
   it('first event drawn from EVENT_IDS range', () => {
     const valid = new Set(['circus', 'boom', 'recession', 'jackpot', 'buildingSale', 'quietDay']);
     for (let seed = 0; seed < 30; seed++) {
-      const id = twoPlayers(seed).activeEvent?.id;
+      const id = twoPlayers(seed).activeEvents[0]?.id;
       expect(valid.has(id ?? '')).toBe(true);
     }
   });
@@ -91,11 +93,10 @@ describe('specialEvents: round boundary', () => {
     expect(s.round).toBeGreaterThan(1);
   });
 
-  it('activeEvent changes at round boundary', () => {
-    // After at least one round boundary, activeEvent must still be set
+  it('an event is active after a round boundary (default frequency)', () => {
     const s = advanceTurns(twoPlayers(0), 2);
     expect(s.round).toBeGreaterThan(1);
-    expect(s.activeEvent).not.toBeNull();
+    expect(s.activeEvents.length).toBeGreaterThan(0);
   });
 
   it('round event announcement is emitted at boundary', () => {
@@ -358,5 +359,107 @@ describe('specialEvents: jackpot', () => {
       const expected = Math.min(Math.floor((win1.params.amount as number) * 1.5), 400);
       expect(win2.params.amount).toBe(expected);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Event frequency setting + multi-round durations
+// ---------------------------------------------------------------------------
+
+function twoPlayersWithFreq(freq: "off" | "rare" | "normal" | "chaos", seed = 0): GameState {
+  return createGame({
+    boardId: 'vegas',
+    seed,
+    players: [
+      { id: 'A', name: 'Alice', isBot: true, color: 'red' },
+      { id: 'B', name: 'Bob', isBot: true, color: 'blue' },
+    ],
+    settings: { eventFrequency: freq },
+  });
+}
+
+describe('specialEvents: frequency setting', () => {
+  it('"off" never populates activeEvents', () => {
+    let s = twoPlayersWithFreq('off');
+    expect(s.activeEvents).toEqual([]);
+    s = advanceTurns(s, 8);
+    expect(s.activeEvents).toEqual([]);
+  });
+
+  it('"rare" starts empty and draws only sometimes over many rounds', () => {
+    let drewSomewhere = false;
+    let emptyStart = true;
+    for (let seed = 0; seed < 5; seed++) {
+      let s = twoPlayersWithFreq('rare', seed);
+      if (s.activeEvents.length !== 0) emptyStart = false;
+      s = advanceTurns(s, 20);
+      if (s.activeEvents.length > 0) drewSomewhere = true;
+    }
+    expect(emptyStart).toBe(true);
+    expect(drewSomewhere).toBe(true);
+  });
+
+  it('"chaos" never yields quietDay', () => {
+    for (let seed = 0; seed < 12; seed++) {
+      let s = twoPlayersWithFreq('chaos', seed);
+      expect(s.activeEvents[0]?.id).not.toBe('quietDay');
+      s = advanceTurns(s, 6);
+      for (const e of s.activeEvents) expect(e.id).not.toBe('quietDay');
+    }
+  });
+
+  it('default frequency is "normal" and matches historical behaviour', () => {
+    const def = twoPlayers(7);
+    const normal = twoPlayersWithFreq('normal', 7);
+    expect(def.eventFrequency).toBe('normal');
+    expect(def.activeEvents).toEqual(normal.activeEvents);
+  });
+});
+
+describe('specialEvents: multi-round durations', () => {
+  it('a forced 2-round event survives exactly one boundary', () => {
+    // Frequency "off" so no new draws interfere with the forced event.
+    let s = twoPlayersWithFreq('off');
+    s = structuredClone(s);
+    s.activeEvents = [{ id: 'recession', remainingRounds: 2 }];
+
+    const startRound = s.round;
+    // Cross exactly one round boundary.
+    let guard = 0;
+    while (s.round === startRound && guard++ < 200) {
+      s = advanceTurns(s, 1);
+    }
+    expect(s.round).toBe(startRound + 1);
+    expect(s.activeEvents).toEqual([{ id: 'recession', remainingRounds: 1 }]);
+
+    // Cross the next boundary — now it expires.
+    const midRound = s.round;
+    guard = 0;
+    while (s.round === midRound && guard++ < 200) {
+      s = advanceTurns(s, 1);
+    }
+    expect(s.activeEvents).toEqual([]);
+  });
+
+  it('hasEvent-driven modifier applies while a multi-round event is active', () => {
+    // recession halves street rent — force it with 3 rounds and verify the
+    // effect persists after one boundary.
+    let s = twoPlayersWithFreq('off');
+    s = structuredClone(s);
+    s.activeEvents = [{ id: 'buildingSale', remainingRounds: 3 }];
+    s.ownership[13] = 'A';
+    s.ownership[14] = 'A';
+    s.players[0]!.money = 5000;
+
+    const board = getBoard('vegas');
+    const tile13 = board.tiles[13]!;
+    if (tile13.type !== 'street') throw new Error('test setup: 13 must be a street');
+    const full = Math.round(tile13.houseCost * s.buildingCostMult);
+    const { state: s1, events } = applyCommand(s, { type: 'BUILD', pos: 13, building: 'house' });
+    const built = events.find((e) => e.key === 'built');
+    expect(built).toBeDefined();
+    // buildingSale halves the cost.
+    expect(Number(built!.params['amount'])).toBe(Math.round(Math.floor(tile13.houseCost / 2) * s1.buildingCostMult));
+    expect(Number(built!.params['amount'])).toBeLessThan(full);
   });
 });

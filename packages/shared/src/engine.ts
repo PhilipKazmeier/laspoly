@@ -12,6 +12,7 @@ import {
 } from "./board.js";
 import { makeRng, nextInt, rollDie, shuffle } from "./rng.js";
 import type {
+  ActiveEvent,
   Buildings,
   Command,
   EventId,
@@ -36,9 +37,26 @@ const EVENT_IDS: EventId[] = [
   'quietDay',
 ];
 
-function drawEvent(state: GameState): { id: EventId } {
-  const idx = nextInt(state.rng, 0, EVENT_IDS.length - 1);
-  return { id: EVENT_IDS[idx]! };
+/**
+ * Draw an event id from the pool. `excludeQuiet` (chaos frequency) removes
+ * quietDay so something always happens. NOTE: under the default pool this
+ * consumes exactly one RNG int, preserving the historical RNG order that
+ * seed-based tests depend on.
+ */
+function drawEventId(rng: GameState["rng"], excludeQuiet: boolean): EventId {
+  const pool = excludeQuiet ? EVENT_IDS.filter((id) => id !== 'quietDay') : EVENT_IDS;
+  const idx = nextInt(rng, 0, pool.length - 1);
+  return pool[idx]!;
+}
+
+/** True when an event with this id is currently in effect. */
+export function hasEvent(state: GameState, id: EventId): boolean {
+  return state.activeEvents.some((e) => e.id === id);
+}
+
+/** The active event with this id (for events carrying extra data), if any. */
+export function getEvent(state: GameState, id: EventId): ActiveEvent | undefined {
+  return state.activeEvents.find((e) => e.id === id);
 }
 
 // ---- Action card definitions -----------------------------------------------
@@ -135,9 +153,14 @@ export function createGame(opts: NewGameOptions): GameState {
     figureIndex: p.figureIndex ?? 0,
   }));
   const rng = makeRng(opts.seed);
-  // Draw the first round's event before building state so it consumes the RNG in order
-  const firstEventIdx = nextInt(rng, 0, EVENT_IDS.length - 1);
-  const firstEvent: { id: EventId } = { id: EVENT_IDS[firstEventIdx]! };
+  const eventFrequency = opts.settings?.eventFrequency ?? "normal";
+  // Draw the first round's event before building state so it consumes the RNG
+  // in order (preserves historical seed-based dice streams under the default
+  // frequency). "off"/"rare" start without an event and consume no RNG.
+  const activeEvents: ActiveEvent[] =
+    eventFrequency === "normal" || eventFrequency === "chaos"
+      ? [{ id: drawEventId(rng, eventFrequency === "chaos"), remainingRounds: 1 }]
+      : [];
   const actionDeck: number[] = [];
   return {
     boardId: opts.boardId,
@@ -158,7 +181,8 @@ export function createGame(opts: NewGameOptions): GameState {
     actionDiscard: [],
     pendingSwap: null,
     round: 1,
-    activeEvent: firstEvent,
+    activeEvents,
+    eventFrequency,
     builtThisTurn: false,
     traveledThisTurn: false,
     buildingCostMult,
@@ -215,7 +239,7 @@ export function buildingChargeCost(
   kind: "house" | "hotel" | "factory",
   state: GameState,
 ): number {
-  const isSale = state.activeEvent?.id === 'buildingSale';
+  const isSale = hasEvent(state, 'buildingSale');
   if (kind === "house") {
     const base = isSale ? Math.floor(tile.houseCost / 2) : tile.houseCost;
     return Math.round(base * state.buildingCostMult);
@@ -432,16 +456,16 @@ function streetRent(state: GameState, board: BoardDefinition, pos: number): numb
   if (b?.factory) return 0; // factory pays its owner, never charges visitors
   if (b?.hotel) {
     const r = tile.rent[5];
-    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+    return hasEvent(state, 'recession') ? Math.floor(r / 2) : r;
   }
   if (b && b.houses > 0) {
     const r = tile.rent[b.houses]!;
-    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+    return hasEvent(state, 'recession') ? Math.floor(r / 2) : r;
   }
   // no buildings: base rent, doubled if owner holds the whole colour group
   const base = tile.rent[0];
   const fullGroupRent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
-  return state.activeEvent?.id === 'recession' ? Math.floor(fullGroupRent / 2) : fullGroupRent;
+  return hasEvent(state, 'recession') ? Math.floor(fullGroupRent / 2) : fullGroupRent;
 }
 
 function stationRent(state: GameState, board: BoardDefinition, pos: number): number {
@@ -455,7 +479,7 @@ function attractionRent(state: GameState, board: BoardDefinition, pos: number, d
   const both = ownsWholeGroup(state, board, ownerId, 'attraction');
   const factor = both ? board.rules.attraction.factorBoth : board.rules.attraction.factorOne;
   const base = diceSum * factor;
-  return state.activeEvent?.id === 'circus' ? base * 2 : base;
+  return hasEvent(state, 'circus') ? base * 2 : base;
 }
 
 // ---- money / bankruptcy --------------------------------------------------
@@ -794,7 +818,7 @@ function performCasinoRoll(state: GameState, board: BoardDefinition, player: Pla
     const doubleShare = board.rules.casino?.doubleShare ?? 0.25;
     const fraction = cd1 === 6 ? sixShare : doubleShare;
     const rawShare = Math.floor(state.casinoPool * fraction);
-    const share = state.activeEvent?.id === 'jackpot'
+    const share = hasEvent(state, 'jackpot')
       ? Math.floor(rawShare * 1.5)
       : rawShare;
     const actualShare = Math.min(share, state.casinoPool); // never exceed pool
@@ -822,7 +846,7 @@ function moveBy(state: GameState, board: BoardDefinition, player: PlayerState, s
   player.position = to;
   // passed or landed on GO (wrapped past 0)
   if (to < from || steps >= 40) {
-    const boomMult = state.activeEvent?.id === 'boom' ? 2 : 1;
+    const boomMult = hasEvent(state, 'boom') ? 2 : 1;
     if (to === 0) {
       const amount = board.rules.goLandMoney * boomMult;
       player.money += amount;
@@ -903,11 +927,29 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
   // Round boundary: index wrapped (new index <= old, meaning we cycled past the end)
   if (state.currentPlayerIndex <= oldIdx) {
     state.round += 1;
-    state.activeEvent = drawEvent(state);
-    events.push({
-      key: `specialEvent_${state.activeEvent.id}` as string,
-      params: { round: state.round },
-    });
+
+    // Expire running events first: decrement durations, drop the finished ones.
+    state.activeEvents = state.activeEvents
+      .map((e) => ({ ...e, remainingRounds: e.remainingRounds - 1 }))
+      .filter((e) => e.remainingRounds > 0);
+
+    // Draw per the configured frequency.
+    const freq = state.eventFrequency;
+    const draws =
+      freq === "off" ? false
+      : freq === "rare" ? nextInt(state.rng, 1, 3) === 1
+      : true; // normal + chaos draw every round
+    if (draws) {
+      const id = drawEventId(state.rng, freq === "chaos");
+      // Announce the draw; extend/refresh rather than duplicate if already active.
+      const existing = state.activeEvents.find((e) => e.id === id);
+      if (existing) existing.remainingRounds = Math.max(existing.remainingRounds, 1);
+      else state.activeEvents.push({ id, remainingRounds: 1 });
+      events.push({
+        key: `specialEvent_${id}` as string,
+        params: { round: state.round },
+      });
+    }
   }
 
   const next = currentPlayer(state);

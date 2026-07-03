@@ -35,6 +35,20 @@ export type EventId =
   | 'buildingSale'
   | 'quietDay';
 
+/** How often round events are drawn (game setting). */
+export type EventFrequency = "off" | "rare" | "normal" | "chaos";
+
+/**
+ * A round-modifier event currently in effect. `remainingRounds` is
+ * decremented at each round boundary; the event expires at 0. Some events
+ * carry extra data (e.g. the street group a party applies to).
+ */
+export interface ActiveEvent {
+  id: EventId;
+  remainingRounds: number;
+  group?: string;
+}
+
 export interface GameState {
   boardId: string;
   rng: RngState;
@@ -60,8 +74,10 @@ export interface GameState {
   pendingSwap: PendingSwap | null;
   /** current round number, starts at 1 */
   round: number;
-  /** the special event active this round, null only before game starts */
-  activeEvent: { id: EventId } | null;
+  /** special events currently in effect (round modifiers with durations) */
+  activeEvents: ActiveEvent[];
+  /** event draw frequency (from game settings, default "normal") */
+  eventFrequency: EventFrequency;
   /** True once the current player has built one building this turn; reset on turn advance. */
   builtThisTurn: boolean;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
@@ -122,6 +138,7 @@ export interface GameSettings {
   startingCapitalMult?: number; // default 1.0
   buildingCostMult?: number;    // default 1.0
   botDifficulty?: "easy" | "normal" | "hard"; // default "normal"
+  eventFrequency?: EventFrequency; // default "normal"
 }
 
 export interface NewGameOptions {
