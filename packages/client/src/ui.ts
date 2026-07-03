@@ -309,6 +309,7 @@ const css = `
   }
   #headerRound { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
   #headerEvent { font-size: 11px; color: var(--gold); margin-top: 1px; }
+  #headerRules { font-size: 11px; color: var(--text-dim); margin-top: 1px; letter-spacing: 2px; }
   #headerRight { display: flex; align-items: center; gap: 6px; min-width: 200px; justify-content: flex-end; }
   .hdr-btn {
     background: var(--glass-light); border: 1px solid var(--hairline);
@@ -793,6 +794,26 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.game.oneX": "1×",
     "settings.game.twoX": "2×",
     "settings.game.readonly": "Einstellungen (nur Host kann ändern)",
+    "settings.game.events": "Ereignisse",
+    "settings.game.eventsOff": "Aus",
+    "settings.game.eventsRare": "Selten",
+    "settings.game.eventsNormal": "Normal",
+    "settings.game.eventsChaos": "Chaos",
+    "settings.game.unbuildable": "Gesperrte Baufelder",
+    "settings.game.roundLimit": "Rundenlimit",
+    "settings.game.noLimit": "Kein Limit",
+    "settings.game.buildsPerTurn": "Bauten pro Zug",
+    "settings.game.unlimited": "Unbegrenzt",
+    "settings.game.noJailRent": "Keine Miete im Gefängnis",
+    "settings.game.extraBuildings": "Wolkenkratzer",
+    "settings.game.on": "An",
+    "settings.game.off": "Aus",
+    "rules.unbuildable": "Gesperrte Baufelder (Hausregel)",
+    "rules.roundLimit": "Rundenlimit — Sieg nach Vermögen",
+    "rules.noJailRent": "Keine Miete, solange der Besitzer im Gefängnis sitzt",
+    "rules.extraBuildings": "Wolkenkratzer aktiviert",
+    "rules.chaos": "Chaos-Ereignisse aktiv",
+    "rules.buildsPerTurn": "Angepasstes Baulimit pro Zug",
   },
   en: {
     // Lobby
@@ -1004,6 +1025,26 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.game.oneX": "1×",
     "settings.game.twoX": "2×",
     "settings.game.readonly": "Settings (only host can change)",
+    "settings.game.events": "Events",
+    "settings.game.eventsOff": "Off",
+    "settings.game.eventsRare": "Rare",
+    "settings.game.eventsNormal": "Normal",
+    "settings.game.eventsChaos": "Chaos",
+    "settings.game.unbuildable": "Blocked build fields",
+    "settings.game.roundLimit": "Round limit",
+    "settings.game.noLimit": "No limit",
+    "settings.game.buildsPerTurn": "Builds per turn",
+    "settings.game.unlimited": "Unlimited",
+    "settings.game.noJailRent": "No rent while jailed",
+    "settings.game.extraBuildings": "Skyscrapers",
+    "settings.game.on": "On",
+    "settings.game.off": "Off",
+    "rules.unbuildable": "Blocked build fields (house rule)",
+    "rules.roundLimit": "Round limit — net-worth winner",
+    "rules.noJailRent": "No rent while the owner is in jail",
+    "rules.extraBuildings": "Skyscrapers enabled",
+    "rules.chaos": "Chaos events active",
+    "rules.buildsPerTurn": "Custom per-turn build limit",
   },
 };
 
@@ -1068,6 +1109,7 @@ export class UI {
   private headerTurnStatus!: HTMLDivElement;
   private headerRound!: HTMLDivElement;
   private headerEvent!: HTMLDivElement;
+  private headerRules!: HTMLDivElement;
   private headerViewBtn!: HTMLButtonElement;
   private turnToast!: HTMLDivElement;
   private turnToastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1371,11 +1413,13 @@ export class UI {
       <div id="headerTurnStatus"></div>
       <div id="headerRound"></div>
       <div id="headerEvent"></div>
+      <div id="headerRules"></div>
     `;
     hdr.appendChild(center);
     this.headerTurnStatus = center.querySelector("#headerTurnStatus") as HTMLDivElement;
     this.headerRound = center.querySelector("#headerRound") as HTMLDivElement;
     this.headerEvent = center.querySelector("#headerEvent") as HTMLDivElement;
+    this.headerRules = center.querySelector("#headerRules") as HTMLDivElement;
 
     // Turn-timer badge (sibling of turn status, inside headerCenter)
     const timerEl = document.createElement("span");
@@ -2807,6 +2851,62 @@ export class UI {
       this.currentRoomSettings = { ...this.currentRoomSettings, botDifficulty: v as "easy" | "normal" | "hard" };
     });
 
+    // ---- House rules ------------------------------------------------------
+    const sendSetting = (patch: Partial<GameSettings>) => {
+      this.currentRoomSettings = { ...this.currentRoomSettings, ...patch };
+      this.net.send({ t: "setGameSettings", settings: this.currentRoomSettings });
+    };
+    const onOff = [
+      { value: "0", label: t("settings.game.off") },
+      { value: "1", label: t("settings.game.on") },
+    ];
+
+    addSetting("settings.game.events", "rsEvents", [
+      { value: "off", label: t("settings.game.eventsOff") },
+      { value: "rare", label: t("settings.game.eventsRare") },
+      { value: "normal", label: t("settings.game.eventsNormal") },
+      { value: "chaos", label: t("settings.game.eventsChaos") },
+    ], settings.eventFrequency ?? "normal", (v) => {
+      sendSetting({ eventFrequency: v as GameSettings["eventFrequency"] });
+    });
+
+    addSetting("settings.game.unbuildable", "rsUnbuildable", [
+      { value: "0", label: t("settings.game.off") },
+      { value: "2", label: "2" },
+      { value: "4", label: "4" },
+      { value: "6", label: "6" },
+    ], String(settings.unbuildableCount ?? 0), (v) => {
+      sendSetting({ unbuildableCount: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.roundLimit", "rsRoundLimit", [
+      { value: "0", label: t("settings.game.noLimit") },
+      { value: "20", label: "20" },
+      { value: "40", label: "40" },
+      { value: "60", label: "60" },
+    ], String(settings.roundLimit ?? 0), (v) => {
+      sendSetting({ roundLimit: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.buildsPerTurn", "rsBuildsPerTurn", [
+      { value: "1", label: "1" },
+      { value: "2", label: "2" },
+      { value: "3", label: "3" },
+      { value: "0", label: t("settings.game.unlimited") },
+    ], String(settings.buildsPerTurn ?? 1), (v) => {
+      sendSetting({ buildsPerTurn: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.noJailRent", "rsNoJailRent", onOff,
+      settings.noRentInJail ? "1" : "0", (v) => {
+        sendSetting({ noRentInJail: v === "1" });
+      });
+
+    addSetting("settings.game.extraBuildings", "rsExtraBuildings", onOff,
+      settings.extraBuildings ? "1" : "0", (v) => {
+        sendSetting({ extraBuildings: v === "1" });
+      });
+
     if (!isHost) {
       const note = document.createElement("div");
       note.className = "rs-readonly";
@@ -2850,6 +2950,28 @@ export class UI {
           .join(" · ");
       } else {
         this.headerEvent.textContent = '';
+      }
+    }
+
+    // Compact active-house-rule badges (tooltips carry the explanation).
+    if (this.headerRules) {
+      const badges: { icon: string; tip: string }[] = [];
+      if (state.unbuildableFields.length > 0)
+        badges.push({ icon: `⛔${state.unbuildableFields.length}`, tip: t("rules.unbuildable") });
+      if (state.roundLimit > 0)
+        badges.push({ icon: `⏱${state.roundLimit}`, tip: t("rules.roundLimit") });
+      if (state.noRentInJail) badges.push({ icon: "🚫🔒", tip: t("rules.noJailRent") });
+      if (state.extraBuildings) badges.push({ icon: "🏙", tip: t("rules.extraBuildings") });
+      if (state.eventFrequency === "chaos") badges.push({ icon: "🎲⚡", tip: t("rules.chaos") });
+      if (state.buildsPerTurn !== 1)
+        badges.push({ icon: `🔨${state.buildsPerTurn === 0 ? "∞" : state.buildsPerTurn}`, tip: t("rules.buildsPerTurn") });
+      this.headerRules.innerHTML = "";
+      for (const b of badges) {
+        const span = document.createElement("span");
+        span.textContent = b.icon;
+        span.title = b.tip;
+        span.style.marginRight = "6px";
+        this.headerRules.appendChild(span);
       }
     }
 

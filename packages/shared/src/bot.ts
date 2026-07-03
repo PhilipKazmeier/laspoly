@@ -52,7 +52,7 @@ function canBuildHouseAt(state: GameState, board: ReturnType<typeof getBoard>, p
   if (!tile || tile.type !== "street") return false;
   if (state.mortgaged[pos]) return false;
   const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-  if (b.hotel || b.factory || b.houses >= 4) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses >= 4) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // any mortgaged member blocks
@@ -92,7 +92,7 @@ function canBuildHotelAt(state: GameState, board: ReturnType<typeof getBoard>, p
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
   const b = state.buildings[pos];
-  if (!b || b.hotel || b.factory || b.houses !== 4) return false;
+  if (!b || b.hotel || b.factory || b.skyscraper || b.houses !== 4) return false;
   if (groupMembers(board, tile.group).length < 2) return false; // mirror engine: no hotel on single-street groups
   const members = groupMembers(board, tile.group);
   for (const m of members) {
@@ -189,7 +189,7 @@ export function botDecide(state: GameState): Command {
         if (!tile || tile.type !== "street") continue;
         const b = state.buildings[pos];
         if (!b) continue;
-        if (b.hotel || b.factory) return { type: "SELL_BUILDING", pos };
+        if (b.skyscraper || b.hotel || b.factory) return { type: "SELL_BUILDING", pos };
         if (b.houses > 0 && canSellHouseAt(state, board, pos)) {
           return { type: "SELL_BUILDING", pos };
         }
@@ -206,7 +206,7 @@ export function botDecide(state: GameState): Command {
         const tile = board.tiles[pos];
         if (!tile) continue;
         const b = state.buildings[pos];
-        if (b && (b.houses > 0 || b.hotel || b.factory)) continue;
+        if (b && (b.houses > 0 || b.hotel || b.factory || b.skyscraper)) continue;
         mortgageable.push({ pos, mv: mortgageValue(board, tile) });
       }
       mortgageable.sort((a, b) => a.mv - b.mv);
