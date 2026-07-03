@@ -630,7 +630,11 @@ export function legalCommandsFor(state: GameState, playerId: string): Command["t
 
 // ---- rent ---------------------------------------------------------------
 
-function streetRent(state: GameState, board: BoardDefinition, pos: number): number {
+// Rent-modifier collector: rent functions push event keys explaining WHY the
+// final amount differs from the printed card (money legibility — a player
+// must never wonder where a number came from). Keys are emitted as their own
+// events right after rentPaid.
+function streetRent(state: GameState, board: BoardDefinition, pos: number, mods?: string[]): number {
   const tile = tileAt(board, pos) as StreetTile;
   const b = state.buildings[pos];
   const ownerId = state.ownership[pos]!;
@@ -646,28 +650,43 @@ function streetRent(state: GameState, board: BoardDefinition, pos: number): numb
   } else {
     // no buildings: base rent, doubled if owner holds the whole colour group
     const base = tile.rent[0];
-    rent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
+    const monopoly = ownsWholeGroup(state, board, ownerId, tile.group);
+    rent = monopoly ? base * 2 : base;
+    if (monopoly) mods?.push("rentModMonopoly");
   }
-  if (hasEvent(state, 'recession')) rent = Math.floor(rent / 2);
+  if (hasEvent(state, 'recession')) {
+    rent = Math.floor(rent / 2);
+    mods?.push("rentModRecession");
+  }
   // Street party doubles rent in its group for the event's duration.
   const party = getEvent(state, 'streetParty');
-  if (party?.group && party.group === tile.group) rent *= 2;
+  if (party?.group && party.group === tile.group) {
+    rent *= 2;
+    mods?.push("rentModParty");
+  }
   return rent;
 }
 
-function stationRent(state: GameState, board: BoardDefinition, pos: number): number {
-  if (hasEvent(state, 'powerOutage')) return 0; // stations charge nothing this round
+function stationRent(state: GameState, board: BoardDefinition, pos: number, mods?: string[]): number {
+  if (hasEvent(state, 'powerOutage')) {
+    mods?.push("rentModPowerOutage");
+    return 0; // stations charge nothing this round
+  }
   const ownerId = state.ownership[pos]!;
   const count = groupOwnedCount(state, board, ownerId, "station");
   return board.rules.station.rent[Math.max(0, count - 1)] ?? 0;
 }
 
-function attractionRent(state: GameState, board: BoardDefinition, pos: number, diceSum: number): number {
+function attractionRent(state: GameState, board: BoardDefinition, pos: number, diceSum: number, mods?: string[]): number {
   const ownerId = state.ownership[pos]!;
   const both = ownsWholeGroup(state, board, ownerId, 'attraction');
   const factor = both ? board.rules.attraction.factorBoth : board.rules.attraction.factorOne;
   const base = diceSum * factor;
-  return hasEvent(state, 'circus') ? base * 2 : base;
+  if (hasEvent(state, 'circus')) {
+    mods?.push("rentModCircus");
+    return base * 2;
+  }
+  return base;
 }
 
 // ---- money / bankruptcy --------------------------------------------------
@@ -958,15 +977,20 @@ function resolveLanding(
     // pay rent
     const diceSum = player.lastRoll[0] + player.lastRoll[1];
     let rent = 0;
-    if (tile.type === "street") rent = streetRent(state, board, pos);
-    else if (tile.type === "station") rent = stationRent(state, board, pos);
-    else if (tile.type === "attraction") rent = attractionRent(state, board, pos, diceSum);
+    const rentMods: string[] = [];
+    if (tile.type === "street") rent = streetRent(state, board, pos, rentMods);
+    else if (tile.type === "station") rent = stationRent(state, board, pos, rentMods);
+    else if (tile.type === "attraction") rent = attractionRent(state, board, pos, diceSum, rentMods);
     const owner = playerById(state, ownerId)!;
     events.push({
       key: "rentPaid",
       params: { player: player.name, owner: owner.name, tile: tile.name, amount: rent },
       playerId: player.id,
     });
+    // Money legibility: say WHY the amount differs from the printed card.
+    for (const mod of rentMods) {
+      events.push({ key: mod, params: {}, playerId: player.id });
+    }
     charge(state, board, player, rent, ownerId, events);
     return;
   }

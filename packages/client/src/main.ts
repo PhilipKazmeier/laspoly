@@ -228,15 +228,28 @@ class StateQueue {
       await Promise.race([this.board.animateCardDrawAsync(title), timeout(3_000)]);
     }
 
-    // (b3) Money floats: diff each player's cash vs the previously rendered
-    //      state and float "+/−LPD" text above their token. State-diff based —
+    // (b3) Money made visible: diff each player's cash vs the previously
+    //      rendered state. Every delta floats off the player rail (DOM), and
+    //      chips fly across the table between the parties. State-diff based —
     //      FormattedEvent text is localized and must never be parsed.
     if (prev) {
+      const gains: Array<{ id: string; delta: number }> = [];
+      const losses: Array<{ id: string; delta: number }> = [];
       for (const p of state.players) {
         const pp = prev.players.find((pl) => pl.id === p.id);
         if (!pp || !p.alive) continue;
         const delta = p.money - pp.money;
-        if (delta !== 0) this.board.showMoneyFloat(p.id, delta);
+        if (delta === 0) continue;
+        this.ui.showMoneyDelta(p.id, delta);
+        (delta > 0 ? gains : losses).push({ id: p.id, delta });
+      }
+      // Chips: a single payer→payee pair is the common case (rent, trade).
+      // Anything else (tax, GO bonus, group events) flows via the bank.
+      if (losses.length === 1 && gains.length === 1) {
+        this.board.flyMoney(losses[0]!.id, gains[0]!.id, Math.abs(losses[0]!.delta));
+      } else {
+        for (const l of losses) this.board.flyMoney(l.id, null, Math.abs(l.delta));
+        for (const g of gains) this.board.flyMoney(null, g.id, g.delta);
       }
     }
 

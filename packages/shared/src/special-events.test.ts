@@ -216,6 +216,10 @@ describe('specialEvents: recession', () => {
       // recession halves rent (floor)
       expect(r2.params.amount).toBe(Math.floor((r1.params.amount as number) / 2));
     }
+
+    // Money legibility (back-room phase 5): the WHY is its own event line.
+    expect(ev2.some(e => e.key === 'rentModRecession')).toBe(true);
+    expect(ev1.some(e => e.key === 'rentModRecession')).toBe(false);
   });
 });
 

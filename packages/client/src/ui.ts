@@ -2197,6 +2197,23 @@ export class UI {
     }
   }
 
+  /**
+   * Money legibility (plan phase 5): a signed LPD delta floats off the
+   * player's rail card. Colour: ok for gains, danger for losses.
+   */
+  showMoneyDelta(playerId: string, delta: number): void {
+    const span = this.playerList?.querySelector(`.money-val[data-pid="${playerId}"]`);
+    if (!span) return;
+    const rect = (span as HTMLElement).getBoundingClientRect();
+    const float = document.createElement("div");
+    float.className = "money-delta " + (delta > 0 ? "gain" : "loss");
+    float.textContent = `${delta > 0 ? "+" : "−"}${Math.abs(delta)} LPD`;
+    float.style.left = `${rect.right + 10}px`;
+    float.style.top = `${rect.top - 4}px`;
+    document.body.appendChild(float);
+    setTimeout(() => float.remove(), 1900);
+  }
+
   appendEventLine(text: string) {
     const line = document.createElement("div");
     line.className = "event-line";
@@ -2652,13 +2669,19 @@ export class UI {
       this.headerTurnStatus.textContent = turnText;
       this.headerRound.textContent = `${t("turn.round")} ${state.round}`;
 
-      // Special event label in header
-      if (state.activeEvents.length > 0) {
-        this.headerEvent.textContent = state.activeEvents
-          .map((e) => t(`event.${e.id}`) || e.id)
-          .join(" · ");
-      } else {
-        this.headerEvent.textContent = '';
+      // Special event label in header — pulse the plaque when it changes so
+      // an economy-phase shift is a *moment*, not a silently swapped word.
+      const evLabel = state.activeEvents.length > 0
+        ? state.activeEvents.map((e) => t(`event.${e.id}`) || e.id).join(" · ")
+        : "";
+      if (evLabel !== this.headerEvent.textContent) {
+        this.headerEvent.textContent = evLabel;
+        const plaque = this.headerEvent.closest("#headerCenter");
+        if (plaque && evLabel) {
+          plaque.classList.remove("plaque-pulse");
+          void (plaque as HTMLElement).offsetWidth;
+          plaque.classList.add("plaque-pulse");
+        }
       }
     }
 

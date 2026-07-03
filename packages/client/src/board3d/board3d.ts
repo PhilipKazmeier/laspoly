@@ -49,6 +49,7 @@ import { Effects } from "./effects.js";
 import { animateCardDrawAsync } from "./cards.js";
 import { buildProceduralToken, makeStandee } from "../tokenFactory.js";
 import { Director } from "../director.js";
+import { flyChips } from "./chips.js";
 
 export class Board3D {
   private engine: Engine;
@@ -548,84 +549,20 @@ export class Board3D {
   }
 
   // -------------------------------------------------------------------------
-  // Money floats: "+LPD 120" / "−LPD 80" billboards rising above a token.
+  // Money made visible: chips fly payer→payee (DOM deltas live in the player
+  // rail — see ui.showMoneyDelta). null endpoint = the bank (table centre).
   // -------------------------------------------------------------------------
-  private activeFloatCount: Map<string, number> = new Map();
-
-  /** Fire-and-forget floating money text above a player's token. */
-  showMoneyFloat(playerId: string, delta: number): void {
-    if (delta === 0) return;
-    const token = this.tokenMeshes.get(playerId);
-    if (!token) return;
-
-    // Stack multiple floats for the same player with a vertical offset.
-    const stackIdx = this.activeFloatCount.get(playerId) ?? 0;
-    this.activeFloatCount.set(playerId, stackIdx + 1);
-
-    const W = 256, H = 64;
-    const tex = new DynamicTexture(`floatTex_${playerId}_${stackIdx}`, { width: W, height: H }, this.scene, false);
-    tex.hasAlpha = true;
-    const ctx = tex.getContext() as CanvasRenderingContext2D;
-    ctx.clearRect(0, 0, W, H);
-    const text = `${delta > 0 ? "+" : "−"}LPD ${Math.abs(delta).toLocaleString()}`;
-    ctx.font = "bold 44px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    // Soft dark halo for legibility on any background.
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.strokeText(text, W / 2, H / 2);
-    ctx.fillStyle = delta > 0 ? "#22c55e" : "#ef4444";
-    ctx.fillText(text, W / 2, H / 2);
-    tex.update();
-
-    const plane = MeshBuilder.CreatePlane(`float_${playerId}_${stackIdx}`, { width: 1.1, height: 0.28 }, this.scene);
-    plane.billboardMode = 7;
-    plane.isPickable = false;
-    const startY = token.position.y + 1.35 + stackIdx * 0.3;
-    plane.position.set(token.position.x, startY, token.position.z);
-    const mat = new StandardMaterial(`floatMat_${playerId}_${stackIdx}`, this.scene);
-    mat.diffuseTexture = tex;
-    mat.opacityTexture = tex;
-    mat.emissiveColor = new Color3(1, 1, 1);
-    mat.specularColor = new Color3(0, 0, 0);
-    mat.backFaceCulling = false;
-    plane.material = mat;
-
-    const RISE_MS = 1400;
-    let elapsed = 0;
-    let lastTime = performance.now();
-    let done = false;
-    // eslint-disable-next-line prefer-const
-    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      this.scene.onBeforeRenderObservable.remove(obs);
-      clearTimeout(safety);
-      plane.dispose();
-      tex.dispose();
-      const n = (this.activeFloatCount.get(playerId) ?? 1) - 1;
-      if (n <= 0) this.activeFloatCount.delete(playerId);
-      else this.activeFloatCount.set(playerId, n);
+  flyMoney(fromId: string | null, toId: string | null, amount: number): void {
+    const endpoint = (id: string | null): Vector3 => {
+      if (id) {
+        const tok = this.tokenMeshes.get(id);
+        if (tok) return tok.position.clone();
+      }
+      return new Vector3(0, 0.2, 0); // the bank: centre felt, by the cup
     };
-    const safety = setTimeout(finish, RISE_MS + 200);
-    obs = this.scene.onBeforeRenderObservable.add(() => {
-      const now = performance.now();
-      elapsed += now - lastTime;
-      lastTime = now;
-      const t = Math.min(elapsed / RISE_MS, 1);
-      plane.position.y = startY + 0.9 * t;
-      plane.visibility = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
-      if (t >= 1) finish();
-    });
+    flyChips(this.scene, endpoint(fromId), endpoint(toId), amount);
   }
 
-  /**
-   * Cache uploaded standee images per player (from RoomView broadcasts, incl.
-   * the resume path). If a player's image changed while their token exists,
-   * the token is dropped so the next rebuild shows the new picture.
-   */
   setCustomTokens(images: Map<string, string>): void {
     for (const [pid, url] of images) {
       if (this.customImages.get(pid) !== url) {
