@@ -18,6 +18,7 @@ import {
   ThemePalette,
   GROUP_COLORS,
   hexToColor3,
+  muteColor,
   SCALE,
   TILE_W,
   TILE_D,
@@ -27,75 +28,6 @@ import {
   outerDirection,
   cornerLabel,
 } from "./constants.js";
-
-// ---------------------------------------------------------------------------
-// Wood texture (procedural planks/grain for the classic-theme table)
-// ---------------------------------------------------------------------------
-export function makeWoodTexture(scene: Scene): DynamicTexture {
-  const W = 1024, H = 1024;
-  const tex = new DynamicTexture("woodTex", { width: W, height: H }, scene, true);
-  const ctx = tex.getContext() as CanvasRenderingContext2D;
-
-  // Base warm brown
-  ctx.fillStyle = "#6b3d12";
-  ctx.fillRect(0, 0, W, H);
-
-  // Draw horizontal wood planks (lighter grain lines)
-  const PLANK_H = 64; // px per plank
-  const NUM_PLANKS = Math.ceil(H / PLANK_H);
-  for (let p = 0; p < NUM_PLANKS; p++) {
-    const py = p * PLANK_H;
-    // Slight shade variation per plank
-    const shade = 0.85 + Math.sin(p * 1.7) * 0.1;
-    const r = Math.round(107 * shade);
-    const g = Math.round(61 * shade);
-    const b = Math.round(18 * shade);
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(0, py, W, PLANK_H - 2);
-
-    // Grain lines within each plank
-    for (let gl = 0; gl < 8; gl++) {
-      const gy = py + (gl / 8) * (PLANK_H - 2);
-      const brightness = 0.9 + Math.sin(gl * 2.1 + p * 0.9) * 0.08;
-      const gr = Math.round(130 * brightness);
-      const gg = Math.round(74 * brightness);
-      const gb = Math.round(22 * brightness);
-      ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      // Slightly wavy grain line
-      ctx.moveTo(0, gy);
-      for (let x = 0; x <= W; x += 16) {
-        const waver = Math.sin((x / W) * Math.PI * 6 + p * 1.3 + gl * 0.8) * 2;
-        ctx.lineTo(x, gy + waver);
-      }
-      ctx.stroke();
-    }
-
-    // Plank gap (dark line between planks)
-    ctx.fillStyle = "#3a1e07";
-    ctx.fillRect(0, py + PLANK_H - 2, W, 2);
-  }
-
-  // Knot holes (circular dark spots)
-  const knots = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15], [W * 0.45, H * 0.65], [W * 0.85, H * 0.55]];
-  for (const [kx, ky] of knots) {
-    const grad = ctx.createRadialGradient(kx!, ky!, 2, kx!, ky!, 14);
-    grad.addColorStop(0, "rgba(30,12,3,0.85)");
-    grad.addColorStop(0.6, "rgba(60,28,8,0.5)");
-    grad.addColorStop(1, "rgba(107,61,18,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.ellipse(kx!, ky!, 14, 10, 0.2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  tex.update();
-  // Tile the texture across the large table surface (scale factor on UV)
-  tex.uScale = 5;
-  tex.vScale = 5;
-  return tex;
-}
 
 // ---------------------------------------------------------------------------
 // Board geometry: base, felt, deck, jail cage, 40 tiles with bars + labels
@@ -144,6 +76,9 @@ export function drawBoard(scene: Scene, palette: ThemePalette, board: BoardDefin
   deck.rotation.y = (45 * Math.PI) / 180;
   const deckMat = new StandardMaterial("deckMat", scene);
   deckMat.diffuseTexture = new Texture("/assets/cardpattern.png", scene);
+  // Dim the card-back pattern toward lamplight so it doesn't strobe on felt.
+  deckMat.diffuseColor = new Color3(0.72, 0.62, 0.55);
+  deckMat.specularColor = new Color3(0.05, 0.04, 0.03);
   deck.material = deckMat;
 
   // ---- Jail cage ----------------------------------------------------------
@@ -236,7 +171,8 @@ function addColorBar(
   bar.rotation.y = rad;
 
   const barMat = new StandardMaterial(`barMat_${pos}`, scene);
-  barMat.diffuseColor = hexToColor3(colorHex);
+  // Muted toward printed pigment — pure RGB reads as neon plastic on felt.
+  barMat.diffuseColor = muteColor(hexToColor3(colorHex));
   barMat.specularColor = new Color3(0, 0, 0);
   bar.material = barMat;
 }
@@ -400,15 +336,18 @@ function buildJailCage(scene: Scene) {
   const H = 0.65;
   const BAR_R = 0.04;
   const BARS = 6;
+  // Dark wrought iron — a cage in a back room, not a garden shed.
   const cageMat = new StandardMaterial("cageMat", scene);
-  cageMat.diffuseColor = new Color3(0.25, 0.25, 0.3);
-  cageMat.specularColor = new Color3(0.7, 0.7, 0.7);
+  cageMat.diffuseColor = new Color3(0.08, 0.08, 0.09);
+  cageMat.specularColor = new Color3(0.35, 0.32, 0.28);
+  cageMat.specularPower = 48;
 
   // Floor
   const floor = MeshBuilder.CreateBox("cageFloor", { width: W, height: 0.05, depth: W }, scene);
   floor.position.set(CX, 0.025, CZ);
   const floorMat = new StandardMaterial("cageFloorMat", scene);
-  floorMat.diffuseColor = new Color3(0.5, 0.4, 0.3);
+  floorMat.diffuseColor = new Color3(0.13, 0.1, 0.07); // dark wood base
+  floorMat.specularColor = new Color3(0, 0, 0);
   floor.material = floorMat;
 
   // Vertical bars on all 4 sides
@@ -456,9 +395,9 @@ function buildJailCage(scene: Scene) {
   // "JAIL" text label floating above the cage
   const jailTex = new DynamicTexture("jailTex", { width: 128, height: 32 }, scene, false);
   const jctx = jailTex.getContext() as CanvasRenderingContext2D;
-  jctx.fillStyle = "#1a1a2e";
+  jctx.fillStyle = "#14100c";
   jctx.fillRect(0, 0, 128, 32);
-  jctx.fillStyle = "#ffd700";
+  jctx.fillStyle = "#c9a35c";
   jctx.font = "bold 20px Arial";
   jctx.textAlign = "center";
   jctx.textBaseline = "middle";

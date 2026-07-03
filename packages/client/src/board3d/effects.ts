@@ -18,17 +18,15 @@ import {
   GlowLayer,
   DirectionalLight,
   ShadowGenerator,
+  HDRCubeTexture,
   Vector3,
   Color3,
   Color4,
-  MeshBuilder,
-  StandardMaterial,
   DynamicTexture,
   ParticleSystem,
   AbstractMesh,
   Mesh,
 } from "@babylonjs/core";
-import type { Theme } from "../theme.js";
 import type { Quality } from "../quality.js";
 
 export class Effects {
@@ -37,33 +35,32 @@ export class Effects {
 
   constructor(
     private scene: Scene,
-    private theme: Theme,
     private quality: Quality,
   ) {}
 
-  /** Bloom + FXAA (+ vignette on neon). FXAA stays on even at low quality. */
+  /** FXAA + warm-room vignette. FXAA stays on even at low quality. */
   initPipeline(camera: ArcRotateCamera): void {
     const pipeline = new DefaultRenderingPipeline("default", false, this.scene, [camera]);
     pipeline.fxaaEnabled = true;
-    if (this.quality === "low") return;
 
     // NO scene-wide bloom: the near-white tiles sit at luminance ~1.0, so any
     // bloom threshold below 1 blooms the entire tile ring into glare and
     // washes out the labels (verified by screenshot at thresholds 0.55 and
-    // 0.85). The selective neon pop comes from the included-only GlowLayer
-    // instead — it only affects hand-registered meshes.
-    if (this.theme === "neon") {
-      pipeline.imageProcessingEnabled = true;
-      pipeline.imageProcessing.vignetteEnabled = true;
-      pipeline.imageProcessing.vignetteWeight = 1.5;
-    }
+    // 0.85). Lamplight accents come from the included-only GlowLayer instead.
+    //
+    // The vignette IS the room: it darkens the table edges toward the
+    // surrounding dark, implying walls without modelling them.
+    pipeline.imageProcessingEnabled = true;
+    pipeline.imageProcessing.vignetteEnabled = true;
+    pipeline.imageProcessing.vignetteWeight = 1.8;
   }
 
-  /** Glow layer for hand-picked emissive meshes (neon + high only). */
+  /** Glow layer for hand-picked emissive meshes (skipped at low quality). */
   initGlow(): void {
-    if (this.theme !== "neon" || this.quality === "low") return;
+    if (this.quality === "low") return;
+    // Lamplight, not neon: low intensity, only hand-registered meshes.
     this.glow = new GlowLayer("glow", this.scene, { blurKernelSize: 32 });
-    this.glow.intensity = 0.6;
+    this.glow.intensity = 0.35;
     // Included-only mode: nothing glows unless registered via addGlowMesh().
     // (Adding one mesh switches the layer from "all emissive" to "only these".)
   }
@@ -74,25 +71,26 @@ export class Effects {
   }
 
   /**
-   * Blurred-exponential shadow map from a dedicated directional light.
-   * Skipped entirely at low quality. The existing straight-down fill light is
-   * dimmed by the caller to compensate for the added directional intensity.
+   * The warm key light of the room — a directional "lamp over the table" that
+   * also drives the blurred-exponential shadow map. Skipped entirely at low
+   * quality (the caller compensates with a brighter flat fill there).
    */
   initShadows(): void {
     if (this.quality === "low") return;
-    const shadowLight = new DirectionalLight(
-      "shadowLight",
-      new Vector3(-0.5, -1, 0.35),
+    const key = new DirectionalLight(
+      "keyLight",
+      new Vector3(-0.45, -1, 0.3),
       this.scene
     );
-    shadowLight.position = new Vector3(12, 24, -9);
-    shadowLight.intensity = 0.35;
-    shadowLight.specular = new Color3(0, 0, 0);
+    key.position = new Vector3(14, 26, -10);
+    key.intensity = 0.8;
+    key.diffuse = new Color3(1, 0.88, 0.7); // warm tungsten
+    key.specular = new Color3(0.08, 0.06, 0.04);
 
-    const gen = new ShadowGenerator(1024, shadowLight);
+    const gen = new ShadowGenerator(1024, key);
     gen.useBlurExponentialShadowMap = true;
     gen.blurKernel = 16;
-    gen.setDarkness(0.35);
+    gen.setDarkness(0.4);
     this.shadows = gen;
   }
 
@@ -107,55 +105,28 @@ export class Effects {
   }
 
   // ---------------------------------------------------------------------------
-  // Environment: neon starfield skybox + drifting dust motes. Classic gets its
-  // warm room feel from the palette (clear colour + key light) instead.
+  // Environment: the room beyond the table is implied, not modelled — the dark
+  // clear colour + vignette are the walls; a warm interior HDRI feeds image-
+  // based lighting into the PBR table so the wood picks up believable sheen.
+  // Drifting dust motes in the key light complete the atmosphere (high only).
   // ---------------------------------------------------------------------------
   initEnvironment(): void {
-    if (this.theme !== "neon") return;
+    if (this.quality === "low") return;
 
-    // Inside-out box with an emissive night-sky texture. infiniteDistance keeps
-    // it glued to the camera so it always fills the horizon.
-    const sky = MeshBuilder.CreateBox(
-      "sky",
-      { size: 400, sideOrientation: Mesh.BACKSIDE },
-      this.scene
+    // IBL only — no visible skybox. 128px prefilter keeps startup cheap.
+    const env = new HDRCubeTexture(
+      "/assets/env/warm_interior_1k.hdr",
+      this.scene,
+      128,
+      false,
+      true,
+      false,
+      true
     );
-    const mat = new StandardMaterial("skyMat", this.scene);
-    mat.disableLighting = true;
-    mat.emissiveTexture = this.makeStarfieldTexture();
-    mat.backFaceCulling = false;
-    mat.specularColor = new Color3(0, 0, 0);
-    sky.material = mat;
-    sky.infiniteDistance = true;
-    sky.isPickable = false;
+    this.scene.environmentTexture = env;
+    this.scene.environmentIntensity = 0.4;
 
     if (this.quality === "high") this.initDust();
-  }
-
-  /** 1024² night sky: vertical midnight gradient + scattered stars. */
-  private makeStarfieldTexture(): DynamicTexture {
-    const S = 1024;
-    const tex = new DynamicTexture("skyTex", { width: S, height: S }, this.scene, true);
-    const ctx = tex.getContext() as CanvasRenderingContext2D;
-    const grad = ctx.createLinearGradient(0, 0, 0, S);
-    grad.addColorStop(0, "#1a1230");
-    grad.addColorStop(1, "#0a0913");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, S, S);
-    // Stars: client-side Math.random is fine (visual only — determinism binds
-    // the engine, not the renderer).
-    for (let i = 0; i < 400; i++) {
-      const x = Math.random() * S;
-      const y = Math.random() * S;
-      const r = 0.5 + Math.random() * 1.0;
-      const a = 0.3 + Math.random() * 0.7;
-      ctx.fillStyle = Math.random() < 0.15 ? `rgba(255,220,150,${a})` : `rgba(255,255,255,${a})`;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    tex.update();
-    return tex;
   }
 
   /** Celebration confetti burst at a world position (win). Skipped on low quality. */

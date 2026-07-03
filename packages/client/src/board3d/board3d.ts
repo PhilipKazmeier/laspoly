@@ -10,11 +10,12 @@ import {
   Scene,
   ArcRotateCamera,
   HemisphericLight,
-  PointLight,
   DirectionalLight,
   Vector3,
   MeshBuilder,
   StandardMaterial,
+  PBRMaterial,
+  Texture,
   Color3,
   DynamicTexture,
   AbstractMesh,
@@ -24,11 +25,10 @@ import {
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
-import { getTheme } from "../theme.js";
 import { getQuality } from "../quality.js";
 import {
-  ThemePalette,
-  THEMES,
+  ScenePalette,
+  BACK_ROOM,
   GROUP_COLORS,
   PLAYER_COLOR_HEX,
   STATION_POSITIONS,
@@ -41,7 +41,7 @@ import {
   HOP_DURATION_MS,
   HOP_HEIGHT,
 } from "./constants.js";
-import { drawBoard, makeWoodTexture } from "./tiles.js";
+import { drawBoard } from "./tiles.js";
 import { DiceRig } from "./dice.js";
 import { BuildingRenderer } from "./buildings.js";
 import { Effects } from "./effects.js";
@@ -53,7 +53,7 @@ export class Board3D {
   private scene: Scene;
   private tokenMeshes: Map<string, AbstractMesh> = new Map();
   private currentBoardId: string | null = null;
-  private readonly palette: ThemePalette = THEMES[getTheme()];
+  private readonly palette: ScenePalette = BACK_ROOM;
   // Car OBJ models (player tokens): one merged template mesh per car index 1-5
   private carModels: Map<number, Mesh> = new Map();
   private carsLoaded = false;
@@ -99,8 +99,8 @@ export class Board3D {
     this.engine = new Engine(canvas, true);
     this.scene = new Scene(this.engine);
 
-    // Neon-Vegas: midnight scene background so any edge beyond the table reads
-    // as the same dark world as the HUD (matches --bg-0 #0a0913).
+    // The Back Room: warm near-black beyond the table (matches --color-bg-0
+    // #14100c) — the vignette in Effects implies the rest of the room.
     this.scene.clearColor = this.palette.clear;
 
     // ---- Camera ------------------------------------------------------------
@@ -119,31 +119,28 @@ export class Board3D {
     this.camera.lowerBetaLimit = 0.15; // prevent fully-vertical "mirror" glare
 
     // ---- Lighting ----------------------------------------------------------
-    // Specular is suppressed across lights/materials so the felt + board read
-    // flat and legible from a top-down view (no white blowout).
+    // One warm key light (lives in Effects, drives the shadows) over a low
+    // warm ambient — a lamp over the table, not an evenly-lit showroom.
+    // Specular stays suppressed on the flat surfaces so the felt + board read
+    // legibly from a top-down view (no white blowout).
     const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
-    ambient.intensity = 0.8;
+    ambient.intensity = 0.55;
+    ambient.diffuse = this.palette.ambientDiffuse;
+    ambient.groundColor = new Color3(0.16, 0.11, 0.07); // bounce off dark wood
     ambient.specular = new Color3(0, 0, 0);
-    const key = new PointLight("key", new Vector3(0, 20, -5), this.scene);
-    key.intensity = this.palette.keyIntensity;
-    key.specular = new Color3(0.1, 0.1, 0.1);
-    if (this.palette.keyDiffuse) key.diffuse = this.palette.keyDiffuse;
-    // Soft fill from straight above so the board is evenly lit when viewed top-down.
+    // Flat top-down fill: barely-there under the key light; carries the board
+    // alone at low quality (where the key/shadow light is skipped).
     const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
+    fill.diffuse = new Color3(1, 0.92, 0.8);
     fill.specular = new Color3(0, 0, 0);
-    // Cool the ambient toward the violet world tone (neon); classic leaves it white.
-    if (this.palette.ambientDiffuse) ambient.diffuse = this.palette.ambientDiffuse;
 
     // ---- Post-processing / glow / shadows (quality-gated) -------------------
-    this.effects = new Effects(this.scene, getTheme(), getQuality());
+    this.effects = new Effects(this.scene, getQuality());
     this.effects.initPipeline(this.camera);
     this.effects.initGlow();
     this.effects.initShadows();
     this.effects.initEnvironment();
-    // The shadow light adds ~0.35 directional intensity, so dim the flat fill
-    // to keep overall board brightness unchanged. Low quality keeps the
-    // original fill (no shadow light exists there).
-    fill.intensity = getQuality() === "high" ? 0.1 : 0.25;
+    fill.intensity = getQuality() === "low" ? 0.5 : 0.12;
 
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
@@ -177,54 +174,30 @@ export class Board3D {
       }
     });
 
-    // ---- Wooden table -------------------------------------------------------
-    // Large enough that the wood fills the view in both camera angles (bug 8a:
-    // the table edge previously revealed the dark scene background).
+    // ---- The wooden table ---------------------------------------------------
+    // Real dark-walnut PBR (vendored CC0 maps, see public/assets/ASSETS.md).
+    // Large enough that wood fills the frame at every camera angle — the table
+    // IS the room's floor as far as the player ever sees.
     const table = MeshBuilder.CreateBox(
       "table",
-      { width: 48, height: 0.5, depth: 48 },
+      { width: 60, height: 0.5, depth: 60 },
       this.scene
     );
     table.position.y = -0.45;
-    const tableMat = new StandardMaterial("tableMat", this.scene);
-    // Classic: procedural wood texture. Neon: flat dark colour (one continuous
-    // surface; the tiled wood showed seams and clashed with the glass HUD).
-    if (this.palette.tableWood) {
-      tableMat.diffuseTexture = makeWoodTexture(this.scene);
-      // Tight specular highlights read as varnish on the wood.
-      tableMat.specularPower = 64;
-    } else {
-      tableMat.diffuseColor = this.palette.tableDiffuse;
-    }
-    tableMat.specularColor = this.palette.tableSpecular;
+    const tableMat = new PBRMaterial("tableMat", this.scene);
+    const woodAlbedo = new Texture("/assets/tex/wood_dark_diff_1k.jpg", this.scene);
+    const woodNormal = new Texture("/assets/tex/wood_dark_nor_1k.jpg", this.scene);
+    woodAlbedo.uScale = woodAlbedo.vScale = 6;
+    woodNormal.uScale = woodNormal.vScale = 6;
+    tableMat.albedoTexture = woodAlbedo;
+    tableMat.bumpTexture = woodNormal;
+    // Darken + de-red the albedo: the room is lamplit, the table shouldn't
+    // read as noon-bright cherry flooring.
+    tableMat.albedoColor = new Color3(0.6, 0.56, 0.52);
+    tableMat.metallic = 0;
+    tableMat.roughness = 0.55; // varnished, not lacquered
     table.material = tableMat;
     this.effects.addShadowReceiver(table);
-
-    // Neon: faint self-lit gold rim around the table edge (glow-registered).
-    if (!this.palette.tableWood) {
-      const RIM_W = 0.35, RIM_H = 0.1, T = 48;
-      const rimParts: Mesh[] = [];
-      for (const sz of [-1, 1]) {
-        const strip = MeshBuilder.CreateBox(`tableRim_z${sz}`, { width: T, height: RIM_H, depth: RIM_W }, this.scene);
-        strip.position.set(0, -0.2, sz * (T / 2 - RIM_W / 2));
-        rimParts.push(strip);
-      }
-      for (const sx of [-1, 1]) {
-        const strip = MeshBuilder.CreateBox(`tableRim_x${sx}`, { width: RIM_W, height: RIM_H, depth: T - 2 * RIM_W }, this.scene);
-        strip.position.set(sx * (T / 2 - RIM_W / 2), -0.2, 0);
-        rimParts.push(strip);
-      }
-      const rim = Mesh.MergeMeshes(rimParts, true, true, undefined, false, false);
-      if (rim) {
-        const rimMat = new StandardMaterial("tableRimMat", this.scene);
-        rimMat.diffuseColor = new Color3(0.2, 0.16, 0.05);
-        rimMat.emissiveColor = new Color3(0.35, 0.28, 0.08);
-        rimMat.specularColor = new Color3(0, 0, 0);
-        rim.material = rimMat;
-        rim.isPickable = false;
-        this.effects.addGlowMesh(rim);
-      }
-    }
 
     // ---- Initial board -------------------------------------------------------
     const boards = listBoards();

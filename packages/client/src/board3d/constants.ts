@@ -7,18 +7,14 @@ import { Color3, Color4 } from "@babylonjs/core";
 import { JAIL_POS } from "@laspoly/shared";
 
 // ---------------------------------------------------------------------------
-// Per-theme 3D palette. "neon" = Neon-Vegas glass; "classic" = the original
-// warm wood + green board. Read once at construction; switching reloads.
+// The single 3D palette: "The Back Room" (docs/idea-brief.md §7) — a private
+// casino table in a warm dark room. Felt, walnut, brass, paper; nothing glows
+// unless it's lit. Replaces the old neon/classic dual-theme system.
 // ---------------------------------------------------------------------------
-export interface ThemePalette {
+export interface ScenePalette {
   clear: Color4;
-  ambientDiffuse: Color3 | null; // null → leave the light's default white
-  keyIntensity: number;          // point-light strength (classic warms up the "room lamp")
-  keyDiffuse: Color3 | null;     // null → default white key light
-  tableWood: boolean;            // true → procedural wood texture; false → flat colour
-  tableDiffuse: Color3;          // used when tableWood is false
-  tableSpecular: Color3;
-  boardBase: Color3;
+  ambientDiffuse: Color3;        // hemispheric fill tint (warm)
+  boardBase: Color3;             // track ring under the tiles
   boardEmissive: Color3;
   feltTint: Color3 | null;       // null → no diffuseColor (full-brightness texture)
   tile: Color3;
@@ -29,43 +25,20 @@ export interface ThemePalette {
   cupSpecular: Color3;
 }
 
-export const THEMES: Record<"neon" | "classic", ThemePalette> = {
-  neon: {
-    clear: new Color4(0.039, 0.035, 0.075, 1),
-    ambientDiffuse: new Color3(0.85, 0.83, 0.95),
-    keyIntensity: 0.3,
-    keyDiffuse: null,
-    tableWood: false,
-    tableDiffuse: new Color3(0.1, 0.085, 0.15),
-    tableSpecular: new Color3(0.05, 0.04, 0.09),
-    boardBase: new Color3(0.09, 0.07, 0.14),
-    boardEmissive: new Color3(0.12, 0.09, 0.02),
-    feltTint: new Color3(0.42, 0.4, 0.55),
-    tile: new Color3(0.95, 0.95, 0.97),
-    tileBorder: "#5b5680",
-    cupDiffuse: new Color3(0.14, 0.11, 0.2),
-    cupEmissive: new Color3(0.22, 0.16, 0.03),
-    cupSpecular: new Color3(0.3, 0.24, 0.1),
-  },
-  classic: {
-    // Warm dark room instead of the old blue-grey void — the table now reads
-    // as sitting in a lamp-lit den.
-    clear: new Color4(0.16, 0.12, 0.09, 1),
-    ambientDiffuse: null,
-    keyIntensity: 0.4,
-    keyDiffuse: new Color3(1, 0.9, 0.75),
-    tableWood: true,
-    tableDiffuse: new Color3(0.42, 0.24, 0.07),
-    tableSpecular: new Color3(0.18, 0.12, 0.06),
-    boardBase: new Color3(0.32, 0.54, 0.28),
-    boardEmissive: new Color3(0, 0, 0),
-    feltTint: null,
-    tile: new Color3(0.97, 0.95, 0.88),
-    tileBorder: "#c9c2a8",
-    cupDiffuse: new Color3(0.22, 0.13, 0.05),
-    cupEmissive: new Color3(0.08, 0.04, 0.01),
-    cupSpecular: new Color3(0.35, 0.22, 0.12),
-  },
+/** Back-compat alias — dice.ts/tiles.ts type their palette parameter with this. */
+export type ThemePalette = ScenePalette;
+
+export const BACK_ROOM: ScenePalette = {
+  clear: new Color4(0.078, 0.063, 0.047, 1),            // --color-bg-0 #14100c
+  ambientDiffuse: new Color3(1, 0.93, 0.82),            // warm lamp fill
+  boardBase: new Color3(0.086, 0.18, 0.135),            // deep felt ring
+  boardEmissive: new Color3(0, 0, 0),
+  feltTint: new Color3(0.5, 0.62, 0.52),                // darken tex_felt toward #1b3a2c
+  tile: new Color3(0.945, 0.91, 0.83),                  // --color-paper #f1e8d4
+  tileBorder: "#b6a380",
+  cupDiffuse: new Color3(0.16, 0.1, 0.06),              // dark leather
+  cupEmissive: new Color3(0.045, 0.028, 0.015),
+  cupSpecular: new Color3(0.3, 0.2, 0.12),
 };
 
 // ---------------------------------------------------------------------------
@@ -87,6 +60,17 @@ export const GROUP_COLORS: Record<string, string> = {
   station: "#888888",
   attraction: "#FFD700",
 };
+
+/**
+ * Mute a colour for the back-room world: pull it toward its own grey by
+ * `desat` and dim slightly, so pure-RGB group colours sit on the felt like
+ * printed board pigment instead of neon plastic. Hue is preserved.
+ */
+export function muteColor(c: Color3, desat = 0.22, dim = 0.92): Color3 {
+  const grey = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+  const mix = (ch: number) => (ch * (1 - desat) + grey * desat) * dim;
+  return new Color3(mix(c.r), mix(c.g), mix(c.b));
+}
 
 export function hexToColor3(hex: string): Color3 {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
