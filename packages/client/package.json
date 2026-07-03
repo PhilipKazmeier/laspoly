@@ -6,6 +6,7 @@
     "dev": "VITE_WS_URL=ws://localhost:8080 vite",
     "build": "vite build",
     "preview": "vite preview --port 4173",
+    "capture": "tsx tools/capture.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
