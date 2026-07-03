@@ -586,6 +586,8 @@ type Locale = "de" | "en";
 const STRINGS: Record<Locale, Record<string, string>> = {
   de: {
     // Lobby
+    "lobby.roomName": "Spielname",
+    "lobby.noRooms": "Keine offenen Spiele — erstelle eins!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -817,6 +819,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
   },
   en: {
     // Lobby
+    "lobby.roomName": "Room name",
+    "lobby.noRooms": "No open games — create one!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -1181,6 +1185,9 @@ export class UI {
   }
 
   private buildLobby() {
+    // Lobby-first hierarchy: the list of joinable games is the primary
+    // content; creating a game is a secondary, collapsed path underneath.
+    const savedNick = localStorage.getItem("laspoly_nickname") ?? "Player";
     const lobby = document.createElement("div");
     lobby.id = "lobby";
     lobby.className = "panel";
@@ -1188,20 +1195,26 @@ export class UI {
       <button id="lobbySettingsBtn" class="hdr-btn" title="${t("header.settings")}" style="position:absolute;top:12px;right:12px;">${t("header.settingsTitle")}</button>
       <h2 id="lobbyTitle" style="margin-bottom:12px;color:var(--gold);">${t("lobby.title")}</h2>
       <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
-      <input id="nickname" type="text" placeholder="Your name" value="Player" />
-      <label id="lobbyBoardLabel">${t("lobby.board")}</label>
-      <select id="boardId"></select>
-      <label id="lobbyBotCountLabel">${t("lobby.botCount")}</label>
-      <select id="botCount">
-        <option value="0">0</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3" selected>3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-      </select>
-      <button id="createRoom" style="margin-top:16px;width:100%;">${t("lobby.createRoom")}</button>
+      <input id="nickname" type="text" placeholder="Your name" />
+      <div id="lobbyRoomsHeader" style="margin-top:14px;font-size:12px;color:#aaa;">${t("lobby.openRooms")}</div>
       <div id="roomList"></div>
+      <div id="createPanel" style="margin-top:16px;border-top:1px solid var(--hairline);padding-top:10px;">
+        <div id="createGameToggle" style="color:var(--gold);font-weight:bold;font-size:13px;margin-bottom:6px;">${t("lobby.createRoom")}</div>
+        <label id="lobbyRoomNameLabel">${t("lobby.roomName")}</label>
+        <input id="roomName" type="text" maxlength="60" placeholder="" />
+        <label id="lobbyBoardLabel">${t("lobby.board")}</label>
+        <select id="boardId"></select>
+        <label id="lobbyBotCountLabel">${t("lobby.botCount")}</label>
+        <select id="botCount">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+        <button id="createRoom" style="margin-top:12px;width:100%;">${t("lobby.createRoom")}</button>
+      </div>
     `;
     this.root.appendChild(lobby);
     this.lobby = lobby;
@@ -1211,6 +1224,12 @@ export class UI {
     this.botCountSelect = document.getElementById("botCount") as HTMLSelectElement;
     this.createRoomBtn = document.getElementById("createRoom") as HTMLButtonElement;
     this.roomList = document.getElementById("roomList") as HTMLDivElement;
+
+    // Nickname persists across sessions.
+    this.nicknameInput.value = savedNick;
+    this.nicknameInput.addEventListener("change", () => {
+      localStorage.setItem("laspoly_nickname", this.nicknameInput.value.trim() || "Player");
+    });
 
     // Populate boards
     for (const b of listBoards()) {
@@ -1230,12 +1249,15 @@ export class UI {
     this.createRoomBtn.addEventListener("click", () => {
       const nickname = this.nicknameInput.value.trim() || "Player";
       this.myName = nickname;
+      localStorage.setItem("laspoly_nickname", nickname);
+      const roomNameInput = document.getElementById("roomName") as HTMLInputElement | null;
+      const roomName = roomNameInput?.value.trim() || `${nickname}'s Room`;
       const boardId = this.boardIdSelect.value || listBoards()[0]?.id || "vegas";
       const botCount = parseInt(this.botCountSelect.value, 10);
       const safeBotCount = Number.isNaN(botCount) ? 3 : Math.max(0, Math.min(5, botCount));
       this.net.send({
         t: "createRoom",
-        name: `${nickname}'s Room`,
+        name: roomName.slice(0, 60),
         nickname,
         boardId,
         botCount: safeBotCount,
@@ -2653,35 +2675,63 @@ export class UI {
     this.net.send({ t: "listRooms" });
   }
 
+  /** Belt-and-braces lobby refresh: push updates are primary, this catches stragglers. */
+  private lobbyPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  private startLobbyPolling() {
+    if (this.lobbyPollTimer) return;
+    this.lobbyPollTimer = setInterval(() => {
+      if (this.lobby.style.display === "none") { this.stopLobbyPolling(); return; }
+      this.net.send({ t: "listRooms" });
+    }, 10_000);
+  }
+
+  private stopLobbyPolling() {
+    if (this.lobbyPollTimer) {
+      clearInterval(this.lobbyPollTimer);
+      this.lobbyPollTimer = null;
+    }
+  }
+
   showLobby(rooms: RoomSummary[]) {
     show(this.lobby);
     hide(this.roomPanel);
     hide(this.gameHud);
     hide(this.spectatorBanner);
+    this.startLobbyPolling();
 
     this.roomList.innerHTML = "";
-    if (rooms.length > 0) {
-      const header = document.createElement("div");
-      header.style.cssText = "margin-top:12px;font-size:12px;color:#aaa;";
-      header.textContent = t("lobby.openRooms");
-      this.roomList.appendChild(header);
+    const boardNames = new Map(listBoards().map((b) => [b.id, b.name]));
+    const joinable = rooms.filter((r) => !r.started);
 
-      for (const room of rooms) {
-        if (room.started) continue;
-        const item = document.createElement("div");
-        item.className = "room-item";
-        item.innerHTML = `<strong>${room.name}</strong> <span style="color:#aaa;font-size:12px;">(${room.playerCount} ${t("lobby.players")})</span>`;
-        item.addEventListener("click", () => {
-          const nickname = this.nicknameInput.value.trim() || "Player";
-          this.net.send({ t: "joinRoom", roomId: room.id, nickname });
-        });
-        this.roomList.appendChild(item);
-      }
+    if (joinable.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "room-item";
+      empty.style.cssText = "color:#888;cursor:default;";
+      empty.textContent = t("lobby.noRooms");
+      this.roomList.appendChild(empty);
+      return;
+    }
+
+    for (const room of joinable) {
+      const item = document.createElement("div");
+      item.className = "room-item";
+      const lock = (room as { hasPassword?: boolean }).hasPassword ? " 🔒" : "";
+      item.innerHTML =
+        `<strong>${room.name}</strong>${lock}` +
+        `<span style="color:#aaa;font-size:12px;margin-left:6px;">${boardNames.get(room.boardId) ?? room.boardId}</span>` +
+        `<span style="color:#aaa;font-size:12px;margin-left:6px;">👥 ${room.playerCount}</span>`;
+      item.addEventListener("click", () => {
+        const nickname = this.nicknameInput.value.trim() || "Player";
+        this.net.send({ t: "joinRoom", roomId: room.id, nickname });
+      });
+      this.roomList.appendChild(item);
     }
   }
 
   onJoined(roomId: string, _playerId: string) {
     this.currentRoomId = roomId;
+    this.stopLobbyPolling();
     hide(this.lobby);
     show(this.roomPanel);
     this.roomInfo.textContent = t("room.waiting");
