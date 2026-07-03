@@ -1,8 +1,9 @@
+import "./styles/tokens.css";
+import "./styles/ui.css";
 import { Net, loadSession, clearSession } from "./net.js";
 import { Board3D } from "./board3d.js";
 import { UI } from "./ui.js";
 import { audio } from "./audio.js";
-import { applyThemeClass } from "./theme.js";
 import { getBoard } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 
@@ -285,9 +286,6 @@ class StateQueue {
   }
 }
 
-// Apply the saved DOM theme before any UI is built (avoids a flash of the wrong
-// theme). The 3D board reads the theme itself at construction.
-applyThemeClass();
 
 const net = new Net();
 const board3d = new Board3D(document.getElementById("renderCanvas") as HTMLCanvasElement);

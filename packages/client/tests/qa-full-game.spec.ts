@@ -684,6 +684,7 @@ test.describe("QA Full-Game Playthrough", () => {
     // Wait for our first turn
     const arrived = await waitForAction(page, 45_000);
     if (arrived === "roll" || arrived === "buy" || arrived === "ransom") {
+      await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
       await page.locator("#chatInput").fill("Hello from QA");
       await page.locator("#chatSendBtn").click();
       await page.waitForTimeout(700);
@@ -896,6 +897,8 @@ test.describe("QA Full-Game Playthrough", () => {
     const leaveBtn = page.locator("#gameHeader button").filter({ hasText: "Verlassen" });
     await expect(leaveBtn).toBeVisible();
     await leaveBtn.click();
+    // The leave-confirm overlay asks first — confirm with its yes button.
+    await page.locator(".confirm-overlay button").first().click();
     await page.waitForTimeout(1_000);
 
     // Should be back at lobby

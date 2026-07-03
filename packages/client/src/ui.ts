@@ -21,619 +21,9 @@ import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
-import { getTheme, setTheme, type Theme } from "./theme.js";
 import { getQuality, setQuality, type Quality } from "./quality.js";
 import { API_BASE, loadSession } from "./net.js";
 
-const css = `
-  /* ── Neon-Vegas glass design system ─────────────────────────────── */
-  :root {
-    --bg-0: #0a0913;
-    --glass: rgba(22, 19, 38, 0.72);
-    --glass-strong: rgba(15, 13, 26, 0.9);
-    --glass-light: rgba(255, 255, 255, 0.05);
-    --hairline: rgba(255, 255, 255, 0.10);
-    --hairline-soft: rgba(255, 255, 255, 0.06);
-    --text: #f3f1fb;
-    --text-dim: #a39fc0;
-    --text-mute: #6f6b8a;
-    --gold: #fbbf24;
-    --gold-deep: #f59e0b;
-    --violet: #7c3aed;
-    --magenta: #d946ef;
-    --success: #34d399;
-    --success-deep: #059669;
-    --danger: #f43f5e;
-    --danger-deep: #9f1239;
-    --info: #60a5fa;
-    --muted: rgba(255, 255, 255, 0.08);
-    --radius-lg: 16px;
-    --radius: 12px;
-    --radius-sm: 8px;
-    --shadow: 0 10px 36px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
-    --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.6);
-    --glow-gold: 0 0 20px rgba(251, 191, 36, 0.35);
-    --glow-magenta: 0 0 22px rgba(217, 70, 239, 0.4);
-    --top-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    --blur: blur(16px) saturate(140%);
-    --font: 'Segoe UI', system-ui, -apple-system, 'Inter', Roboto, sans-serif;
-    --ease: 0.18s cubic-bezier(.4, 0, .2, 1);
-  }
-  .panel {
-    background: var(--glass);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg);
-    padding: 18px;
-    color: var(--text);
-    box-shadow: var(--shadow), var(--top-hi);
-  }
-  button {
-    background: linear-gradient(135deg, var(--violet), var(--magenta));
-    color: #fff;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 9px 16px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    margin: 4px 2px;
-    font-family: var(--font);
-    box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3);
-    transition: transform var(--ease), box-shadow var(--ease), filter var(--ease);
-  }
-  button:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), var(--glow-magenta); }
-  button:active { transform: translateY(0); filter: brightness(0.97); }
-  button:disabled { background: var(--muted); color: var(--text-mute); cursor: default; box-shadow: none; transform: none; filter: none; }
-  input, select {
-    background: rgba(10, 9, 18, 0.6);
-    color: var(--text);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-sm);
-    padding: 9px 12px;
-    font-size: 14px;
-    margin: 4px 0;
-    width: 100%;
-    box-sizing: border-box; /* include padding in width:100% (fixes lobby h-scrollbar, bug 2-2) */
-    font-family: var(--font);
-    transition: border-color var(--ease), box-shadow var(--ease);
-  }
-  input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18); }
-  input::placeholder { color: var(--text-mute); }
-  label { font-size: 13px; color: var(--text-dim); display: block; margin-top: 8px; }
-  #lobby {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 360px;
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
-    box-sizing: border-box;
-  }
-  #roomPanel {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 360px;
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
-    box-sizing: border-box;
-  }
-  #roomList { margin-top: 12px; max-height: 200px; overflow-y: auto; }
-  .room-item { padding: 10px 12px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 6px 0; cursor: pointer; background: var(--glass-light); transition: background var(--ease), border-color var(--ease), transform var(--ease); }
-  .room-item:hover { background: rgba(255,255,255,0.08); border-color: var(--hairline); transform: translateX(2px); }
-  #playerList {
-    position: absolute; top: 80px; left: 16px;
-    width: 220px;
-    max-height: calc(60vh - 48px);
-    overflow-y: auto;
-  }
-  .player-row { padding: 8px 10px; margin: 5px 0; border-radius: var(--radius-sm); border: 1px solid var(--hairline-soft); font-size: 13px; background: var(--glass-light); transition: background var(--ease), border-color var(--ease); }
-  .player-row.current-player { border-color: var(--gold); background: rgba(251,204,21,0.12); box-shadow: var(--glow-gold); }
-  .player-row.dead { opacity: 0.4; }
-  .chip-stack { display:flex; align-items:center; gap:2px; flex-wrap:wrap; margin-top:2px; }
-  .chip-img { width:16px; height:16px; object-fit:contain; image-rendering:pixelated; }
-  .chip-count { font-size:10px; color:#aaa; margin-left:1px; }
-  .deed-strip { display:flex; flex-wrap:wrap; gap:2px; margin-top:3px; }
-  .deed-chip {
-    width:12px; height:16px; border-radius:2px;
-    display:inline-block; cursor:default;
-    border:1px solid rgba(255,255,255,0.15);
-  }
-  .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
-  @keyframes screenEnter {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .screen-enter { animation: screenEnter 0.25s ease-out; }
-  @media (prefers-reduced-motion: reduce) {
-    .screen-enter { animation: none; }
-    #actionCardPopup { animation: none; }
-  }
-  #deedTooltip {
-    position: fixed;
-    z-index: 130;
-    pointer-events: none;
-    background: var(--glass-strong);
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    padding: 7px 10px;
-    font-size: 11px;
-    color: var(--text);
-    max-width: 200px;
-    line-height: 1.5;
-  }
-  #deedTooltip .dt-bar { height: 4px; border-radius: 2px; margin-bottom: 5px; }
-  @keyframes cardPopIn {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
-    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  }
-  #actionCardPopup {
-    position: absolute; top: calc(50% + 24px); left: 50%; transform: translate(-50%, -50%);
-    width: 320px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    overflow: hidden;
-    z-index: 100;
-    animation: cardPopIn 0.25s ease-out;
-  }
-  #actionCardPopup .ac-header {
-    background: linear-gradient(135deg, var(--gold-deep), var(--gold)); color: #2a1c02; font-weight: 700; font-size: 15px;
-    padding: 12px 16px;
-    text-align: center;
-  }
-  #actionCardPopup .ac-body {
-    padding: 16px; color: var(--text); font-size: 14px; line-height: 1.5;
-    text-align: center;
-  }
-  #actionCardPopup .ac-footer {
-    padding: 0 16px 14px; text-align: center;
-  }
-  #buyOfferPanel {
-    position: absolute; bottom: 100px; right: 16px;
-    width: 260px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold);
-    border-radius: var(--radius); padding: 0;
-    color: var(--text); overflow: hidden;
-    box-shadow: var(--shadow), var(--glow-gold);
-  }
-  #buyOfferPanel .buy-header {
-    background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color: #2a1c02;
-    font-weight: 700; font-size: 13px;
-    padding: 9px 14px;
-  }
-  #buyOfferPanel .buy-body { padding: 12px 14px; }
-  #buyOfferPanel h3 { color: var(--gold); margin: 0 0 6px; font-size: 14px; display: none; }
-  #buyOfferPanel .buy-detail { font-size: 12px; color: var(--text-dim); margin: 3px 0; }
-  #buyOfferPanel .buy-btns { display:flex; gap:8px; margin-top:10px; }
-  #eventLogPanel {
-    position: absolute; bottom: 16px; left: 16px;
-    width: 300px;
-  }
-  #eventLog {
-    height: 150px; overflow-y: auto;
-    background: rgba(0,0,0,0.35);
-    border: 1px solid var(--hairline-soft);
-    border-radius: var(--radius-sm);
-    padding: 8px;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  .event-line { margin: 2px 0; color: var(--text-dim); }
-  #chatRow { display: flex; gap: 4px; margin-top: 6px; }
-  #chatInput { flex: 1; }
-  #chatSendBtn { width: auto; }
-  #actionPanel {
-    position: absolute; bottom: 16px; right: 16px;
-    text-align: right;
-  }
-  #gameHud {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none;
-  }
-  #gameHud > * { pointer-events: auto; }
-  #gameOverBanner {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: radial-gradient(ellipse at center, rgba(40,20,60,0.7), rgba(0,0,0,0.85));
-    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-    align-items: center; justify-content: center;
-    flex-direction: column; gap: 16px;
-  }
-  #gameOverBanner h1 { font-size: 2.75rem; color: var(--gold); text-shadow: var(--glow-gold), 0 2px 12px rgba(0,0,0,0.6); letter-spacing: 1px; }
-  #spectatorBanner {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(159,18,57,0.55); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid rgba(244,63,94,0.4);
-    padding: 8px 20px; border-radius: var(--radius-sm);
-    font-size: 14px; box-shadow: var(--shadow);
-  }
-  #versionBadge {
-    position: absolute; bottom: 4px; right: 8px;
-    font-size: 11px; color: var(--text-mute);
-  }
-  #errorBanner {
-    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    background: rgba(159,18,57,0.92); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid rgba(244,63,94,0.5);
-    padding: 9px 20px; border-radius: var(--radius-sm);
-    font-size: 13px; max-width: 400px; text-align: center; box-shadow: var(--shadow);
-  }
-  #specialEventBanner {
-    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    background: rgba(20, 10, 40, 0.7); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--magenta);
-    border-radius: var(--radius-sm);
-    padding: 7px 18px;
-    font-size: 13px;
-    color: #f0d5ff;
-    box-shadow: var(--glow-magenta);
-    pointer-events: none;
-    white-space: nowrap;
-    max-width: 480px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  #myPropsPanel {
-    position: absolute; top: 80px; right: 16px;
-    width: 280px;
-    max-height: calc(70vh - 48px);
-    overflow-y: auto;
-  }
-  .prop-row { padding: 9px 10px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 5px 0; font-size: 12px; background: var(--glass-light); }
-  .prop-row .prop-name { font-weight: 600; color: var(--text); }
-  .prop-row .prop-detail { color: var(--text-dim); font-size: 11px; margin: 2px 0; }
-  .prop-btn { font-size: 11px; padding: 4px 9px; margin: 2px 1px; }
-  .prop-btn.danger { background: linear-gradient(135deg, var(--danger-deep), var(--danger)); box-shadow: 0 2px 8px rgba(244,63,94,0.25); }
-  .prop-btn.danger:hover { box-shadow: 0 4px 14px rgba(244,63,94,0.4), 0 0 16px rgba(244,63,94,0.3); }
-  #travelPanel {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 260px;
-  }
-  #tradePanel {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 560px;
-    max-width: 92vw;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-  .trade-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
-  .trade-col-title { font-size: 12px; color: var(--text-dim); font-weight: bold; margin-bottom: 6px; }
-  .trade-card {
-    display: flex; align-items: center; gap: 6px;
-    padding: 5px 8px; margin: 3px 0;
-    border: 1px solid var(--hairline-soft); border-radius: 6px;
-    background: var(--glass-light);
-    font-size: 12px; cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
-  .trade-card:hover { border-color: var(--gold); }
-  .trade-card.selected { border-color: var(--gold); background: rgba(201,162,39,0.16); }
-  .trade-card.selected::after { content: "✓"; margin-left: auto; color: var(--gold); font-weight: bold; }
-  .trade-card .tc-chip { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-  .trade-card .tc-value { color: #aaa; margin-left: auto; }
-  .trade-card.selected .tc-value { margin-left: 6px; }
-  .player-chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 10px; margin: 0 6px 6px 0;
-    border: 1px solid var(--hairline-soft); border-radius: 999px;
-    background: var(--glass-light); font-size: 12px; cursor: pointer;
-  }
-  .player-chip.selected { border-color: var(--gold); background: rgba(201,162,39,0.16); font-weight: bold; }
-  .money-stepper { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-  .money-stepper button { padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.08); }
-  .money-stepper input { width: 70px; text-align: center; }
-  #tradeSummary {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-top: 10px; padding: 8px; border-radius: 6px;
-    background: var(--glass-light); border: 1px solid var(--hairline-soft);
-    font-size: 12px;
-  }
-  #incomingSwapPanel {
-    position: absolute; bottom: 80px; right: 16px;
-    width: 300px;
-  }
-  .swap-section { margin: 8px 0; padding: 8px; background: var(--glass-light); border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); }
-  .swap-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
-  .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
-  #gameHeader {
-    position: absolute; top: 0; left: 0; width: 100%; min-height: 48px;
-    background: linear-gradient(180deg, rgba(18,16,34,0.92), rgba(12,10,24,0.82));
-    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border-bottom: 1px solid var(--hairline);
-    box-shadow: 0 2px 18px rgba(0,0,0,0.45), inset 0 -2px 0 rgba(251,191,36,0.55);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 12px;
-    box-sizing: border-box;
-    z-index: 50;
-    pointer-events: none;
-    font-family: var(--font);
-  }
-  #gameHeader > * { pointer-events: auto; }
-  #headerLeft { display: flex; flex-direction: column; gap: 1px; min-width: 160px; }
-  #headerLeft .room-label { font-size: 13px; font-weight: 700; color: var(--gold); line-height: 1.2; letter-spacing: 0.3px; }
-  #headerLeft .board-label { font-size: 11px; color: var(--text-dim); line-height: 1.2; }
-  #headerCenter { flex: 1; text-align: center; padding: 0 8px; }
-  #headerTurnStatus {
-    font-size: 15px; font-weight: 700; color: var(--text);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    line-height: 1.2;
-  }
-  #headerRound { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
-  #headerEvent { font-size: 11px; color: var(--gold); margin-top: 1px; }
-  #headerRules { font-size: 11px; color: var(--text-dim); margin-top: 1px; letter-spacing: 2px; }
-  #headerRight { display: flex; align-items: center; gap: 6px; min-width: 200px; justify-content: flex-end; }
-  .hdr-btn {
-    background: var(--glass-light); border: 1px solid var(--hairline);
-    color: var(--text); border-radius: var(--radius-sm); padding: 5px 9px;
-    font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: var(--font);
-    transition: background var(--ease), border-color var(--ease);
-  }
-  .hdr-btn:hover { background: rgba(255,255,255,0.14); border-color: var(--gold); }
-  #headerVersion { font-size: 10px; color: var(--text-mute); margin-left: 4px; }
-  #turnToast {
-    position: absolute; bottom: 140px; right: 16px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold);
-    border-radius: var(--radius-sm);
-    padding: 9px 14px;
-    font-size: 13px;
-    color: var(--text);
-    max-width: 240px;
-    pointer-events: none;
-    opacity: 0;
-    box-shadow: var(--shadow), var(--glow-gold);
-    transition: opacity 0.3s ease;
-    z-index: 60;
-  }
-  #turnToast.visible { opacity: 1; }
-  #helpOverlay {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    width: 320px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg); padding: 18px;
-    color: var(--text); font-size: 13px; line-height: 1.6;
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    z-index: 80;
-  }
-  #helpOverlay h3 { color: var(--gold); margin: 0 0 10px; font-size: 14px; }
-  #helpOverlay ul { margin: 0; padding-left: 18px; }
-  #helpOverlay li { margin: 4px 0; color: var(--text-dim); }
-  #settingsOverlay {
-    position: absolute; top: 80px; right: 12px;
-    width: 200px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg); padding: 14px;
-    color: var(--text); font-size: 13px;
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    z-index: 80;
-  }
-  #settingsOverlay label { color: var(--text-dim); font-size: 12px; margin-top: 6px; }
-  #deedCardPopup {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    width: 300px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop), var(--glow-gold);
-    z-index: 90;
-    overflow: hidden;
-  }
-  #deedCardPopup .dc-color-bar {
-    height: 8px; width: 100%;
-  }
-  #deedCardPopup .dc-header {
-    padding: 12px 16px 6px; font-weight: 700; font-size: 15px; color: var(--gold);
-    display: flex; justify-content: space-between; align-items: flex-start;
-  }
-  #deedCardPopup .dc-close {
-    background: none; border: none; color: var(--text-dim); font-size: 18px;
-    cursor: pointer; padding: 0 0 0 8px; line-height: 1; box-shadow: none;
-  }
-  #deedCardPopup .dc-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #deedCardPopup .dc-body {
-    padding: 8px 16px 14px; color: var(--text); font-size: 12px; line-height: 1.6;
-  }
-  #deedCardPopup .dc-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--hairline-soft); padding: 3px 0; }
-  #deedCardPopup .dc-row:last-child { border-bottom: none; }
-  #deedCardPopup .dc-label { color: var(--text-dim); }
-  #deedCardPopup .dc-value { color: var(--text); text-align: right; }
-  #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: var(--info); }
-  #deedCardPopup .dc-status { font-size: 11px; color: var(--danger); margin-top: 2px; }
-  #specialEventToast {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(67, 20, 110, 0.78); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--magenta);
-    border-radius: var(--radius);
-    padding: 11px 16px;
-    font-size: 13px;
-    color: #f0d5ff;
-    max-width: 500px;
-    text-align: center;
-    line-height: 1.5;
-    box-shadow: var(--shadow), var(--glow-magenta);
-    z-index: 85;
-    display: flex; align-items: flex-start; gap: 10px;
-  }
-  #specialEventToast .set-text { flex: 1; }
-  #specialEventToast .set-close {
-    background: none; border: none; color: #c4b5fd; font-size: 16px;
-    cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0; box-shadow: none;
-  }
-  #specialEventToast .set-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #paymentToasts {
-    position: absolute; bottom: 185px; right: 16px;
-    display: flex; flex-direction: column-reverse; gap: 6px;
-    pointer-events: none;
-    z-index: 65;
-  }
-  .payment-toast {
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 13px;
-    font-weight: bold;
-    color: #fff;
-    max-width: 280px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    line-height: 1.4;
-  }
-  .payment-toast.visible { opacity: 1; }
-  .payment-toast.paying { background: rgba(153,27,27,0.92); border: 1px solid #ef4444; }
-  .payment-toast.receiving { background: rgba(20,83,45,0.92); border: 1px solid #22c55e; }
-  #roomLinkRow { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
-  #roomLinkRow input { flex:1; font-size:12px; color:#aaa; background:#111; border:1px solid #444; border-radius:4px; padding:4px 8px; }
-  #figurePicker { margin-top: 12px; }
-  #figurePicker .fp-title { font-size: 12px; color: #aaa; margin-bottom: 6px; }
-  .fp-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
-  .fp-swatch {
-    width: 28px; height: 28px; border-radius: 5px; border: 2px solid transparent;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: #fff; font-weight: bold;
-  }
-  .fp-swatch.selected { border-color: var(--gold); box-shadow: var(--glow-gold); }
-  .fp-swatch.taken { opacity: 0.35; cursor: default; }
-  .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
-  #turnTimer {
-    display: inline-block;
-    font-size: 13px;
-    font-weight: bold;
-    color: rgba(255,255,255,0.85);
-    background: rgba(0,0,0,0.35);
-    border-radius: 4px;
-    padding: 1px 7px;
-    margin-left: 6px;
-    vertical-align: middle;
-    min-width: 36px;
-    text-align: center;
-  }
-  #turnTimer.urgent {
-    color: #f87171;
-    animation: timerPulse 0.6s ease-in-out infinite alternate;
-  }
-  @keyframes timerPulse {
-    from { opacity: 1; }
-    to   { opacity: 0.45; }
-  }
-  /* Player inspector (feature 1) */
-  #playerInspector {
-    position: absolute; top: 80px; left: 250px;
-    width: 280px;
-    max-height: calc(70vh - 48px);
-    overflow-y: auto;
-    z-index: 70;
-  }
-  #playerInspector .pi-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 8px;
-  }
-  #playerInspector .pi-title { font-size: 13px; color: var(--gold); font-weight: 700; }
-  #playerInspector .pi-close {
-    background: none; border: none; color: var(--text-dim); font-size: 18px;
-    cursor: pointer; padding: 0; line-height: 1; box-shadow: none;
-  }
-  #playerInspector .pi-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #playerInspector .pi-stat { font-size: 12px; color: var(--text-dim); margin: 2px 0; }
-  #playerInspector .pi-worth { font-size: 13px; color: var(--success); font-weight: 700; margin: 4px 0; }
-  #playerInspector .pi-group { margin-top: 8px; }
-  #playerInspector .pi-group-title { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-  #playerInspector .pi-prop { font-size: 11px; color: var(--text); padding: 2px 0; border-bottom: 1px solid var(--hairline-soft); }
-  /* Net worth rank badge */
-  .nw-rank { font-size: 10px; font-weight: 700; color: #2a1c02; background: var(--gold); border-radius: 4px; padding: 0 5px; margin-left: 4px; }
-  .nw-worth { font-size: 10px; color: var(--success); margin-left: 4px; }
-  /* Player row clickable hint */
-  .player-row { cursor: pointer; }
-  .player-row:hover { background: rgba(255,255,255,0.04); }
-  /* Surrender button */
-  #surrenderBtn {
-    background: rgba(159,18,57,0.55); border: 1px solid rgba(244,63,94,0.5);
-    color: #fff; border-radius: var(--radius-sm); padding: 5px 9px;
-    font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: var(--font); box-shadow: none;
-    transition: background var(--ease), box-shadow var(--ease);
-  }
-  #surrenderBtn:hover { background: rgba(159,18,57,0.85); box-shadow: 0 0 14px rgba(244,63,94,0.35); transform: none; filter: none; }
-  /* Room ready UI (feature 3) */
-  .rp-player-row { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 0; }
-  .rp-ready-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .rp-ready-dot.ready { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,0.6); }
-  .rp-ready-dot.not-ready { background: var(--text-mute); }
-  /* Room settings (feature 6) */
-  #roomSettingsPanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline-soft); }
-  #roomSettingsPanel .rs-title { font-size: 12px; color: var(--gold); font-weight: 700; margin-bottom: 6px; }
-  #roomSettingsPanel label { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: block; }
-  #roomSettingsPanel select { font-size: 12px; padding: 5px 8px; margin-top: 2px; }
-  #roomSettingsPanel .rs-readonly { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
-  /* Confirm overlay (non-modal, inline) */
-  .confirm-overlay {
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--danger);
-    border-radius: var(--radius); padding: 14px 16px; font-size: 13px; color: var(--text);
-    box-shadow: var(--shadow-pop);
-    position: absolute; z-index: 200;
-  }
-  .confirm-overlay .co-btns { display: flex; gap: 8px; margin-top: 10px; }
-  .confirm-overlay .co-msg { margin-bottom: 6px; }
-
-  /* ── Classic theme (original look) ──────────────────────────────────
-     Overriding the tokens reverts the token-driven rules (glass, radii,
-     shadows, blur, accents); the block below only re-adds the few bits that
-     the neon rules hardcode (button/header/popup gradients). */
-  body.theme-classic {
-    --glass: rgba(10, 10, 30, 0.85);
-    --glass-strong: #1a1a2e;
-    --glass-light: rgba(255, 255, 255, 0.03);
-    --hairline: #444;
-    --hairline-soft: #333;
-    --text: #eee;
-    --text-dim: #aaa;
-    --text-mute: #888;
-    --gold: #facc15;
-    --gold-deep: #eab308;
-    --success: #22c55e;
-    --danger: #ef4444;
-    --muted: #555;
-    --radius-lg: 8px;
-    --radius: 8px;
-    --radius-sm: 4px;
-    --shadow: none;
-    --shadow-pop: 0 4px 24px rgba(0, 0, 0, 0.7);
-    --glow-gold: none;
-    --glow-magenta: none;
-    --top-hi: none;
-    --blur: none;
-    --font: 'Segoe UI', Arial, sans-serif;
-    background: #1a1a2e;
-  }
-  body.theme-classic button {
-    background: #2563eb; font-weight: normal; letter-spacing: normal;
-    box-shadow: none;
-  }
-  body.theme-classic button:hover { background: #1d4ed8; transform: none; filter: none; box-shadow: none; }
-  body.theme-classic button:active { transform: none; filter: none; }
-  body.theme-classic input:focus, body.theme-classic select:focus { box-shadow: none; }
-  body.theme-classic #gameHeader {
-    background: linear-gradient(to bottom, #c2410c, #ea580c);
-    border-bottom: 2px solid #f97316;
-    box-shadow: none;
-  }
-  body.theme-classic #headerLeft .room-label { color: #fff; }
-  body.theme-classic #actionCardPopup .ac-header { background: #f97316; color: #fff; }
-  body.theme-classic #buyOfferPanel .buy-header { background: #facc15; color: #1a1a2e; }
-  body.theme-classic .prop-btn.danger { background: #991b1b; box-shadow: none; }
-  body.theme-classic .prop-btn.danger:hover { background: #7f1d1d; box-shadow: none; }
-  body.theme-classic #gameOverBanner { background: rgba(0, 0, 0, 0.75); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  body.theme-classic #gameOverBanner h1 { text-shadow: none; }
-  body.theme-classic #specialEventToast { background: rgba(88, 28, 135, 0.95); }
-  body.theme-classic #surrenderBtn:hover { box-shadow: none; }
-`;
 
 // ---------------------------------------------------------------------------
 // i18n — client-side string table (DE + EN)
@@ -710,9 +100,6 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Einstellungen",
     "settings.locale": "Sprache / Locale",
     "settings.localeNote": "Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.",
-    "settings.theme": "Design",
-    "settings.themeNeon": "Neon-Vegas",
-    "settings.themeClassic": "Klassisch",
     "settings.quality": "Grafik",
     "settings.qualityHigh": "Hoch",
     "settings.qualityLow": "Niedrig",
@@ -823,6 +210,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "room.customToken": "Eigenes Bild als Figur",
     "room.uploadHint": "PNG/JPEG, wird auf 256×256 zugeschnitten",
     "room.uploadTooBig": "Bild konnte nicht verarbeitet werden (zu groß?)",
+    "figure.car": "Auto",
+    "figure.police": "Polizei",
     "figure.topHat": "Zylinder",
     "figure.pawn": "Spielstein",
     "figure.rocket": "Rakete",
@@ -969,9 +358,6 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Settings",
     "settings.locale": "Language / Locale",
     "settings.localeNote": "Note: Local display language – game events come from the server.",
-    "settings.theme": "Design",
-    "settings.themeNeon": "Neon Vegas",
-    "settings.themeClassic": "Classic",
     "settings.quality": "Graphics",
     "settings.qualityHigh": "High",
     "settings.qualityLow": "Low",
@@ -1082,6 +468,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "room.customToken": "Your picture as token",
     "room.uploadHint": "PNG/JPEG, cover-cropped to 256×256",
     "room.uploadTooBig": "Could not process the image (too large?)",
+    "figure.car": "Car",
+    "figure.police": "Police",
     "figure.topHat": "Top Hat",
     "figure.pawn": "Pawn",
     "figure.rocket": "Rocket",
@@ -1200,6 +588,8 @@ export class UI {
   private gameHud!: HTMLDivElement;
   private playerList!: HTMLDivElement;
   private eventLog!: HTMLDivElement;
+  private tickerText!: HTMLSpanElement;
+  private yourRail!: HTMLDivElement;
   private rollBtn!: HTMLButtonElement;
   private casinoRollBtn!: HTMLButtonElement;
   private ransomBtn!: HTMLButtonElement;
@@ -1267,7 +657,6 @@ export class UI {
     this.root = root;
     this.net = net;
     this.board3d = board3d;
-    this.injectStyles();
     this.buildLobby();
     this.buildRoomPanel();
     this.buildGameHud();
@@ -1288,11 +677,6 @@ export class UI {
     this.checkRoomFromUrl();
   }
 
-  private injectStyles() {
-    const style = document.createElement("style");
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
 
   private buildLobby() {
     // Lobby-first hierarchy: the list of joinable games is the primary
@@ -1444,21 +828,28 @@ export class UI {
     hud.appendChild(playerListPanel);
     this.playerList = playerListPanel;
 
-    // Event log
+    // Event ticker: one quiet line at rest; hovering (or focusing chat) expands
+    // to the scrollback + chat. The log never renders as an empty box.
     const logPanel = document.createElement("div");
     logPanel.id = "eventLogPanel";
     logPanel.className = "panel";
     logPanel.innerHTML = `
-      <div id="eventsLabel" style="font-size:12px;color:#aaa;margin-bottom:4px;">${t("game.events")}</div>
-      <div id="eventLog"></div>
-      <div id="chatRow">
-        <input id="chatInput" type="text" placeholder="${t("game.chat")}" />
-        <button id="chatSendBtn">${t("game.send")}</button>
+      <div id="tickerLine"><span id="eventsLabel">${t("game.events")}</span><span id="tickerText">—</span></div>
+      <div id="eventLogExpand">
+        <div id="eventLog"></div>
+        <div id="chatRow">
+          <input id="chatInput" type="text" placeholder="${t("game.chat")}" />
+          <button id="chatSendBtn">${t("game.send")}</button>
+        </div>
       </div>
     `;
     hud.appendChild(logPanel);
     this.eventLog = document.getElementById("eventLog") as HTMLDivElement;
     this.chatInput = document.getElementById("chatInput") as HTMLInputElement;
+    this.tickerText = document.getElementById("tickerText") as HTMLSpanElement;
+    // Keep the panel expanded while the chat input holds focus.
+    this.chatInput.addEventListener("focus", () => logPanel.classList.add("expanded"));
+    this.chatInput.addEventListener("blur", () => logPanel.classList.remove("expanded"));
 
     const chatSendBtn = document.getElementById("chatSendBtn") as HTMLButtonElement;
     chatSendBtn.addEventListener("click", () => this.sendChat());
@@ -1466,17 +857,23 @@ export class UI {
       if (e.key === "Enter") this.sendChat();
     });
 
-    // Action panel
+    // Your rail (zone 3): my-properties summary + the contextual action,
+    // stacked bottom-right. buildMyPropsPanel() appends into this container.
+    const yourRail = document.createElement("div");
+    yourRail.id = "yourRail";
+    hud.appendChild(yourRail);
+    this.yourRail = yourRail;
+
     const actionPanel = document.createElement("div");
     actionPanel.id = "actionPanel";
     actionPanel.className = "panel";
     actionPanel.innerHTML = `
       <button id="rollBtn">${t("game.roll")}</button>
-      <button id="casinoRollBtn" style="background:#a855f7;font-weight:bold;display:none;">${t("game.casinoRoll")}</button>
+      <button id="casinoRollBtn" class="btn-warn" style="display:none;">${t("game.casinoRoll")}</button>
       <button id="ransomBtn">${t("game.ransom")}</button>
-      <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">${t("game.endTurn")}</button>
+      <button id="endTurnBtn" class="btn-ok" style="display:none;">${t("game.endTurn")}</button>
     `;
-    hud.appendChild(actionPanel);
+    yourRail.appendChild(actionPanel);
 
     this.rollBtn = document.getElementById("rollBtn") as HTMLButtonElement;
     this.casinoRollBtn = document.getElementById("casinoRollBtn") as HTMLButtonElement;
@@ -1708,11 +1105,6 @@ export class UI {
         <button id="localeENBtn" class="hdr-btn" style="font-size:12px;${sel(_locale === 'en')}">🇬🇧 EN</button>
       </div>
       <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
-      <label id="settingsThemeLabel" style="margin-top:10px;">${t("settings.theme")}</label>
-      <div style="display:flex;gap:6px;margin-top:4px;">
-        <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'neon')}">${t("settings.themeNeon")}</button>
-        <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'classic')}">${t("settings.themeClassic")}</button>
-      </div>
       <label id="settingsQualityLabel" style="margin-top:10px;">${t("settings.quality")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
         <button id="qualityHighBtn" class="hdr-btn" style="font-size:12px;${sel(getQuality() === 'high')}">${t("settings.qualityHigh")}</button>
@@ -1741,14 +1133,12 @@ export class UI {
       settings.innerHTML = buildSettingsContent();
       this.wireLocaleButtons(settings, applyLocale);
       this.wireVolumeSliders(settings);
-      this.wireThemeButtons(settings);
       this.wireQualityButtons(settings);
       // Re-render all static UI text
       this.relabelUI();
     };
     this.wireLocaleButtons(settings, applyLocale);
     this.wireVolumeSliders(settings);
-    this.wireThemeButtons(settings);
     this.wireQualityButtons(settings);
     const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
@@ -1758,18 +1148,6 @@ export class UI {
   private wireLocaleButtons(settings: HTMLElement, applyLocale: (locale: Locale) => void) {
     settings.querySelector("#localeDEBtn")?.addEventListener("click", () => applyLocale("de"));
     settings.querySelector("#localeENBtn")?.addEventListener("click", () => applyLocale("en"));
-  }
-
-  private wireThemeButtons(settings: HTMLElement) {
-    // Switching theme reloads so the 3D scene rebuilds under the new palette;
-    // a mid-game reload resumes via the saved session.
-    const apply = (theme: Theme) => {
-      if (getTheme() === theme) return;
-      setTheme(theme);
-      location.reload();
-    };
-    settings.querySelector("#themeNeonBtn")?.addEventListener("click", () => apply("neon"));
-    settings.querySelector("#themeClassicBtn")?.addEventListener("click", () => apply("classic"));
   }
 
   private wireQualityButtons(settings: HTMLElement) {
@@ -1911,7 +1289,8 @@ export class UI {
     panel.id = "myPropsPanel";
     panel.className = "panel";
     hide(panel);
-    this.gameHud.appendChild(panel);
+    // Lives in the your-rail (zone 3), above the action panel.
+    this.yourRail.insertBefore(panel, this.yourRail.firstChild);
     this.myPropsPanel = panel;
   }
 
@@ -2544,6 +1923,12 @@ export class UI {
     // Determine if it's the local player's timer
     const isMe = this.net.playerId !== null && playerId === this.net.playerId;
 
+    // Quiet until it matters: a permanently ticking clock adds anxiety to a
+    // casual game. Only the last 15 s are shown (brief §7, HUD-at-rest).
+    if (secondsLeft > 15) {
+      el.style.display = "none";
+      return;
+    }
     el.textContent = `⏱ ${secondsLeft}s`;
     el.style.display = "inline-block";
     el.classList.toggle("urgent", secondsLeft <= 10 && isMe);
@@ -2633,7 +2018,11 @@ export class UI {
       red: "#ef4444", blue: "#3b82f6", green: "#22c55e",
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
-    const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police", "🎩 " + t("figure.topHat"), "♟ " + t("figure.pawn"), "🚀 " + t("figure.rocket")];
+    const figureNames = [
+      t("figure.car") + " 1", t("figure.car") + " 2", t("figure.car") + " 3",
+      t("figure.car") + " 4", t("figure.car") + " 5", t("figure.police"),
+      "🎩 " + t("figure.topHat"), "♟ " + t("figure.pawn"), "🚀 " + t("figure.rocket"),
+    ];
 
     // Colour is assigned by the server (bug 2): read it from this player's seat.
     const me = room.players.find((p) => p.id === this.net.playerId);
@@ -2879,6 +2268,8 @@ export class UI {
     line.textContent = text;
     this.eventLog.appendChild(line);
     this.eventLog.scrollTop = this.eventLog.scrollHeight;
+    // The ticker always shows the latest event.
+    if (this.tickerText) this.tickerText.textContent = text;
   }
 
   private showLobbyPanel() {
@@ -3377,7 +2768,7 @@ export class UI {
       const row = document.createElement("div");
       row.className = "player-row" + (isCurrent ? " current-player" : "") + (!p.alive ? " dead" : "");
 
-      const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
+      const dot = `<span class="chip-disc" data-color="${p.color}"></span>`;
       const rollStr = p.lastRoll[0] > 0 ? ` [${p.lastRoll[0]}+${p.lastRoll[1]}]` : "";
       const jail = p.inJail ? t("player.jail") : "";
       const rank = rankMap.get(p.id);
@@ -3388,7 +2779,7 @@ export class UI {
       // without them). LPD amount + net-worth badge remain.
       // Cash on its own line below (bug 3): "LPD <money>" sits next to the amount,
       // not glued to the "NW" net-worth badge above it.
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span class="money-val" data-pid="${p.id}" style="display:block;color:#aaa;font-size:11px;margin-top:2px;">LPD ${p.money}</span>`;
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span class="money-val" data-pid="${p.id}">LPD ${p.money}</span>`;
 
       // Feature 1: clicking row opens inspector
       row.addEventListener("click", () => {
@@ -3640,10 +3031,10 @@ export class UI {
     headerRow.appendChild(tradeBtn);
     header.appendChild(headerRow);
 
-    // Cash line
+    // Cash line: amount in display type + the physical chip stack
     const cashLine = document.createElement("div");
-    cashLine.style.cssText = "font-size:12px;color:#86efac;";
-    cashLine.textContent = `${t("props.capital")}: ${me?.money ?? 0} LPD`;
+    cashLine.className = "capital-line";
+    cashLine.innerHTML = `<span class="capital-amount">${t("props.capital")}: ${me?.money ?? 0} LPD</span>${this.renderChipStack(me?.money ?? 0)}`;
     header.appendChild(cashLine);
 
     // Builds-remaining indicator (per-turn build limit)

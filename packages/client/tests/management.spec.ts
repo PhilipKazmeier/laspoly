@@ -174,6 +174,7 @@ test.describe("Phase 2c Management UI", () => {
           myPropsPanelSeen = true;
 
           // Verify non-modality: chat input must be editable while panel is open
+          await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
           const chatInput = page.locator("#chatInput");
           const isEnabled = await chatInput.isEnabled().catch(() => false);
           if (isEnabled) {

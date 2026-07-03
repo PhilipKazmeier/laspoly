@@ -85,16 +85,6 @@ export class Board3D {
   private activeHighlightObs: ReturnType<typeof this.scene.onBeforeRenderObservable.add> | null = null;
   // Resolvers for animateMoveAsync
   private moveResolvers: Map<string, () => void> = new Map();
-  // Per-player deed/money displays
-  private playerDisplayMeshes: Map<string, AbstractMesh> = new Map();
-  // World seat positions for up to 4 players' on-board deed/money displays
-  private readonly SEAT_POSITIONS: Array<[number, number, number]> = [
-    [-12, 0.5, -12],
-    [12, 0.5, -12],
-    [12, 0.5, 12],
-    [-12, 0.5, 12],
-  ];
-
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true);
     this.scene = new Scene(this.engine);
@@ -522,87 +512,6 @@ export class Board3D {
   }
 
   // -------------------------------------------------------------------------
-  // Per-player on-board deed + money displays (up to 4 players)
-  // -------------------------------------------------------------------------
-  private updatePlayerDisplays(state: GameState) {
-    const board = getBoard(state.boardId);
-    const alivePlayers = state.players.filter((p) => p.alive);
-
-    // Remove displays for players who left/died.
-    for (const [id, mesh] of this.playerDisplayMeshes) {
-      if (!alivePlayers.find((p) => p.id === id)) {
-        mesh.dispose();
-        this.playerDisplayMeshes.delete(id);
-      }
-    }
-
-    alivePlayers.slice(0, 4).forEach((player, seatIdx) => {
-      // Cheap to recreate for ≤4 players each state change.
-      const existing = this.playerDisplayMeshes.get(player.id);
-      if (existing) existing.dispose();
-
-      const ownedPositions = Object.entries(state.ownership)
-        .filter(([, pid]) => pid === player.id)
-        .map(([pos]) => Number(pos));
-
-      const groupSet: Set<string> = new Set();
-      for (const pos of ownedPositions) {
-        const tile = board.tiles.find((t) => t.pos === pos);
-        if (tile && "group" in tile && tile.group) groupSet.add(tile.group as string);
-      }
-
-      const TEX_W = 192, TEX_H = 80;
-      const tex = new DynamicTexture(`pdTex_${player.id}`, { width: TEX_W, height: TEX_H }, this.scene, false);
-      const ctx = tex.getContext() as CanvasRenderingContext2D;
-      ctx.fillStyle = "rgba(20,20,30,0.85)";
-      ctx.fillRect(0, 0, TEX_W, TEX_H);
-
-      // Name + colour swatch
-      const pColorHex = PLAYER_COLOR_HEX[player.color.toLowerCase()] ?? player.color;
-      ctx.fillStyle = pColorHex;
-      ctx.fillRect(4, 4, 10, 10);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 13px Arial";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(player.name.slice(0, 14), 18, 4);
-
-      // Money
-      ctx.fillStyle = "#facc15";
-      ctx.font = "12px Arial";
-      ctx.fillText(`LPD ${player.money.toLocaleString()}`, 18, 20);
-
-      // Owned property group colour chips
-      let dotX = 4;
-      for (const grp of Array.from(groupSet).slice(0, 12)) {
-        ctx.fillStyle = GROUP_COLORS[grp] ?? "#888";
-        ctx.fillRect(dotX, 40, 12, 12);
-        dotX += 14;
-      }
-
-      // Deed count
-      ctx.fillStyle = "#ddd";
-      ctx.font = "11px Arial";
-      ctx.fillText(`${ownedPositions.length} props`, 4, 56);
-
-      tex.update();
-
-      const plane = MeshBuilder.CreatePlane(`playerDisplay_${player.id}`, { width: 2.4, height: 1.0 }, this.scene);
-      const seat = this.SEAT_POSITIONS[seatIdx] ?? ([-12, 0.5, -12] as [number, number, number]);
-      plane.position.set(seat[0], seat[1], seat[2]);
-      plane.billboardMode = 7;
-      const mat = new StandardMaterial(`pdMat_${player.id}`, this.scene);
-      mat.diffuseTexture = tex;
-      mat.backFaceCulling = false;
-      mat.emissiveColor = new Color3(0.8, 0.8, 0.8);
-      mat.specularColor = new Color3(0, 0, 0);
-      plane.material = mat;
-      plane.isPickable = false;
-      this.playerDisplayMeshes.set(player.id, plane);
-    });
-  }
-
-  // -------------------------------------------------------------------------
   // Public state application (called by the serial state queue in main.ts)
   // -------------------------------------------------------------------------
 
@@ -617,7 +526,6 @@ export class Board3D {
     // Drop-in placement animation for freshly built positions — skipped on
     // reconnect snaps and on the very first render (everything is "new" then).
     if (animate && !firstState) this.buildings.animateDropIn(changedBuildings);
-    this.updatePlayerDisplays(state);
   }
 
   /** Instantly snap all tokens to positions in `state` (reconnect / fast-forward). */

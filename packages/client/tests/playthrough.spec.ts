@@ -229,6 +229,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           buyPhaseEncountered = true;
 
           // Checklist #3: Chat input must be interactive during buy phase
+          await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
           const chatInput = page.locator("#chatInput");
           const isDisabled = await chatInput.evaluate(
             (el) => (el as HTMLInputElement).disabled,
@@ -429,6 +430,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
       if (arrived === "buy") {
         buyPhaseReached = true;
         // Chat input must not be disabled
+        await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
         const chatInput = page.locator("#chatInput");
         await expect(chatInput).toBeEnabled();
         await chatInput.fill("hello from buy phase");
@@ -444,6 +446,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) {
           buyPhaseReached = true;
+          await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
           const chatInput = page.locator("#chatInput");
           await expect(chatInput).toBeEnabled();
           await chatInput.fill("buy phase open");
