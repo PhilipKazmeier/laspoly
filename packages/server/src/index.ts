@@ -774,6 +774,11 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
           throw new Error("extraBuildings must be a boolean");
         settings.extraBuildings = s["extraBuildings"] as boolean;
       }
+      if (s["buildsPerTurn"] !== undefined) {
+        if (typeof s["buildsPerTurn"] !== "number" || !Number.isInteger(s["buildsPerTurn"] as number))
+          throw new Error("buildsPerTurn must be an integer");
+        settings.buildsPerTurn = Math.min(10, Math.max(0, s["buildsPerTurn"] as number));
+      }
       room.updateSettings(settings);
       broadcastToRoom(room, { t: "room", room: room.toView() });
       break;

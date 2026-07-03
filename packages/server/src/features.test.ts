@@ -420,7 +420,7 @@ describe("Fix 6 — bot uses actual charge cost (buildingCostMult) to decide bui
     gs.ownership[1] = "A"; // Alice owns brown (single-street group)
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
-    gs.builtThisTurn = false;
+    gs.buildsThisTurn = 0;
 
     const cmd = botDecide(gs);
     // Bot must NOT attempt a BUILD (it would throw "Cannot afford house")
@@ -442,7 +442,7 @@ describe("Fix 6 — bot uses actual charge cost (buildingCostMult) to decide bui
     gs.ownership[1] = "A"; // brown single-street
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
-    gs.builtThisTurn = false;
+    gs.buildsThisTurn = 0;
 
     const cmd = botDecide(gs);
     expect(cmd.type).toBe("BUILD");

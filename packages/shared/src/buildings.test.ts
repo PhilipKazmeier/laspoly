@@ -58,7 +58,7 @@ function stateWithDeeppink(seed = 0): GameState {
  */
 function resetBuildFlag(s: GameState): GameState {
   const cloned = structuredClone(s);
-  cloned.builtThisTurn = false;
+  cloned.buildsThisTurn = 0;
   return cloned;
 }
 
@@ -765,20 +765,20 @@ describe("legalCommands - management", () => {
 describe("one-build-per-turn limit", () => {
   it("builtThisTurn starts false on a fresh game", () => {
     const s = twoPlayers();
-    expect(s.builtThisTurn).toBe(false);
+    expect(s.buildsThisTurn).toBe(0);
   });
 
   it("a single BUILD sets builtThisTurn true", () => {
     const s = stateWithMonopoly();
     const { state } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    expect(state.builtThisTurn).toBe(true);
+    expect(state.buildsThisTurn).toBe(1);
   });
 
   it("a second BUILD in the same turn is rejected (even on a different street)", () => {
     const s = stateWithMonopoly();
     const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
     // 14 is the other mistyrose street; building there would be the 2nd build this turn
-    expect(() => applyCommand(s1, { type: "BUILD", pos: 14, building: "house" })).toThrow(/one building per turn/);
+    expect(() => applyCommand(s1, { type: "BUILD", pos: 14, building: "house" })).toThrow(/build limit reached/);
   });
 
   it("legalCommands omits BUILD once builtThisTurn is true", () => {
@@ -795,7 +795,7 @@ describe("one-build-per-turn limit", () => {
     s.ownership[4] = "B"; // Bob owns deeppink
     // A builds once, then BUILD is blocked this turn
     const { state: a1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
-    expect(a1.builtThisTurn).toBe(true);
+    expect(a1.buildsThisTurn).toBe(1);
     // A confirms turn-end; play continues until it is A's turn again.
     let cur = a1;
     let guard = 0;
@@ -808,14 +808,14 @@ describe("one-build-per-turn limit", () => {
         ({ state: cur } = applyCommand(cur, { type: "END_TURN" }));
         if (cur.phase === "finished") break;
         // Stop as soon as control returns to player A (index 0) at the start of a fresh turn.
-        if (cur.currentPlayerIndex === 0 && !cur.builtThisTurn && cur.players[0]!.alive) break;
+        if (cur.currentPlayerIndex === 0 && cur.buildsThisTurn === 0 && cur.players[0]!.alive) break;
         continue;
       }
       ({ state: cur } = applyCommand(cur, { type: "ROLL_DICE" }));
       if (cur.phase === "finished") break;
     }
     // builtThisTurn must have been reset for the new turn
-    expect(cur.builtThisTurn).toBe(false);
+    expect(cur.buildsThisTurn).toBe(0);
   });
 
   it("canBuild predicate returns false after builtThisTurn", () => {
@@ -863,7 +863,7 @@ describe("hotel at 4/4 houses + buildBlockReason", () => {
     let s = stateWithMonopoly();
     s = buildHousesEvenly(s, [13, 14], 4);
     // buildHousesEvenly leaves builtThisTurn=true after the last build.
-    expect(s.builtThisTurn).toBe(true);
+    expect(s.buildsThisTurn).toBe(1);
     expect(canBuild(s, 13, "hotel")).toBe(false);
     expect(buildBlockReason(s, 13, "hotel")).toBe("buildLimitUsed");
   });
@@ -1004,7 +1004,7 @@ function skyscraperGame(extraBuildings = true, seed = 0) {
   s.players[0]!.money = 5000;
   s.phase = "turn-end";
   s.currentPlayerIndex = 0;
-  s.builtThisTurn = false;
+  s.buildsThisTurn = 0;
   return s;
 }
 
@@ -1109,5 +1109,77 @@ describe("house rule: skyscraper", () => {
     off.players[0]!.money = 10_000;
     const cmdOff = botDecide(off);
     expect(cmdOff.type === "BUILD" && (cmdOff as { building?: string }).building === "skyscraper").toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// House rule: configurable builds per turn
+// ---------------------------------------------------------------------------
+
+describe("house rule: buildsPerTurn", () => {
+  function monopolyWithLimit(buildsPerTurn?: number) {
+    const s = structuredClone(createGame({
+      boardId: "vegas",
+      seed: 0,
+      players: [
+        { id: "A", name: "Alice", isBot: true, color: "red" },
+        { id: "B", name: "Bob", isBot: true, color: "blue" },
+      ],
+      settings: buildsPerTurn === undefined ? {} : { buildsPerTurn },
+    }));
+    s.ownership[13] = "A";
+    s.ownership[14] = "A";
+    s.players[0]!.money = 50_000;
+    s.phase = "turn-end";
+    s.currentPlayerIndex = 0;
+    return s;
+  }
+
+  it("default stays 1 build per turn", () => {
+    const s = monopolyWithLimit();
+    expect(s.buildsPerTurn).toBe(1);
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" });
+    expect(() => applyCommand(s1, { type: "BUILD", pos: 14, building: "house" })).toThrow(/build limit/);
+  });
+
+  it("limit 3 allows exactly three builds, the fourth throws", () => {
+    let s = monopolyWithLimit(3);
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }));
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 14, building: "house" }));
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }));
+    expect(s.buildsThisTurn).toBe(3);
+    expect(canBuild(s, 14, "house")).toBe(false);
+    expect(() => applyCommand(s, { type: "BUILD", pos: 14, building: "house" })).toThrow(/build limit/);
+  });
+
+  it("0 means unlimited", () => {
+    let s = monopolyWithLimit(0);
+    for (let i = 0; i < 8; i++) {
+      const pos = i % 2 === 0 ? 13 : 14;
+      ({ state: s } = applyCommand(s, { type: "BUILD", pos, building: "house" }));
+    }
+    expect(s.buildsThisTurn).toBe(8);
+    expect(s.buildings[13]!.houses).toBe(4);
+    expect(s.buildings[14]!.houses).toBe(4);
+  });
+
+  it("counter resets on turn advance", () => {
+    let s = monopolyWithLimit(2);
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }));
+    ({ state: s } = applyCommand(s, { type: "END_TURN" }));
+    expect(s.buildsThisTurn).toBe(0);
+  });
+
+  it("bot keeps building within a raised limit (botDecide re-issues BUILD)", () => {
+    let s = monopolyWithLimit(3);
+    s.players[0]!.isBot = true;
+    let builds = 0;
+    for (let i = 0; i < 6; i++) {
+      const cmd = botDecide(s);
+      if (cmd.type !== "BUILD") break;
+      builds++;
+      ({ state: s } = applyCommand(s, cmd));
+    }
+    expect(builds).toBe(3); // stops exactly at the limit
   });
 });

@@ -1,5 +1,5 @@
 import { getBoard, groupMembers, mortgageValue } from "./board.js";
-import { buildingChargeCost, currentPlayer, legalCommands } from "./engine.js";
+import { canBuildMore, buildingChargeCost, currentPlayer, legalCommands } from "./engine.js";
 import type { Command, GameState } from "./types.js";
 
 /**
@@ -115,7 +115,7 @@ export function botDecide(state: GameState): Command {
   // In turn-end, try to build if possible, then confirm END_TURN.
   if (state.phase === "turn-end") {
     // Optionally build (reuse the BUILD logic below by falling through? No — just check here)
-    if (legal.includes("BUILD") && !state.builtThisTurn) {
+    if (legal.includes("BUILD") && canBuildMore(state)) {
       for (const [posStr, ownerId] of Object.entries(state.ownership)) {
         if (ownerId !== p.id) continue;
         const pos = Number(posStr);

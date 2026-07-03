@@ -654,6 +654,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
     "props.capital": "Kapital",
+    "props.builds": "Bauten diese Runde",
     // Buy offer
     "buy.header": "Kaufangebot",
     "buy.price": "Preis:",
@@ -864,6 +865,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "props.title": "My Properties",
     "props.trade": "Trade",
     "props.capital": "Capital",
+    "props.builds": "Builds this turn",
     // Buy offer
     "buy.header": "Purchase Offer",
     "buy.price": "Price:",
@@ -3112,6 +3114,15 @@ export class UI {
     cashLine.style.cssText = "font-size:12px;color:#86efac;";
     cashLine.textContent = `${t("props.capital")}: ${me?.money ?? 0} LPD`;
     header.appendChild(cashLine);
+
+    // Builds-remaining indicator (per-turn build limit)
+    const buildsLine = document.createElement("div");
+    const exhausted = state.buildsPerTurn > 0 && state.buildsThisTurn >= state.buildsPerTurn;
+    buildsLine.id = "buildsLeftLine";
+    buildsLine.style.cssText = `font-size:11px;color:${exhausted ? "#f87171" : "#aaa"};`;
+    const limitStr = state.buildsPerTurn === 0 ? "∞" : String(state.buildsPerTurn);
+    buildsLine.textContent = `${t("props.builds")}: ${state.buildsThisTurn}/${limitStr}`;
+    header.appendChild(buildsLine);
 
     // buildingSale indicator
     if (state.activeEvents.some((e) => e.id === "buildingSale")) {

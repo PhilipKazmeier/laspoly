@@ -87,6 +87,11 @@ export function getEvent(state: GameState, id: EventId): ActiveEvent | undefined
   return state.activeEvents.find((e) => e.id === id);
 }
 
+/** True while the current player may still build this turn (buildsPerTurn 0 = unlimited). */
+export function canBuildMore(state: GameState): boolean {
+  return state.buildsPerTurn === 0 || state.buildsThisTurn < state.buildsPerTurn;
+}
+
 /** Random street group for a street party (consumes one RNG int). */
 function pickPartyGroup(rng: GameState["rng"], board: BoardDefinition): string {
   const groups = [...new Set(
@@ -276,6 +281,7 @@ export function createGame(opts: NewGameOptions): GameState {
   const roundLimit = opts.settings?.roundLimit ?? 0;
   const noRentInJail = opts.settings?.noRentInJail ?? false;
   const extraBuildings = opts.settings?.extraBuildings ?? false;
+  const buildsPerTurn = opts.settings?.buildsPerTurn ?? 1;
   // Draw the first round's event before building state so it consumes the RNG
   // in order (preserves historical seed-based dice streams under the default
   // frequency). "off"/"rare" start without an event and consume no RNG.
@@ -325,7 +331,8 @@ export function createGame(opts: NewGameOptions): GameState {
     roundLimit,
     noRentInJail,
     extraBuildings,
-    builtThisTurn: false,
+    buildsThisTurn: 0,
+    buildsPerTurn,
     traveledThisTurn: false,
     buildingCostMult,
     botDifficulty,
@@ -557,7 +564,7 @@ function _addManagementCommands(
 
     if (tile.type === "street") {
       // BUILD only if the player hasn't already built once this turn (one-build-per-turn).
-      if (!state.builtThisTurn && ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
+      if (canBuildMore(state) && ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
         if (canConstructHouse(state, board, pos)) cmds.push("BUILD");
         if (canConstructHotel(state, board, pos)) cmds.push("BUILD");
         if (canConstructFactory(state, board, pos)) cmds.push("BUILD");
@@ -1109,7 +1116,7 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
   const oldIdx = state.currentPlayerIndex;
   state.doublesCount = 0;
   state.extraRoll = false;
-  state.builtThisTurn = false;
+  state.buildsThisTurn = 0;
   state.traveledThisTurn = false;
   state.currentPlayerIndex = nextAliveIndex(state);
   state.turn += 1;
@@ -1306,7 +1313,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Property is mortgaged");
       if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) throw new Error("Must own entire group to build");
-      if (state.builtThisTurn) throw new Error("one building per turn");
+      if (!canBuildMore(state)) throw new Error("build limit reached this turn");
 
       const st = tile as StreetTile;
       if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
@@ -1347,7 +1354,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         b.factory = true;
         events.push({ key: 'built', params: { player: p.name, building: 'factory', tile: st.name, amount: cost }, playerId: p.id });
       }
-      state.builtThisTurn = true;
+      state.buildsThisTurn += 1;
       // BUILD does not advance the turn
       break;
     }
@@ -1683,7 +1690,7 @@ export function ownedPropsOf(state: GameState, playerId: string): number[] {
 }
 
 export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory" | "skyscraper"): boolean {
-  if (state.builtThisTurn) return false; // one-build-per-turn
+  if (!canBuildMore(state)) return false; // per-turn build limit
   const board = getBoard(state.boardId);
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
@@ -1724,8 +1731,8 @@ export function buildBlockReason(
   if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) return null;
   if (state.mortgaged[pos]) return null;
 
-  // The one-build-per-turn limit masking an otherwise legal build.
-  if (state.builtThisTurn) {
+  // The per-turn build limit masking an otherwise legal build.
+  if (!canBuildMore(state)) {
     const legal =
       kind === "house" ? canConstructHouse(state, board, pos)
       : kind === "hotel" ? canConstructHotel(state, board, pos)

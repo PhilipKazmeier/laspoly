@@ -100,8 +100,10 @@ export interface GameState {
   noRentInJail: boolean;
   /** skyscraper building tier enabled (house rule) */
   extraBuildings: boolean;
-  /** True once the current player has built one building this turn; reset on turn advance. */
-  builtThisTurn: boolean;
+  /** Buildings constructed by the current player this turn; reset on turn advance. */
+  buildsThisTurn: number;
+  /** Max builds per turn (game setting; 0 = unlimited, default 1). */
+  buildsPerTurn: number;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
   traveledThisTurn: boolean;
   /** Building cost multiplier (from game settings, default 1.0). */
@@ -169,6 +171,8 @@ export interface GameSettings {
   noRentInJail?: boolean;
   /** enable the skyscraper building tier above hotels (default false) */
   extraBuildings?: boolean;
+  /** max buildings per turn (0 = unlimited; default 1) */
+  buildsPerTurn?: number;
 }
 
 export interface NewGameOptions {
