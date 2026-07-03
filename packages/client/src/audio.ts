@@ -282,6 +282,45 @@ class AudioPlayer {
     document.addEventListener("keydown", unlock, { once: true });
   }
 
+  // Lazy shared context for short synthesized UI tones (no audio assets).
+  private uiCtx: AudioContext | null = null;
+
+  /**
+   * Short synthesized UI tone: "card" = quick two-note rising blip on a card
+   * draw, "turn" = soft two-note chord when it becomes YOUR turn. Both well
+   * under 0.5s so they never outlast their moment.
+   */
+  playUiTone(kind: "card" | "turn"): void {
+    if (this.muted) return;
+    try {
+      if (!this.uiCtx) this.uiCtx = new AudioContext();
+      const ctx = this.uiCtx;
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+      const vol = this.sfxVolume * 0.22;
+      const note = (freq: number, start: number, dur: number) => {
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        const env = ctx.createGain();
+        const t0 = ctx.currentTime + start;
+        env.gain.setValueAtTime(0, t0);
+        env.gain.linearRampToValueAtTime(vol, t0 + 0.02);
+        env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(env);
+        env.connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.05);
+      };
+      if (kind === "card") {
+        note(660, 0, 0.16);
+        note(880, 0.12, 0.2);
+      } else {
+        note(523.3, 0, 0.3);
+        note(659.3, 0.02, 0.32);
+      }
+    } catch { /* unsupported browser — ignore */ }
+  }
+
   get isMuted(): boolean { return this.muted; }
   get currentSfxVolume(): number { return this.sfxVolume; }
   get currentMusicVolume(): number { return this.musicVolume; }

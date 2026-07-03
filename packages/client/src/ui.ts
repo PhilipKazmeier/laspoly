@@ -145,6 +145,29 @@ const css = `
     border:1px solid rgba(255,255,255,0.15);
   }
   .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
+  @keyframes screenEnter {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .screen-enter { animation: screenEnter 0.25s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .screen-enter { animation: none; }
+    #actionCardPopup { animation: none; }
+  }
+  #deedTooltip {
+    position: fixed;
+    z-index: 130;
+    pointer-events: none;
+    background: var(--glass-strong);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 11px;
+    color: var(--text);
+    max-width: 200px;
+    line-height: 1.5;
+  }
+  #deedTooltip .dt-bar { height: 4px; border-radius: 2px; margin-bottom: 5px; }
   @keyframes cardPopIn {
     from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
     to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -631,6 +654,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "trade.pending": "Tauschangebot wartet auf",
     "trade.empty": "Keine tauschbaren Grundstücke",
     "lobby.noRooms": "Keine offenen Spiele — erstelle eins!",
+    "lobby.connecting": "Verbinde…",
+    "gameover.player": "Spieler",
+    "gameover.worth": "Vermögen",
+    "gameover.props": "Grundstücke",
+    "gameover.cash": "Bargeld",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -885,6 +913,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "trade.pending": "Trade offer awaiting",
     "trade.empty": "No tradable properties",
     "lobby.noRooms": "No open games — create one!",
+    "lobby.connecting": "Connecting…",
+    "gameover.player": "Player",
+    "gameover.worth": "Net worth",
+    "gameover.props": "Properties",
+    "gameover.cash": "Cash",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -1274,7 +1307,7 @@ export class UI {
       <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
       <input id="nickname" type="text" placeholder="Your name" />
       <div id="lobbyRoomsHeader" style="margin-top:14px;font-size:12px;color:#aaa;">${t("lobby.openRooms")}</div>
-      <div id="roomList"></div>
+      <div id="roomList"><div class="room-item" style="color:#888;cursor:default;">${t("lobby.connecting")}</div></div>
       <div id="createPanel" style="margin-top:16px;border-top:1px solid var(--hairline);padding-top:10px;">
         <div id="createGameToggle" style="color:var(--gold);font-weight:bold;font-size:13px;margin-bottom:6px;">${t("lobby.createRoom")}</div>
         <label id="lobbyRoomNameLabel">${t("lobby.roomName")}</label>
@@ -1915,6 +1948,7 @@ export class UI {
     banner.innerHTML = `
       <h1>${t("gameover.title")}</h1>
       <div id="gameOverWinner" style="font-size:1.5rem;color:#fff;"></div>
+      <div id="gameOverStats"></div>
       <div id="gameOverBtns" style="display:flex;gap:12px;margin-top:16px;align-items:center;justify-content:center;"></div>
     `;
     hide(banner);
@@ -2892,8 +2926,77 @@ export class UI {
     }
   }
 
+  // Compact deed tooltip on 3D tile hover (desktop only).
+  private deedTooltip: HTMLDivElement | null = null;
+  private deedTooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  showDeedTooltip(pos: number | null, x: number, y: number): void {
+    // Touch devices get the click-opened deed card instead.
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    if (pos === null) {
+      if (this.deedTooltipTimer) { clearTimeout(this.deedTooltipTimer); this.deedTooltipTimer = null; }
+      this.deedTooltip?.remove();
+      this.deedTooltip = null;
+      return;
+    }
+    const state = this.lastState;
+    if (!state) return;
+    const board = getBoard(state.boardId);
+    const tile = board.tiles[pos];
+    if (!tile) return;
+
+    const render = () => {
+      if (!this.deedTooltip) {
+        this.deedTooltip = document.createElement("div");
+        this.deedTooltip.id = "deedTooltip";
+        document.body.appendChild(this.deedTooltip);
+      }
+      const group = (tile as { group?: string }).group;
+      const price = tilePrice(board, tile);
+      const ownerId = state.ownership[pos];
+      const owner = ownerId ? state.players.find((p) => p.id === ownerId) : null;
+      const b = state.buildings[pos];
+      let buildStr = "";
+      if (b?.skyscraper) buildStr = t("deed.skyscraper");
+      else if (b?.hotel) buildStr = t("deed.hotel");
+      else if (b?.factory) buildStr = t("deed.factory");
+      else if (b && b.houses > 0) buildStr = `${b.houses}× ${t("deed.house")}`;
+      this.deedTooltip.innerHTML =
+        (group ? `<div class="dt-bar" style="background:${this.groupCssColor(group)};"></div>` : "") +
+        `<strong>${tile.name}</strong>` +
+        (price > 0 ? `<div>${price} LPD</div>` : "") +
+        (owner ? `<div style="color:#aaa;">${t("deed.owner")} ${owner.name}</div>` : "") +
+        (state.mortgaged[pos] ? `<div style="color:#f87171;">${t("deed.mortgaged")}</div>` : "") +
+        (buildStr ? `<div style="color:#aaa;">${buildStr}</div>` : "") +
+        (state.unbuildableFields?.includes(pos) ? `<div style="color:#f87171;">⛔</div>` : "");
+      this.deedTooltip.style.left = `${Math.min(x + 14, window.innerWidth - 210)}px`;
+      this.deedTooltip.style.top = `${Math.min(y + 14, window.innerHeight - 120)}px`;
+    };
+
+    if (this.deedTooltip) {
+      // Already visible — just follow the cursor / retarget.
+      render();
+    } else if (!this.deedTooltipTimer) {
+      // First contact: small delay so quick pans don't flicker tooltips.
+      this.deedTooltipTimer = setTimeout(() => {
+        this.deedTooltipTimer = null;
+        render();
+      }, 350);
+    }
+  }
+
+  /** Re-trigger the entry animation on a screen container. */
+  private animateIn(el: HTMLElement) {
+    el.classList.remove("screen-enter");
+    void el.offsetWidth; // reflow so the animation restarts
+    el.classList.add("screen-enter");
+  }
+
   showLobby(rooms: RoomSummary[]) {
+    this.showDeedTooltip(null, 0, 0); // clear any lingering hover tooltip
+    const wasHidden = this.lobby.style.display === "none";
     show(this.lobby);
+    if (wasHidden) this.animateIn(this.lobby);
     hide(this.roomPanel);
     hide(this.gameHud);
     hide(this.spectatorBanner);
@@ -2961,6 +3064,7 @@ export class UI {
     this.stopLobbyPolling();
     hide(this.lobby);
     show(this.roomPanel);
+    this.animateIn(this.roomPanel);
     this.roomInfo.textContent = t("room.waiting");
     hide(this.startGameBtn);
     // Update room link (feature #6)
@@ -3200,7 +3304,9 @@ export class UI {
     this.disposeFigurePreview(); // free the lobby 3D vehicle preview once in-game
     hide(this.lobby);
     hide(this.roomPanel);
+    const hudWasHidden = this.gameHud.style.display === "none";
     show(this.gameHud, "block");
+    if (hudWasHidden) this.animateIn(this.gameHud);
 
     const currentPlayer = state.players[state.currentPlayerIndex];
     const isMyTurn = myId !== null && currentPlayer?.id === myId;
@@ -3444,8 +3550,34 @@ export class UI {
   }
 
   showGameOver(winnerName: string, _winnerId?: string) {
+    this.showDeedTooltip(null, 0, 0); // clear any lingering hover tooltip
     const winnerEl = document.getElementById("gameOverWinner");
     if (winnerEl) winnerEl.textContent = `${t("gameover.winner")} ${winnerName}`;
+
+    // Final standings from the last rendered state (net worth, props, cash).
+    const statsEl = document.getElementById("gameOverStats");
+    const state = this.lastState;
+    if (statsEl && state) {
+      const rows = state.players
+        .map((p) => ({
+          p,
+          worth: p.alive ? netWorth(state, p.id) : 0,
+          props: Object.values(state.ownership).filter((id) => id === p.id).length,
+        }))
+        .sort((a, b) => (Number(b.p.alive) - Number(a.p.alive)) || (b.worth - a.worth));
+      statsEl.innerHTML =
+        `<table style="margin:12px auto 0;border-collapse:collapse;font-size:13px;color:#ddd;">` +
+        `<tr style="color:#aaa;font-size:11px;"><th style="padding:2px 10px;"></th><th style="padding:2px 10px;text-align:left;">${t("gameover.player")}</th><th style="padding:2px 10px;">${t("gameover.worth")}</th><th style="padding:2px 10px;">${t("gameover.props")}</th><th style="padding:2px 10px;">${t("gameover.cash")}</th></tr>` +
+        rows.map((r, i) =>
+          `<tr style="${!r.p.alive ? "opacity:0.45;" : i === 0 ? "color:var(--gold);font-weight:bold;" : ""}">` +
+          `<td style="padding:3px 10px;">${!r.p.alive ? "✝" : `#${i + 1}`}</td>` +
+          `<td style="padding:3px 10px;text-align:left;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${r.p.color};margin-right:6px;"></span>${r.p.name}</td>` +
+          `<td style="padding:3px 10px;">${r.worth}</td>` +
+          `<td style="padding:3px 10px;">${r.props}</td>` +
+          `<td style="padding:3px 10px;">${r.p.money}</td></tr>`
+        ).join("") +
+        `</table>`;
+    }
 
     // Rematch button (feature 5): only host sees it
     const rematchBtn = document.getElementById("gameOverRematch") as HTMLButtonElement | null;

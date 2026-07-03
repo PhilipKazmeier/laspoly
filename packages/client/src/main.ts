@@ -206,6 +206,7 @@ class StateQueue {
     if (anyCardEv) {
       const title =
         anyCardEv.text.split(": ").slice(1).join(": ").replace(/\.\s*$/, "") || anyCardEv.text;
+      audio.playUiTone("card");
       await Promise.race([this.board.animateCardDrawAsync(title), timeout(3_000)]);
     }
 
@@ -230,6 +231,16 @@ class StateQueue {
     // Active-player highlight.
     const activePlayer = state.players[state.currentPlayerIndex];
     this.board.setActivePlayer(activePlayer?.id ?? null);
+
+    // Soft ping when the turn passes TO the local player.
+    if (
+      myId &&
+      activePlayer?.id === myId &&
+      prev &&
+      prev.players[prev.currentPlayerIndex]?.id !== myId
+    ) {
+      audio.playUiTone("turn");
+    }
 
     // Sound effects for events.
     for (const ev of events) {
@@ -292,6 +303,10 @@ board3d.setRollHandler(() => {
 // Tile clicks are exposed for the HTML property-card popup (owned by the UI agent).
 board3d.setTileClickHandler((pos) => {
   ui.showDeedCard(pos);
+});
+// Tile hover → compact deed tooltip (desktop only; ui decides).
+board3d.setTileHoverHandler((pos, x, y) => {
+  ui.showDeedTooltip(pos, x, y);
 });
 
 // Track whether we are attempting a session resume (suppress initial lobby flash).

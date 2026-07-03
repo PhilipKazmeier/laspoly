@@ -76,6 +76,9 @@ export class Board3D {
   // Interaction hooks
   private rollHandler: (() => void) | null = null;
   private tileClickHandler: ((pos: number) => void) | null = null;
+  private tileHoverHandler: ((pos: number | null, x: number, y: number) => void) | null = null;
+  private lastHoverPos: number | null = null;
+  private lastHoverCheck = 0;
   // Active-player highlight ring (feature #3)
   private activeHighlightMesh: AbstractMesh | null = null;
   private activeHighlightPlayerId: string | null = null;
@@ -144,6 +147,24 @@ export class Board3D {
 
     // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
     this.scene.onPointerObservable.add((pointerInfo) => {
+      // Hover (POINTERMOVE = 4): throttled tile lookup for the deed tooltip.
+      if (pointerInfo.type === 4 && this.tileHoverHandler) {
+        const now = performance.now();
+        if (now - this.lastHoverCheck < 80) return;
+        this.lastHoverCheck = now;
+        const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+        const name = pick?.pickedMesh?.name ?? "";
+        const pos = name.startsWith("tile_") ? parseInt(name.slice(5), 10) : null;
+        const ev = pointerInfo.event as PointerEvent;
+        if (pos !== this.lastHoverPos) {
+          this.lastHoverPos = pos;
+          this.tileHoverHandler(Number.isNaN(pos as number) ? null : pos, ev.clientX, ev.clientY);
+        } else if (pos !== null) {
+          // Same tile — keep the tooltip following the cursor.
+          this.tileHoverHandler(pos, ev.clientX, ev.clientY);
+        }
+        return;
+      }
       if (pointerInfo.type !== 1) return; // POINTERDOWN
       const picked = pointerInfo.pickInfo;
       if (!picked?.hit || !picked.pickedMesh) return;
@@ -736,6 +757,11 @@ export class Board3D {
   /** Register a callback called with the tile position (0–39) when a tile is clicked. */
   setTileClickHandler(cb: (pos: number) => void): void {
     this.tileClickHandler = cb;
+  }
+
+  /** Register a hover callback (pos or null on leave, plus cursor coords). */
+  setTileHoverHandler(cb: (pos: number | null, x: number, y: number) => void): void {
+    this.tileHoverHandler = cb;
   }
 
   /**
