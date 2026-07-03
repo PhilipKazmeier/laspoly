@@ -90,7 +90,7 @@ export class BuildingRenderer {
   }
 
   /** Merged prism-roof house / stacked hotel / chimney factory templates. */
-  private getTemplate(kind: "house" | "hotel" | "factory"): Mesh {
+  private getTemplate(kind: "house" | "hotel" | "factory" | "skyscraper"): Mesh {
     if (kind === "house" && this.houseObjTemplate) return this.houseObjTemplate;
     let tpl = this.templates.get(kind);
     if (tpl) return tpl;
@@ -114,6 +114,17 @@ export class BuildingRenderer {
       roof.rotation.y = Math.PI / 2;
       roof.position.y = 0.64;
       parts.push(base, upper, roof);
+    } else if (kind === "skyscraper") {
+      // Three tapering storeys — a proper tower above hotel height.
+      const s1 = MeshBuilder.CreateBox("sk_1", { width: 0.36, height: 0.34, depth: 0.36 }, this.scene);
+      s1.position.y = 0.17;
+      const s2 = MeshBuilder.CreateBox("sk_2", { width: 0.3, height: 0.3, depth: 0.3 }, this.scene);
+      s2.position.y = 0.49;
+      const s3 = MeshBuilder.CreateBox("sk_3", { width: 0.24, height: 0.28, depth: 0.24 }, this.scene);
+      s3.position.y = 0.78;
+      const spire = MeshBuilder.CreateCylinder("sk_spire", { diameterTop: 0, diameterBottom: 0.08, height: 0.18, tessellation: 6 }, this.scene);
+      spire.position.y = 1.0;
+      parts.push(s1, s2, s3, spire);
     } else {
       const hall = MeshBuilder.CreateBox("f_hall", { width: 0.55, height: 0.3, depth: 0.55 }, this.scene);
       hall.position.y = 0.15;
@@ -129,7 +140,7 @@ export class BuildingRenderer {
     return tpl;
   }
 
-  private cloneBuilding(kind: "house" | "hotel" | "factory", name: string, mortgaged: boolean): AbstractMesh {
+  private cloneBuilding(kind: "house" | "hotel" | "factory" | "skyscraper", name: string, mortgaged: boolean): AbstractMesh {
     const tpl = this.getTemplate(kind);
     const clone = tpl.clone(name)!;
     clone.setEnabled(true);
@@ -138,11 +149,14 @@ export class BuildingRenderer {
       house: new Color3(0.15, 0.65, 0.2),
       hotel: new Color3(0.8, 0.12, 0.12),
       factory: new Color3(0.62, 0.58, 0.3),
+      skyscraper: new Color3(0.25, 0.28, 0.4),
     };
     const base = colors[kind]!;
     const matKey = `${kind}_${mortgaged ? "m" : "n"}`;
     clone.material = this.getMaterial(matKey, (mat) => {
       mat.diffuseColor = mortgaged ? base.scale(0.4) : base;
+      // Tower windows glow warm at night — reads as lit offices.
+      if (kind === "skyscraper" && !mortgaged) mat.emissiveColor = new Color3(0.25, 0.2, 0.08);
     });
     this.effects?.addShadowCaster(clone);
     return clone;
@@ -268,11 +282,11 @@ export class BuildingRenderer {
 
     for (const [posStr, b] of Object.entries(state.buildings)) {
       const pos = Number(posStr);
-      if (!b || (!b.houses && !b.hotel && !b.factory)) continue;
+      if (!b || (!b.houses && !b.hotel && !b.factory && !b.skyscraper)) continue;
       seen.add(pos);
 
       const mortgaged = !!state.mortgaged[pos];
-      const sig = `${b.houses}|${b.hotel ? 1 : 0}|${b.factory ? 1 : 0}|${mortgaged ? 1 : 0}`;
+      const sig = `${b.houses}|${b.hotel ? 1 : 0}|${b.factory ? 1 : 0}|${b.skyscraper ? 1 : 0}|${mortgaged ? 1 : 0}`;
       const cached = this.buildingCache.get(pos);
       if (cached?.sig === sig) continue; // unchanged — keep existing meshes
 
@@ -287,7 +301,12 @@ export class BuildingRenderer {
       const perpX = odz, perpZ = -odx;
       const angleRad = (getFieldAngle(pos) * Math.PI) / 180;
 
-      if (b.hotel) {
+      if (b.skyscraper) {
+        const m = this.cloneBuilding("skyscraper", `bldg_${pos}`, mortgaged);
+        m.position.set(innerX, 0.1, innerZ);
+        m.rotation.y = angleRad;
+        meshes.push(m);
+      } else if (b.hotel) {
         const m = this.cloneBuilding("hotel", `bldg_${pos}`, mortgaged);
         m.position.set(innerX, 0.1, innerZ);
         m.rotation.y = angleRad;

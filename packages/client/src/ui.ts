@@ -648,6 +648,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "buildBlock.evenBuild": "Gleichmäßig bauen: erst die anderen Straßen der Gruppe aufstocken.",
     "buildBlock.mortgagedInGroup": "Eine Straße der Gruppe ist mit Hypothek belastet.",
     "deed.unbuildable": "⛔ Nicht bebaubar (Hausregel)",
+    "deed.skyscraper": "Wolkenkratzer",
+    "prop.skyscraper": "Wolkenkratzer",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
@@ -856,6 +858,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "buildBlock.evenBuild": "Build evenly: raise the other streets in the group first.",
     "buildBlock.mortgagedInGroup": "A street in this group is mortgaged.",
     "deed.unbuildable": "⛔ No building allowed (house rule)",
+    "deed.skyscraper": "Skyscraper",
+    "prop.skyscraper": "Skyscraper",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
@@ -2032,7 +2036,8 @@ export class UI {
       }
 
       let buildStr = "";
-      if (bld.hotel) buildStr = t("deed.hotel");
+      if (bld.skyscraper) buildStr = t("deed.skyscraper");
+      else if (bld.hotel) buildStr = t("deed.hotel");
       else if (bld.factory) buildStr = t("deed.factory");
       else if (bld.houses > 0) buildStr = `${bld.houses} ${bld.houses > 1 ? t("deed.houses") : t("deed.house")}`;
       if (buildStr) {
@@ -3142,7 +3147,8 @@ export class UI {
         : "";
 
       let buildingStr = "";
-      if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
+      if (b.skyscraper) buildingStr = `[${t("deed.skyscraper")}]`;
+      else if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
       else if (b.factory) buildingStr = `[${t("deed.factory")}]`;
       else if (b.houses > 0) buildingStr = `[${b.houses} ${b.houses > 1 ? t("deed.houses") : t("deed.house")}]`;
       else buildingStr = "—";
@@ -3224,6 +3230,14 @@ export class UI {
           btnRow.appendChild(makeBtn(
             `${t("prop.factory")} (${fCost} LPD)`, fCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } })
+          ));
+        }
+        if (canBuild(state, pos, "skyscraper")) {
+          const skyMult = board.rules.skyscraper?.costMult ?? 2.0;
+          const skCost = Math.round(st.hotelCost * skyMult * costMult);
+          btnRow.appendChild(makeBtn(
+            `${t("prop.skyscraper")} (${skCost} LPD)`, skCost, "prop-btn",
+            () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "skyscraper" } })
           ));
         }
         if (canSellBuilding(state, pos)) {

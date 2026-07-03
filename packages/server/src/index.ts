@@ -363,8 +363,8 @@ function validateCommand(cmd: unknown): string | null {
     case "BUILD": {
       const pos = cmd["pos"]; const building = cmd["building"];
       if (!isFiniteInt(pos) || pos < 0 || pos > 39) return "BUILD.pos must be integer 0–39";
-      if (!isStr(building) || !["house","hotel","factory"].includes(building))
-        return "BUILD.building must be 'house', 'hotel', or 'factory'";
+      if (!isStr(building) || !["house","hotel","factory","skyscraper"].includes(building))
+        return "BUILD.building must be 'house', 'hotel', 'factory', or 'skyscraper'";
       break;
     }
     case "SELL_BUILDING": case "MORTGAGE": case "UNMORTGAGE": case "SELL_PROPERTY": {
@@ -768,6 +768,11 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         if (typeof s["noRentInJail"] !== "boolean")
           throw new Error("noRentInJail must be a boolean");
         settings.noRentInJail = s["noRentInJail"] as boolean;
+      }
+      if (s["extraBuildings"] !== undefined) {
+        if (typeof s["extraBuildings"] !== "boolean")
+          throw new Error("extraBuildings must be a boolean");
+        settings.extraBuildings = s["extraBuildings"] as boolean;
       }
       room.updateSettings(settings);
       broadcastToRoom(room, { t: "room", room: room.toView() });

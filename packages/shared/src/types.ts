@@ -4,6 +4,9 @@ export interface Buildings {
   houses: number; // 0-4
   hotel: boolean;
   factory: boolean;
+  /** house-rule tier above the hotel (extraBuildings setting); optional so
+   *  states persisted before the rule existed stay readable */
+  skyscraper?: boolean;
 }
 
 export interface PlayerState {
@@ -95,6 +98,8 @@ export interface GameState {
   roundLimit: number;
   /** jailed owners collect no street/station/attraction rent (house rule) */
   noRentInJail: boolean;
+  /** skyscraper building tier enabled (house rule) */
+  extraBuildings: boolean;
   /** True once the current player has built one building this turn; reset on turn advance. */
   builtThisTurn: boolean;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
@@ -123,7 +128,7 @@ export type Command =
   | { type: "BUY_PROPERTY" }
   | { type: "DECLINE_PROPERTY" }
   | { type: "PAY_RANSOM" }
-  | { type: "BUILD"; pos: number; building: "house" | "hotel" | "factory" }
+  | { type: "BUILD"; pos: number; building: "house" | "hotel" | "factory" | "skyscraper" }
   | { type: "SELL_BUILDING"; pos: number }
   | { type: "MORTGAGE"; pos: number }
   | { type: "UNMORTGAGE"; pos: number }
@@ -162,6 +167,8 @@ export interface GameSettings {
   roundLimit?: number;
   /** jailed owners collect no rent (default false) */
   noRentInJail?: boolean;
+  /** enable the skyscraper building tier above hotels (default false) */
+  extraBuildings?: boolean;
 }
 
 export interface NewGameOptions {

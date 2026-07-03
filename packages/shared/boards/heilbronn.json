@@ -35,6 +35,10 @@
     "casino": {
       "sixShare": 0.35,
       "doubleShare": 0.2
+    },
+    "skyscraper": {
+      "costMult": 2.0,
+      "rentMult": 2.5
     }
   },
   "tiles": [

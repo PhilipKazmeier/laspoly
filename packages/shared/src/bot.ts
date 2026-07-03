@@ -66,6 +66,24 @@ function canBuildHouseAt(state: GameState, board: ReturnType<typeof getBoard>, p
   return true;
 }
 
+/** Mirrors engine canConstructSkyscraper so the bot never issues an illegal BUILD. */
+function canBuildSkyscraperAt(state: GameState, board: ReturnType<typeof getBoard>, pos: number): boolean {
+  if (!state.extraBuildings) return false;
+  if (state.unbuildableFields.includes(pos)) return false;
+  const tile = board.tiles[pos];
+  if (!tile || tile.type !== "street") return false;
+  const b = state.buildings[pos];
+  if (!b || !b.hotel || b.skyscraper || b.factory) return false;
+  const members = groupMembers(board, tile.group);
+  for (const m of members) {
+    if (state.mortgaged[m]) return false;
+    if (m === pos) continue;
+    const bm = state.buildings[m] ?? { houses: 0, hotel: false, factory: false };
+    if (!bm.hotel && !bm.skyscraper) return false;
+  }
+  return true;
+}
+
 /**
  * Returns whether a hotel can be built at `pos` (mirrors engine canConstructHotel logic).
  */
@@ -105,7 +123,16 @@ export function botDecide(state: GameState): Command {
         if (!tile || tile.type !== "street") continue;
         if (!groupMembers(board, tile.group).every((m) => state.ownership[m] === p.id)) continue;
         const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-        if (b.hotel || b.factory) continue;
+        if (b.factory || b.skyscraper) continue;
+        if (b.hotel) {
+          if (canBuildSkyscraperAt(state, board, pos)) {
+            const cost = buildingChargeCost(tile, "skyscraper", state);
+            if (p.money - cost >= threshold) {
+              return { type: "BUILD", pos, building: "skyscraper" };
+            }
+          }
+          continue;
+        }
         if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {
           const cost = buildingChargeCost(tile, "hotel", state);
           if (p.money - cost >= threshold) {
@@ -198,7 +225,18 @@ export function botDecide(state: GameState): Command {
       if (!tile || tile.type !== "street") continue;
       if (!groupMembers(board, tile.group).every((m) => state.ownership[m] === p.id)) continue;
       const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-      if (b.hotel || b.factory) continue;
+      if (b.factory || b.skyscraper) continue;
+
+      // Skyscraper upgrade on an existing hotel (extraBuildings house rule)
+      if (b.hotel) {
+        if (canBuildSkyscraperAt(state, board, pos)) {
+          const cost = buildingChargeCost(tile, "skyscraper", state);
+          if (p.money - cost >= threshold) {
+            return { type: "BUILD", pos, building: "skyscraper" };
+          }
+        }
+        continue;
+      }
 
       // Hotel upgrade: validate with engine-mirrored check
       if (b.houses === 4 && canBuildHotelAt(state, board, pos)) {

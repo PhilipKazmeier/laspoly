@@ -26,6 +26,10 @@ import type {
 
 const GO_TO_JAIL_POS = 30;
 
+// Skyscraper tier fallbacks when a board's rules block lacks the entry.
+const SKYSCRAPER_COST_MULT = 2.0;
+const SKYSCRAPER_RENT_MULT = 2.5;
+
 // ---- special events -------------------------------------------------------
 
 const EVENT_IDS: EventId[] = [
@@ -271,6 +275,7 @@ export function createGame(opts: NewGameOptions): GameState {
   const eventFrequency = opts.settings?.eventFrequency ?? "normal";
   const roundLimit = opts.settings?.roundLimit ?? 0;
   const noRentInJail = opts.settings?.noRentInJail ?? false;
+  const extraBuildings = opts.settings?.extraBuildings ?? false;
   // Draw the first round's event before building state so it consumes the RNG
   // in order (preserves historical seed-based dice streams under the default
   // frequency). "off"/"rare" start without an event and consume no RNG.
@@ -319,6 +324,7 @@ export function createGame(opts: NewGameOptions): GameState {
     unbuildableFields,
     roundLimit,
     noRentInJail,
+    extraBuildings,
     builtThisTurn: false,
     traveledThisTurn: false,
     buildingCostMult,
@@ -372,10 +378,16 @@ function isInPendingSwap(state: GameState, pos: number): boolean {
  */
 export function buildingChargeCost(
   tile: StreetTile,
-  kind: "house" | "hotel" | "factory",
+  kind: "house" | "hotel" | "factory" | "skyscraper",
   state: GameState,
 ): number {
   const isSale = hasEvent(state, 'buildingSale');
+  if (kind === "skyscraper") {
+    const mult = getBoard(state.boardId).rules.skyscraper?.costMult ?? SKYSCRAPER_COST_MULT;
+    const sky = tile.hotelCost * mult;
+    const base = isSale ? Math.floor(sky / 2) : sky;
+    return Math.round(base * state.buildingCostMult);
+  }
   if (kind === "house") {
     const base = isSale ? Math.floor(tile.houseCost / 2) : tile.houseCost;
     return Math.round(base * state.buildingCostMult);
@@ -395,7 +407,7 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
   if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses >= 4) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses >= 4) return false;
   const members = groupMembers(board, tile.group);
   // Even build: this street can't have more houses than any other (build in order)
   for (const m of members) {
@@ -403,7 +415,7 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
     if (bm.factory) return false; // factory in group blocks houses
     if (state.mortgaged[m]) return false; // mortgaged in group blocks build
     if (m !== pos) {
-      const otherCount = bm.hotel ? 5 : bm.houses;
+      const otherCount = bm.hotel || bm.skyscraper ? 5 : bm.houses;
       // Can't build on this if another member has fewer houses
       if (otherCount < b.houses) return false;
     }
@@ -415,7 +427,7 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
   if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses !== 4) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses !== 4) return false;
   // Balance: single-street colour groups may build houses but NOT a hotel. A lone
   // street reaches its 4th house in only a few one-per-turn builds, and its hotel
   // rent (e.g. 2210 on Edison Walker) is a guaranteed early one-shot KO. Capping it
@@ -425,8 +437,8 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
   for (const m of members) {
     if (m === pos) continue;
     const bm = getBuildingsAt(state, m);
-    // Others must have 4 houses or already a hotel
-    if (!bm.hotel && bm.houses !== 4) return false;
+    // Others must have 4 houses, a hotel, or already a skyscraper
+    if (!bm.hotel && !bm.skyscraper && bm.houses !== 4) return false;
   }
   return true;
 }
@@ -435,7 +447,7 @@ function canConstructFactory(state: GameState, board: BoardDefinition, pos: numb
   if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses !== 0) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses !== 0) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // mortgaged blocks factory
@@ -443,6 +455,27 @@ function canConstructFactory(state: GameState, board: BoardDefinition, pos: numb
     const bm = getBuildingsAt(state, m);
     // Others must be empty or have a factory (no houses/hotels)
     if (!bm.factory && (bm.houses > 0 || bm.hotel)) return false;
+  }
+  return true;
+}
+
+/**
+ * Skyscraper (extraBuildings house rule): the tier above the hotel. Requires
+ * the rule enabled, a hotel standing here, and every group member carrying a
+ * hotel or skyscraper (top-tier even-build); mortgaged members block.
+ */
+function canConstructSkyscraper(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (!state.extraBuildings) return false;
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (!b.hotel || b.skyscraper || b.factory) return false;
+  const members = groupMembers(board, tile.group);
+  for (const m of members) {
+    if (state.mortgaged[m]) return false;
+    if (m === pos) continue;
+    const bm = getBuildingsAt(state, m);
+    if (!bm.hotel && !bm.skyscraper) return false;
   }
   return true;
 }
@@ -520,7 +553,7 @@ function _addManagementCommands(
     const tile = board.tiles[pos];
     if (!tile) continue;
     const b = getBuildingsAt(state, pos);
-    const hasBuildings = b.houses > 0 || b.hotel || b.factory;
+    const hasBuildings = b.houses > 0 || b.hotel || b.factory || !!b.skyscraper;
 
     if (tile.type === "street") {
       // BUILD only if the player hasn't already built once this turn (one-build-per-turn).
@@ -528,9 +561,10 @@ function _addManagementCommands(
         if (canConstructHouse(state, board, pos)) cmds.push("BUILD");
         if (canConstructHotel(state, board, pos)) cmds.push("BUILD");
         if (canConstructFactory(state, board, pos)) cmds.push("BUILD");
+        if (canConstructSkyscraper(state, board, pos)) cmds.push("BUILD");
       }
       if (hasBuildings) {
-        if (b.hotel || b.factory) cmds.push("SELL_BUILDING");
+        if (b.hotel || b.factory || b.skyscraper) cmds.push("SELL_BUILDING");
         else if (b.houses > 0 && canSellHouse(state, board, pos)) cmds.push("SELL_BUILDING");
       }
     } else {
@@ -594,7 +628,10 @@ function streetRent(state: GameState, board: BoardDefinition, pos: number): numb
   const ownerId = state.ownership[pos]!;
   if (b?.factory) return 0; // factory pays its owner, never charges visitors
   let rent: number;
-  if (b?.hotel) {
+  if (b?.skyscraper) {
+    const mult = board.rules.skyscraper?.rentMult ?? SKYSCRAPER_RENT_MULT;
+    rent = Math.floor(tile.rent[5] * mult);
+  } else if (b?.hotel) {
     rent = tile.rent[5];
   } else if (b && b.houses > 0) {
     rent = tile.rent[b.houses]!;
@@ -1291,6 +1328,15 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         b.hotel = true;
         b.factory = false;
         events.push({ key: 'built', params: { player: p.name, building: 'hotel', tile: st.name, amount: cost }, playerId: p.id });
+      } else if (command.building === 'skyscraper') {
+        if (!canConstructSkyscraper(state, board, pos)) throw new Error('Cannot build skyscraper here');
+        const cost = buildingChargeCost(st, 'skyscraper', state);
+        if (p.money < cost) throw new Error('Cannot afford skyscraper');
+        p.money -= cost;
+        b.hotel = false;
+        b.skyscraper = true;
+        b.factory = false;
+        events.push({ key: 'built', params: { player: p.name, building: 'skyscraper', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'factory') {
         if (!canConstructFactory(state, board, pos)) throw new Error('Cannot build factory here');
         const cost = buildingChargeCost(st, 'factory', state);
@@ -1315,7 +1361,17 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const tile = tileAt(board, pos) as StreetTile;
       const b = getBuildingsAt(state, pos);
 
-      if (b.hotel) {
+      if (b.skyscraper) {
+        // skyscraper knockdown -> the hotel beneath reappears, refund = 2× mortgage
+        const refund = tile.mortgage * 2;
+        if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+        state.buildings[pos]!.skyscraper = false;
+        state.buildings[pos]!.hotel = true;
+        state.buildings[pos]!.houses = 0;
+        state.buildings[pos]!.factory = false;
+        p.money += refund;
+        events.push({ key: "soldBuilding", params: { player: p.name, building: "skyscraper", tile: tile.name, amount: refund }, playerId: p.id });
+      } else if (b.hotel) {
         // hotel knockdown -> 4 houses appear, refund = mortgage value
         const refund = tile.mortgage;
         if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
@@ -1352,7 +1408,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (state.mortgaged[pos]) throw new Error("Property is already mortgaged");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
-      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before mortgaging");
+      if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error("Must sell buildings before mortgaging");
       const mv = mortgageValue(board, tile);
       state.mortgaged[pos] = true;
       p.money += mv;
@@ -1385,7 +1441,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (state.mortgaged[pos]) throw new Error("Cannot sell mortgaged property directly");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
-      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before selling property");
+      if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error("Must sell buildings before selling property");
       let refund = Math.floor(tilePrice(board, tile) / 2);
       if (hasEvent(state, 'marketCrash')) refund = Math.floor(refund / 2); // crash halves sale value
       p.money += refund;
@@ -1456,7 +1512,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       for (const pos of give.props) {
         if (state.ownership[pos] !== proposer.id) throw new Error(`Proposer does not own property at ${pos}`);
         const b = getBuildingsAt(state, pos);
-        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error(`Property at ${pos} has buildings - sell them first`);
         if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
       }
       if (give.money < 0) throw new Error("Give money must be non-negative");
@@ -1466,7 +1522,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       for (const pos of receive.props) {
         if (state.ownership[pos] !== toId) throw new Error(`Target does not own property at ${pos}`);
         const b = getBuildingsAt(state, pos);
-        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error(`Property at ${pos} has buildings - sell them first`);
         if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
       }
       if (receive.money < 0) throw new Error("Receive money must be non-negative");
@@ -1564,7 +1620,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       // proposal and accept (the proposer can act on their own turn meanwhile).
       for (const pos of [...swap.give.props, ...swap.receive.props]) {
         const b = getBuildingsAt(state, pos);
-        if (state.mortgaged[pos] || b.houses > 0 || b.hotel || b.factory) {
+        if (state.mortgaged[pos] || b.houses > 0 || b.hotel || b.factory || b.skyscraper) {
           state.pendingSwap = null;
           events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "property encumbered" }, playerId: from.id });
           return { state, events };
@@ -1626,7 +1682,7 @@ export function ownedPropsOf(state: GameState, playerId: string): number[] {
     .map(([pos]) => Number(pos));
 }
 
-export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory"): boolean {
+export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory" | "skyscraper"): boolean {
   if (state.builtThisTurn) return false; // one-build-per-turn
   const board = getBoard(state.boardId);
   const tile = board.tiles[pos];
@@ -1637,6 +1693,7 @@ export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" 
   if (kind === "house") return canConstructHouse(state, board, pos);
   if (kind === "hotel") return canConstructHotel(state, board, pos);
   if (kind === "factory") return canConstructFactory(state, board, pos);
+  if (kind === "skyscraper") return canConstructSkyscraper(state, board, pos);
   return false;
 }
 
@@ -1681,7 +1738,7 @@ export function buildBlockReason(
 
   if (kind === "hotel") {
     // Only explain when the player is plausibly AT the hotel step here.
-    if (b.hotel || b.factory || b.houses !== 4) return null;
+    if (b.hotel || b.factory || b.skyscraper || b.houses !== 4) return null;
     if (members.length < 2) return "singleStreetNoHotel";
     for (const m of members) {
       if (m === pos) continue;
@@ -1692,7 +1749,7 @@ export function buildBlockReason(
   }
 
   if (kind === "house") {
-    if (b.hotel || b.factory || b.houses >= 4) return null;
+    if (b.hotel || b.factory || b.skyscraper || b.houses >= 4) return null;
     for (const m of members) {
       if (state.mortgaged[m]) return "mortgagedInGroup";
     }
@@ -1713,6 +1770,7 @@ export function canSellBuilding(state: GameState, pos: number): boolean {
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
   const b = getBuildingsAt(state, pos);
+  if (b.skyscraper) return true;
   if (b.hotel) return true;
   if (b.factory) return true;
   if (b.houses > 0) return canSellHouse(state, board, pos);
@@ -1725,7 +1783,7 @@ export function canMortgage(state: GameState, pos: number): boolean {
   if (!tile) return false;
   if (state.mortgaged[pos]) return false;
   const b = getBuildingsAt(state, pos);
-  return !(b.houses > 0 || b.hotel || b.factory);
+  return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper);
 }
 
 export function canUnmortgage(state: GameState, pos: number): boolean {
@@ -1745,7 +1803,7 @@ export function canSellProperty(state: GameState, pos: number): boolean {
   if (!tile) return false;
   if (state.mortgaged[pos]) return false;
   const b = getBuildingsAt(state, pos);
-  return !(b.houses > 0 || b.hotel || b.factory);
+  return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper);
 }
 
 export function canTravelFrom(state: GameState, playerId: string): number[] {
@@ -1806,8 +1864,10 @@ export function netWorth(state: GameState, playerId: string): number {
     if (!b) continue;
     if (tile.type === "street") {
       const st = tile as import("./board.js").StreetTile;
+      // Skyscraper sell-back chain: 2×mortgage (own refund) + the hotel beneath
+      if (b.skyscraper) total += st.mortgage * 2 + st.mortgage;
       // Hotel sell-back: st.mortgage (mirrors SELL_BUILDING hotel)
-      if (b.hotel) total += st.mortgage;
+      else if (b.hotel) total += st.mortgage;
       // Houses sell-back: st.mortgage per house
       else if (b.houses > 0) total += b.houses * st.mortgage;
       // Factory sell-back: st.houseCost (mirrors SELL_BUILDING factory)

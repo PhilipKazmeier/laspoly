@@ -978,3 +978,136 @@ describe("house rule: unbuildable fields", () => {
     expect(cmd.type === "BUILD").toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// House rule: skyscraper tier (extraBuildings)
+// ---------------------------------------------------------------------------
+
+import { buildingChargeCost, netWorth as netWorthFn, canSellBuilding } from "./engine.js";
+import { getBoard as getBoardFn } from "./board.js";
+
+function skyscraperGame(extraBuildings = true, seed = 0) {
+  const s = structuredClone(createGame({
+    boardId: "vegas",
+    seed,
+    players: [
+      { id: "A", name: "Alice", isBot: true, color: "red" },
+      { id: "B", name: "Bob", isBot: true, color: "blue" },
+    ],
+    settings: extraBuildings ? { extraBuildings: true } : {},
+  }));
+  // A owns the mistyrose group with hotels on both members.
+  s.ownership[13] = "A";
+  s.ownership[14] = "A";
+  s.buildings[13] = { houses: 0, hotel: true, factory: false };
+  s.buildings[14] = { houses: 0, hotel: true, factory: false };
+  s.players[0]!.money = 5000;
+  s.phase = "turn-end";
+  s.currentPlayerIndex = 0;
+  s.builtThisTurn = false;
+  return s;
+}
+
+describe("house rule: skyscraper", () => {
+  it("flag off → skyscraper is never buildable and BUILD throws", () => {
+    const s = skyscraperGame(false);
+    expect(canBuild(s, 13, "skyscraper")).toBe(false);
+    expect(() => applyCommand(s, { type: "BUILD", pos: 13, building: "skyscraper" })).toThrow();
+  });
+
+  it("flag on → buildable on a full-hotel group; cost = round(hotelCost × costMult × buildingCostMult)", () => {
+    const s = skyscraperGame(true);
+    const board = getBoardFn("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("13 must be a street");
+    const mult = board.rules.skyscraper?.costMult ?? 2.0;
+
+    expect(canBuild(s, 13, "skyscraper")).toBe(true);
+    expect(buildingChargeCost(tile, "skyscraper", s)).toBe(Math.round(tile.hotelCost * mult * s.buildingCostMult));
+
+    const before = s.players[0]!.money;
+    const { state: s1, events } = applyCommand(s, { type: "BUILD", pos: 13, building: "skyscraper" });
+    expect(s1.buildings[13]!.skyscraper).toBe(true);
+    expect(s1.buildings[13]!.hotel).toBe(false);
+    expect(s1.players[0]!.money).toBe(before - Math.round(tile.hotelCost * mult));
+    expect(events.some((e) => e.key === "built" && e.params["building"] === "skyscraper")).toBe(true);
+  });
+
+  it("top-tier even-build: blocked while a sibling lacks its hotel", () => {
+    const s = skyscraperGame(true);
+    s.buildings[14] = { houses: 4, hotel: false, factory: false }; // sibling not at hotel yet
+    expect(canBuild(s, 13, "skyscraper")).toBe(false);
+  });
+
+  it("rent = floor(hotel rent × rentMult); recession halves it", () => {
+    const board = getBoardFn("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("13 must be a street");
+    const rentMult = board.rules.skyscraper?.rentMult ?? 2.5;
+
+    // Land B on 13 (A owns a skyscraper there).
+    const tmp = skyscraperGame(true, 0);
+    const rng0 = { seed: tmp.rng.seed };
+    const d1 = nextInt(rng0, 1, 6);
+    const d2 = nextInt(rng0, 1, 6);
+    const startPos = ((13 - (d1 + d2)) % 40 + 40) % 40;
+
+    const base = skyscraperGame(true, 0);
+    base.buildings[13] = { houses: 0, hotel: false, factory: false, skyscraper: true };
+    base.players[1]!.position = startPos;
+    base.currentPlayerIndex = 1;
+    base.phase = "awaiting-roll";
+    base.activeEvents = [];
+
+    const rent = applyCommand(base, { type: "ROLL_DICE" }).events.find((e) => e.key === "rentPaid");
+    expect(rent!.params["amount"]).toBe(Math.floor(tile.rent[5] * rentMult));
+
+    const recessed = structuredClone(base);
+    recessed.activeEvents = [{ id: "recession", remainingRounds: 1 }];
+    const rent2 = applyCommand(recessed, { type: "ROLL_DICE" }).events.find((e) => e.key === "rentPaid");
+    expect(rent2!.params["amount"]).toBe(Math.floor(Math.floor(tile.rent[5] * rentMult) / 2));
+  });
+
+  it("sell-back: skyscraper → hotel reappears, refund 2× mortgage; mortgage/sale blocked while standing", () => {
+    const board = getBoardFn("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("13 must be a street");
+    const s = skyscraperGame(true);
+    s.buildings[13] = { houses: 0, hotel: false, factory: false, skyscraper: true };
+
+    expect(() => applyCommand(s, { type: "MORTGAGE", pos: 13 })).toThrow();
+    expect(() => applyCommand(s, { type: "SELL_PROPERTY", pos: 13 })).toThrow();
+    expect(canSellBuilding(s, 13)).toBe(true);
+
+    const before = s.players[0]!.money;
+    const { state: s1 } = applyCommand(s, { type: "SELL_BUILDING", pos: 13 });
+    expect(s1.buildings[13]!.skyscraper).toBe(false);
+    expect(s1.buildings[13]!.hotel).toBe(true);
+    expect(s1.players[0]!.money).toBe(before + tile.mortgage * 2);
+  });
+
+  it("netWorth counts the skyscraper's sell-back chain", () => {
+    const board = getBoardFn("vegas");
+    const tile = board.tiles[13]!;
+    if (tile.type !== "street") throw new Error("13 must be a street");
+    const s = skyscraperGame(true);
+
+    const hotelWorth = netWorthFn(s, "A");
+    s.buildings[13] = { houses: 0, hotel: false, factory: false, skyscraper: true };
+    const skyWorth = netWorthFn(s, "A");
+    // Skyscraper adds 2×mortgage + implied hotel mortgage vs the hotel's single mortgage.
+    expect(skyWorth - hotelWorth).toBe(tile.mortgage * 2);
+  });
+
+  it("bot builds a skyscraper on its hotel when rich (flag on) and never when off", () => {
+    const s = skyscraperGame(true);
+    s.players[0]!.money = 10_000;
+    const cmd = botDecide(s);
+    expect(cmd).toEqual({ type: "BUILD", pos: expect.any(Number), building: "skyscraper" });
+
+    const off = skyscraperGame(false);
+    off.players[0]!.money = 10_000;
+    const cmdOff = botDecide(off);
+    expect(cmdOff.type === "BUILD" && (cmdOff as { building?: string }).building === "skyscraper").toBe(false);
+  });
+});
