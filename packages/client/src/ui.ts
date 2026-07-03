@@ -118,7 +118,6 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "props.capital": "Kapital",
     "props.builds": "Bauten diese Runde",
     // Buy offer
-    "buy.header": "Kaufangebot",
     "buy.price": "Preis:",
     "buy.balance": "Dein Kapital:",
     "buy.buy": "Kaufen",
@@ -377,7 +376,6 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "props.capital": "Capital",
     "props.builds": "Builds this turn",
     // Buy offer
-    "buy.header": "Purchase Offer",
     "buy.price": "Price:",
     "buy.balance": "Your capital:",
     "buy.buy": "Buy",
@@ -1234,9 +1232,8 @@ export class UI {
     const helpOverlay = document.getElementById("helpOverlay") as HTMLElement & { _rebuildContent?: () => void } | null;
     if (helpOverlay?._rebuildContent) helpOverlay._rebuildContent();
 
-    // Buy offer panel
-    const buyHeader = document.querySelector("#buyOfferPanel .buy-header");
-    if (buyHeader) buyHeader.textContent = t("buy.header");
+    // Buy offer (deed card): button labels re-render with the card; the ids
+    // survive relabelling while it is open.
     const buyBtn = document.getElementById("buyOfferBuyBtn");
     if (buyBtn) buyBtn.textContent = t("buy.buy");
     const buyDeclineBtn = document.getElementById("buyOfferDeclineBtn");
@@ -1481,8 +1478,10 @@ export class UI {
         const { x, y } = this.board3d.projectTile(this.buyOfferPos);
         const w = panel.offsetWidth || 280;
         const h = panel.offsetHeight || 340;
+        // Top clamp starts below the header cluster so the card can never
+        // cover the view/settings/leave buttons (e2e + usability).
         panel.style.left = `${Math.min(Math.max(8, x - w / 2), window.innerWidth - w - 8)}px`;
-        panel.style.top = `${Math.min(Math.max(8, y - h - 24), window.innerHeight - h - 8)}px`;
+        panel.style.top = `${Math.min(Math.max(90, y - h - 24), window.innerHeight - h - 8)}px`;
         this.buyOfferAnchorRaf = requestAnimationFrame(step);
       };
       this.buyOfferAnchorRaf = requestAnimationFrame(step);

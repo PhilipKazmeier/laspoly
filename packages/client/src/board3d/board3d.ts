@@ -25,7 +25,7 @@ import {
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
 import { getBoard, listBoards, JAIL_POS, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
-import type { GameState, FormattedEvent } from "@laspoly/shared";
+import type { GameState } from "@laspoly/shared";
 import { getQuality } from "../quality.js";
 import {
   ScenePalette,

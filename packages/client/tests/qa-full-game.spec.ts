@@ -795,6 +795,8 @@ test.describe("QA Full-Game Playthrough", () => {
         await page.locator("#ransomBtn").click();
       } else if (arrived === "buy") {
         await page.locator("#buyOfferDeclineBtn").click();
+      } else if (arrived === "endTurn") {
+        await page.locator("#endTurnBtn").click();
       } else {
         await page.locator("#rollBtn").click();
         await page.waitForTimeout(300);
