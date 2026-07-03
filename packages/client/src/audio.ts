@@ -322,8 +322,14 @@ class AudioPlayer {
     } catch { /* ignore */ }
   }
 
-  // Maximum playback duration in seconds for sounds that can be too long.
+  // Maximum playback duration in seconds, matched to the on-screen action so
+  // sounds never outlast what they accompany. Raw file lengths for reference:
+  // dice 2.06s (roll sequence ≈1.8s), buy 2.09s (instant), build 4.57s
+  // (placement ≈0.4s), jail 32s (siren), rent 0.72s + gameover 5.12s uncapped.
   private static readonly MAX_DURATION: Partial<Record<SfxName, number>> = {
+    dice: 1.9,
+    buy: 1.0,
+    build: 0.7,
     jail: 1.2,
   };
 
@@ -340,12 +346,22 @@ class AudioPlayer {
       const clone = el.cloneNode() as HTMLAudioElement;
       clone.volume = this.sfxVolume;
       void clone.play().catch(() => {/* autoplay blocked — ignore */});
-      // Cap duration for sounds that would otherwise run too long (e.g. jail siren)
+      // Cap duration, fading out over ~150ms instead of a hard cut.
       const maxDur = AudioPlayer.MAX_DURATION[name];
       if (maxDur !== undefined) {
         setTimeout(() => {
-          clone.pause();
-          clone.currentTime = 0;
+          const FADE_STEPS = 6;
+          const startVol = clone.volume;
+          let step = 0;
+          const fade = setInterval(() => {
+            step++;
+            clone.volume = Math.max(0, startVol * (1 - step / FADE_STEPS));
+            if (step >= FADE_STEPS) {
+              clearInterval(fade);
+              clone.pause();
+              clone.currentTime = 0;
+            }
+          }, 25);
         }, maxDur * 1000);
       }
     } catch {

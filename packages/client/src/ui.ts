@@ -5,6 +5,7 @@ import {
   mortgageValue,
   tilePrice,
   canBuild,
+  buildBlockReason,
   canSellBuilding,
   canMortgage,
   canUnmortgage,
@@ -641,6 +642,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.quality": "Grafik",
     "settings.qualityHigh": "Hoch",
     "settings.qualityLow": "Niedrig",
+    "buildBlock.buildLimitUsed": "Baulimit für diesen Zug erreicht — nächste Runde wieder möglich.",
+    "buildBlock.needFourOnAll": "Alle Straßen der Gruppe brauchen erst 4 Häuser.",
+    "buildBlock.singleStreetNoHotel": "Auf Einzelstraßen-Gruppen kann kein Hotel gebaut werden (Balance-Regel).",
+    "buildBlock.evenBuild": "Gleichmäßig bauen: erst die anderen Straßen der Gruppe aufstocken.",
+    "buildBlock.mortgagedInGroup": "Eine Straße der Gruppe ist mit Hypothek belastet.",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
@@ -839,6 +845,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.quality": "Graphics",
     "settings.qualityHigh": "High",
     "settings.qualityLow": "Low",
+    "buildBlock.buildLimitUsed": "Build limit reached this turn — available again next turn.",
+    "buildBlock.needFourOnAll": "All streets in the group need 4 houses first.",
+    "buildBlock.singleStreetNoHotel": "Single-street groups cannot build a hotel (balance rule).",
+    "buildBlock.evenBuild": "Build evenly: raise the other streets in the group first.",
+    "buildBlock.mortgagedInGroup": "A street in this group is mortgaged.",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
@@ -3142,30 +3153,50 @@ export class UI {
           if (unaffordable) btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
           else if (!canAct) btn.title = t("tooltip.onlyYourTurn");
         } else {
-          btn.addEventListener("click", onClick);
+          // stopPropagation: the whole property row opens the deed card on
+          // click — building/selling/mortgaging must NOT bubble into that.
+          btn.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
         }
+        return btn;
+      };
+
+      /** Disabled build button explaining WHY the build is blocked. */
+      const makeBlockedBtn = (label: string, reasonKey: string): HTMLButtonElement => {
+        const btn = document.createElement("button");
+        btn.className = "prop-btn";
+        btn.textContent = label;
+        btn.disabled = true;
+        btn.style.opacity = "0.4";
+        btn.title = t(`buildBlock.${reasonKey}`);
         return btn;
       };
 
       // BUILD buttons (only for streets with whole-group ownership)
       if (tile.type === "street") {
         const st = tile as StreetTile;
-        // Compute discounted costs
-        const hCost = Math.floor(st.houseCost * costMult);
-        const htCost = Math.floor(st.hotelCost * costMult);
-        const fCost = Math.floor(st.factoryCost * costMult);
+        // Compute discounted costs (Math.round matches the engine's
+        // buildingChargeCost rounding — was Math.floor, a cosmetic mismatch).
+        const hCost = Math.round(st.houseCost * costMult);
+        const htCost = Math.round(st.hotelCost * costMult);
+        const fCost = Math.round(st.factoryCost * costMult);
 
         if (canBuild(state, pos, "house")) {
           btnRow.appendChild(makeBtn(
             `${t("prop.house")} (${hCost} LPD)`, hCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } })
           ));
+        } else {
+          const reason = buildBlockReason(state, pos, "house");
+          if (reason) btnRow.appendChild(makeBlockedBtn(`${t("prop.house")} (${hCost} LPD)`, reason));
         }
         if (canBuild(state, pos, "hotel")) {
           btnRow.appendChild(makeBtn(
             `${t("prop.hotel")} (${htCost} LPD)`, htCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } })
           ));
+        } else {
+          const reason = buildBlockReason(state, pos, "hotel");
+          if (reason) btnRow.appendChild(makeBlockedBtn(`${t("prop.hotel")} (${htCost} LPD)`, reason));
         }
         if (canBuild(state, pos, "factory")) {
           btnRow.appendChild(makeBtn(

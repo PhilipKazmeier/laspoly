@@ -825,3 +825,74 @@ describe("one-build-per-turn limit", () => {
     expect(canBuild(s1, 13, "house")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hotel regression (user-reported "cannot build hotel with 4 houses") +
+// buildBlockReason transparency helper
+// ---------------------------------------------------------------------------
+
+import { buildBlockReason } from "./engine.js";
+
+describe("hotel at 4/4 houses + buildBlockReason", () => {
+  it("REGRESSION: full group at 4 houses each → hotel is buildable and BUILD succeeds", () => {
+    let s = stateWithMonopoly();
+    s = buildHousesEvenly(s, [13, 14], 4);
+    s = resetBuildFlag(s);
+    expect(s.buildings[13]!.houses).toBe(4);
+    expect(s.buildings[14]!.houses).toBe(4);
+    expect(canBuild(s, 13, "hotel")).toBe(true);
+    const { state: s1 } = applyCommand(s, { type: "BUILD", pos: 13, building: "hotel" });
+    expect(s1.buildings[13]!.hotel).toBe(true);
+    expect(s1.buildings[13]!.houses).toBe(0);
+  });
+
+  it("reason 'needFourOnAll': this street has 4 houses, sibling has fewer", () => {
+    let s = stateWithMonopoly();
+    // Even-build to 3/3, then a 4th on 13 only.
+    s = buildHousesEvenly(s, [13, 14], 3);
+    s = resetBuildFlag(s);
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }));
+    s = resetBuildFlag(s);
+    expect(s.buildings[13]!.houses).toBe(4);
+    expect(s.buildings[14]!.houses).toBe(3);
+    expect(canBuild(s, 13, "hotel")).toBe(false);
+    expect(buildBlockReason(s, 13, "hotel")).toBe("needFourOnAll");
+  });
+
+  it("reason 'buildLimitUsed': legal hotel masked by the one-build-per-turn limit", () => {
+    let s = stateWithMonopoly();
+    s = buildHousesEvenly(s, [13, 14], 4);
+    // buildHousesEvenly leaves builtThisTurn=true after the last build.
+    expect(s.builtThisTurn).toBe(true);
+    expect(canBuild(s, 13, "hotel")).toBe(false);
+    expect(buildBlockReason(s, 13, "hotel")).toBe("buildLimitUsed");
+  });
+
+  it("reason 'evenBuild': house blocked because a sibling has fewer houses", () => {
+    let s = stateWithMonopoly();
+    s = resetBuildFlag(s);
+    ({ state: s } = applyCommand(s, { type: "BUILD", pos: 13, building: "house" }));
+    s = resetBuildFlag(s);
+    // 13 has 1 house, 14 has 0 → building AGAIN on 13 violates even-build.
+    expect(canBuild(s, 13, "house")).toBe(false);
+    expect(buildBlockReason(s, 13, "house")).toBe("evenBuild");
+  });
+
+  it("reason 'mortgagedInGroup': house blocked by a mortgaged sibling", () => {
+    const s = stateWithMonopoly();
+    s.mortgaged[14] = true;
+    expect(canBuild(s, 13, "house")).toBe(false);
+    expect(buildBlockReason(s, 13, "house")).toBe("mortgagedInGroup");
+  });
+
+  it("returns null when the build is simply possible or not plausible", () => {
+    const s = stateWithMonopoly();
+    // House is possible → no block reason.
+    expect(canBuild(s, 13, "house")).toBe(true);
+    expect(buildBlockReason(s, 13, "house")).toBe(null);
+    // Hotel on a street without 4 houses is not a plausible expectation.
+    expect(buildBlockReason(s, 13, "hotel")).toBe(null);
+    // Unowned tile → null.
+    expect(buildBlockReason(s, 1, "house")).toBe(null);
+  });
+});

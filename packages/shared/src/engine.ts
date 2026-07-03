@@ -1406,6 +1406,74 @@ export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" 
   return false;
 }
 
+export type BuildBlockReason =
+  | "buildLimitUsed"       // an otherwise-legal build is masked by the one-per-turn limit
+  | "needFourOnAll"        // hotel: other group members lack their 4 houses
+  | "singleStreetNoHotel"  // hotel: single-street groups are hotel-capped (balance rule)
+  | "evenBuild"            // house: another member has fewer houses — build there first
+  | "mortgagedInGroup";    // house: a mortgaged group member blocks building
+
+/**
+ * Explains WHY a build the player might reasonably expect is currently
+ * blocked (UI transparency: the client shows a disabled button with this
+ * reason instead of silently hiding it). Returns null when the build is
+ * either possible or not a sensible expectation on this tile at all
+ * (e.g. hotel on a street without 4 houses yet).
+ */
+export function buildBlockReason(
+  state: GameState,
+  pos: number,
+  kind: "house" | "hotel" | "factory",
+): BuildBlockReason | null {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile || tile.type !== "street") return null;
+  const p = currentPlayer(state);
+  if (state.ownership[pos] !== p.id) return null;
+  if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) return null;
+  if (state.mortgaged[pos]) return null;
+
+  // The one-build-per-turn limit masking an otherwise legal build.
+  if (state.builtThisTurn) {
+    const legal =
+      kind === "house" ? canConstructHouse(state, board, pos)
+      : kind === "hotel" ? canConstructHotel(state, board, pos)
+      : canConstructFactory(state, board, pos);
+    if (legal) return "buildLimitUsed";
+  }
+
+  const b = getBuildingsAt(state, pos);
+  const members = groupMembers(board, (tile as StreetTile).group);
+
+  if (kind === "hotel") {
+    // Only explain when the player is plausibly AT the hotel step here.
+    if (b.hotel || b.factory || b.houses !== 4) return null;
+    if (members.length < 2) return "singleStreetNoHotel";
+    for (const m of members) {
+      if (m === pos) continue;
+      const bm = getBuildingsAt(state, m);
+      if (!bm.hotel && bm.houses !== 4) return "needFourOnAll";
+    }
+    return null;
+  }
+
+  if (kind === "house") {
+    if (b.hotel || b.factory || b.houses >= 4) return null;
+    for (const m of members) {
+      if (state.mortgaged[m]) return "mortgagedInGroup";
+    }
+    for (const m of members) {
+      if (m === pos) continue;
+      const bm = getBuildingsAt(state, m);
+      const otherCount = bm.hotel ? 5 : bm.houses;
+      if (otherCount < b.houses) return "evenBuild";
+    }
+    return null;
+  }
+
+  return null;
+}
+
 export function canSellBuilding(state: GameState, pos: number): boolean {
   const board = getBoard(state.boardId);
   const tile = board.tiles[pos];
