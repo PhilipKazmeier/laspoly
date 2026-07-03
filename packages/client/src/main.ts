@@ -100,9 +100,6 @@ class StateQueue {
     const prev = this.lastProcessed;
     const myId = this.net.playerId;
 
-    // 1. Board-side event hooks (no animation wait needed here).
-    this.board.handleEvents(events);
-
     // Special-event toasts can appear right away (not tied to movement).
     for (const ev of events) {
       if (ev.key.startsWith("specialEvent_")) {
@@ -151,6 +148,23 @@ class StateQueue {
       }
     }
 
+    // Direction: choreograph this frame (fire-and-forget tweens — the Director
+    // never adds wall-clock time to the queue). Full drama on the local
+    // player's turn, a calm lean for bots.
+    const director = this.board.director;
+    const curPlayer = state.players[state.currentPlayerIndex];
+    if (curPlayer) director.setIntensity(curPlayer.id === myId ? "full" : "calm");
+    if (rolledD1 > 0) {
+      director.diceMoment();
+    } else if (
+      state.phase === "awaiting-roll" &&
+      curPlayer &&
+      (!prev || prev.currentPlayerIndex !== state.currentPlayerIndex)
+    ) {
+      // A fresh turn begins: settle the camera on the player about to roll.
+      director.focus(curPlayer.inJail ? JAIL_POS : curPlayer.position);
+    }
+
     // (a) Dice FIRST (cup lift → shake → settle with the rolled value face-up).
     //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
@@ -170,6 +184,9 @@ class StateQueue {
     //    Safety timeout: 15 s per mover (12 tiles × 120 ms + margin).
     for (const { id, from, to } of movers) {
       this.board.ensureTokenExists(id, state, myId);
+      // Track the walking token (full intensity only; no-op for bot turns).
+      const moverMesh = this.board.getTokenMesh(id);
+      if (moverMesh) director.follow(moverMesh);
 
       // Jail via the Go-To-Jail field: if this move ends in jail AND the player's
       // roll lands them exactly on that field, walk the roll onto the field first,
@@ -225,6 +242,14 @@ class StateQueue {
 
     // (c) After animation: apply visuals, show action-card popup, update HUD.
     //     Everything in this block is strictly after dice + movement.
+
+    // Direction: hold on the landed tile while a buy decision is open,
+    // otherwise ease back to the table overview.
+    if (state.phase === "awaiting-buy" && curPlayer) {
+      director.present(curPlayer.position);
+    } else {
+      director.release();
+    }
 
     // Apply visuals (HUD, board, ownership, displays).
     this.board.applyVisuals(state, myId);

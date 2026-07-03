@@ -47,6 +47,7 @@ import { BuildingRenderer } from "./buildings.js";
 import { Effects } from "./effects.js";
 import { animateCardDrawAsync } from "./cards.js";
 import { buildProceduralToken, makeStandee } from "../tokenFactory.js";
+import { Director } from "../director.js";
 
 export class Board3D {
   private engine: Engine;
@@ -70,6 +71,8 @@ export class Board3D {
   private prevPositions: Map<string, number> = new Map();
   private dice: DiceRig;
   private buildings: BuildingRenderer;
+  /** Camera choreography — public so the StateQueue can direct the turn. */
+  readonly director!: Director;
   private effects: Effects;
   private camera!: ArcRotateCamera;
   private tokenRings: Map<string, AbstractMesh> = new Map();
@@ -202,6 +205,8 @@ export class Board3D {
     this.dice = new DiceRig(this.scene, this.palette, this.effects);
     // Buildings + ownership markers
     this.buildings = new BuildingRenderer(this.scene, this.effects);
+    // The camera director (turn choreography) — owns all camera movement.
+    this.director = new Director(this.scene, this.camera);
 
     this.engine.runRenderLoop(() => this.scene.render());
     window.addEventListener("resize", () => this.engine.resize());
@@ -645,28 +650,9 @@ export class Board3D {
     this.tileHoverHandler = cb;
   }
 
-  /**
-   * Called by main.ts with the just-arrived FormattedEvent batch.
-   * FormattedEvent only carries {key, text, playerId}; movement and dice data
-   * are read from the authoritative GameState by the serial state queue. This
-   * hook is retained as the documented entry point for event-keyed board
-   * effects and is intentionally a no-op for now.
-   */
-  handleEvents(_events: FormattedEvent[]) {
-    void _events;
-  }
-
   /** Switch camera between angled standard view and flat top-down view. */
   setView(v: 'standard' | 'top'): void {
-    if (v === 'top') {
-      this.camera.alpha = -Math.PI / 2;
-      this.camera.beta = 0.25; // ~14° from vertical — readable top-down without mirror glare
-      this.camera.radius = 38;
-    } else {
-      this.camera.alpha = -Math.PI / 2;
-      this.camera.beta = Math.PI / 3.2;
-      this.camera.radius = 32;
-    }
+    this.director.setView(v);
   }
 
   /**
@@ -1002,33 +988,15 @@ export class Board3D {
     const pos = token ? token.position : Vector3.Zero();
     this.effects.confettiBurst(pos.x, pos.y + 0.4, pos.z);
 
+    // The orbit itself lives in the Director (pointer-down aborts it there).
     const ORBIT_MS = 8000;
-    const startAlpha = this.camera.alpha;
-    let elapsed = 0;
-    let lastTime = performance.now();
-    let done = false;
-    // eslint-disable-next-line prefer-const
-    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
-    const stop = () => {
-      if (done) return;
-      done = true;
-      this.scene.onBeforeRenderObservable.remove(obs);
-      this.scene.onPointerObservable.remove(pointerObs);
-      clearTimeout(safety);
-    };
-    const safety = setTimeout(stop, ORBIT_MS + 1000);
-    // Abort the orbit the moment the user touches the scene.
-    const pointerObs = this.scene.onPointerObservable.add((pi) => {
-      if (pi.type === 1) stop(); // POINTERDOWN
-    });
-    obs = this.scene.onBeforeRenderObservable.add(() => {
-      const now = performance.now();
-      elapsed += now - lastTime;
-      lastTime = now;
-      const t = Math.min(elapsed / ORBIT_MS, 1);
-      this.camera.alpha = startAlpha + Math.PI * 2 * t;
-      if (t >= 1) stop();
-    });
+    this.director.celebrate();
+    setTimeout(() => this.director.stopCelebration(), ORBIT_MS);
+  }
+
+  /** The token mesh for a player, if it exists (Director follow targets). */
+  getTokenMesh(playerId: string): AbstractMesh | null {
+    return this.tokenMeshes.get(playerId) ?? null;
   }
 
   // -------------------------------------------------------------------------
