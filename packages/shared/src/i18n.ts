@@ -60,6 +60,18 @@ const de: Catalogue = {
   specialEvent_jackpot: '🎰 Runde {round}: Casino-Jackpot-Nacht! Casinogewinne sind diese Runde 50 % höher.',
   specialEvent_buildingSale: '🏗️ Runde {round}: Bau-Rabatt! Gebäudekosten sind diese Runde halbiert.',
   specialEvent_quietDay: '😴 Runde {round}: Ruhiger Tag. Keine besonderen Ereignisse.',
+  specialEvent_earthquake: '🌋 Runde {round}: Erdbeben! Jeder verliert ein Haus seiner am stärksten bebauten Straße und zahlt Reparaturen.',
+  specialEvent_taxAudit: '🧾 Runde {round}: Steuerprüfung! Der reichste Spieler zahlt 10 % seines Bargelds in den Casino-Pool.',
+  specialEvent_lottery: '🎟️ Runde {round}: Lotterie! Ein zufälliger Spieler gewinnt ein Viertel des Casino-Pools.',
+  specialEvent_windfall: '💸 Runde {round}: Geldsegen! Alle Spieler erhalten Geld.',
+  specialEvent_streetParty: '🎉 Runde {round}: Straßenfest in der Gruppe {group}! Mieten dort sind 2 Runden lang verdoppelt.',
+  specialEvent_powerOutage: '🔌 Runde {round}: Stromausfall! Bahnhöfe kassieren diese Runde keine Miete.',
+  specialEvent_marketCrash: '📉 Runde {round}: Marktcrash! Verkaufserlöse für Grundstücke sind 2 Runden lang halbiert.',
+  specialEvent_goldRush: '⛏️ Runde {round}: Goldrausch! Fabrik-Einnahmen sind 2 Runden lang verdoppelt.',
+  earthquakeDamage: '🌋 {player} verliert ein Haus auf {tile} und zahlt {fee} LPD Reparaturkosten.',
+  taxAuditPaid: '🧾 {player} zahlt {amount} LPD Steuern in den Casino-Pool.',
+  lotteryWin: '🎟️ {player} gewinnt {amount} LPD in der Lotterie!',
+  windfallCollect: '💸 Alle Spieler erhalten {amount} LPD.',
 };
 
 const en: Catalogue = {
@@ -118,6 +130,18 @@ const en: Catalogue = {
   specialEvent_jackpot: '🎰 Round {round}: Casino Jackpot Night! Casino winnings are 50% higher this round.',
   specialEvent_buildingSale: '🏗️ Round {round}: Building Sale! Construction costs are halved this round.',
   specialEvent_quietDay: '😴 Round {round}: Quiet Day. No special effects.',
+  specialEvent_earthquake: '🌋 Round {round}: Earthquake! Everyone loses a house on their most-built street and pays repairs.',
+  specialEvent_taxAudit: '🧾 Round {round}: Tax audit! The richest player pays 10% of their cash into the casino pool.',
+  specialEvent_lottery: '🎟️ Round {round}: Lottery! A random player wins a quarter of the casino pool.',
+  specialEvent_windfall: '💸 Round {round}: Windfall! All players receive money.',
+  specialEvent_streetParty: '🎉 Round {round}: Street party in the {group} group! Rents there are doubled for 2 rounds.',
+  specialEvent_powerOutage: '🔌 Round {round}: Power outage! Stations charge no rent this round.',
+  specialEvent_marketCrash: '📉 Round {round}: Market crash! Property sale proceeds are halved for 2 rounds.',
+  specialEvent_goldRush: '⛏️ Round {round}: Gold rush! Factory revenues are doubled for 2 rounds.',
+  earthquakeDamage: '🌋 {player} loses a house on {tile} and pays {fee} LPD in repairs.',
+  taxAuditPaid: '🧾 {player} pays {amount} LPD in taxes into the casino pool.',
+  lotteryWin: '🎟️ {player} wins {amount} LPD in the lottery!',
+  windfallCollect: '💸 All players receive {amount} LPD.',
 };
 
 const catalogues: Record<Locale, Catalogue> = { de, en };

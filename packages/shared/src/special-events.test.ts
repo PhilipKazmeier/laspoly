@@ -463,3 +463,276 @@ describe('specialEvents: multi-round durations', () => {
     expect(Number(built!.params['amount'])).toBeLessThan(full);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Chaos events v2: instant one-shots + multi-round modifiers
+// ---------------------------------------------------------------------------
+
+import type { GameEvent } from './types.js';
+
+/** Chaos-frequency 2-player game. */
+function chaosGame(seed = 0): GameState {
+  return createGame({
+    boardId: 'vegas',
+    seed,
+    players: [
+      { id: 'A', name: 'Alice', isBot: true, color: 'red' },
+      { id: 'B', name: 'Bob', isBot: true, color: 'blue' },
+    ],
+    settings: { eventFrequency: 'chaos' },
+  });
+}
+
+/**
+ * Force a specific event to be drawn at the next round boundary by searching
+ * RNG seeds (deterministic given the mulberry32 implementation). `base` must
+ * be at turn-end with the LAST player current so END_TURN wraps the round.
+ */
+function forceBoundaryEvent(base: GameState, wanted: string): { state: GameState; events: GameEvent[] } {
+  for (let seed = 0; seed < 20000; seed++) {
+    const s = structuredClone(base);
+    s.rng.seed = seed >>> 0;
+    const res = applyCommand(s, { type: 'END_TURN' });
+    if (res.events.some((e) => e.key === `specialEvent_${wanted}`)) return res;
+  }
+  throw new Error(`no seed found that draws ${wanted}`);
+}
+
+/** Chaos game parked at turn-end of the LAST player (so END_TURN wraps a round). */
+function atBoundary(mutate?: (s: GameState) => void): GameState {
+  const s = structuredClone(chaosGame());
+  s.phase = 'turn-end';
+  s.currentPlayerIndex = 1; // last of two → wrap on advance
+  s.activeEvents = [];      // isolate from the initial draw
+  if (mutate) mutate(s);
+  return s;
+}
+
+describe('chaos events: instant one-shots', () => {
+  it('earthquake removes one house from each player’s most-built street + repair fee', () => {
+    const base = atBoundary((s) => {
+      s.ownership[13] = 'A';
+      s.ownership[14] = 'A';
+      s.buildings[13] = { houses: 3, hotel: false, factory: false };
+      s.buildings[14] = { houses: 1, hotel: false, factory: false };
+      s.players[0]!.money = 1000;
+      s.players[1]!.money = 800; // B owns nothing → spared
+    });
+    const { state: s1, events } = forceBoundaryEvent(base, 'earthquake');
+    expect(s1.buildings[13]!.houses).toBe(2); // most-built street hit
+    expect(s1.buildings[14]!.houses).toBe(1); // other street untouched
+    expect(s1.players[0]!.money).toBe(950);   // flat 50 repair fee
+    expect(s1.players[1]!.money).toBe(800);   // no houses, no damage
+    expect(events.some((e) => e.key === 'earthquakeDamage' && e.playerId === 'A')).toBe(true);
+    expect(events.some((e) => e.key === 'earthquakeDamage' && e.playerId === 'B')).toBe(false);
+  });
+
+  it('tax audit: richest-by-cash player pays 10% into the casino pool', () => {
+    const base = atBoundary((s) => {
+      s.players[0]!.money = 1000;
+      s.players[1]!.money = 400;
+      s.casinoPool = 100;
+    });
+    const { state: s1, events } = forceBoundaryEvent(base, 'taxAudit');
+    expect(s1.players[0]!.money).toBe(900);
+    expect(s1.players[1]!.money).toBe(400);
+    expect(s1.casinoPool).toBe(200);
+    const ev = events.find((e) => e.key === 'taxAuditPaid');
+    expect(ev?.playerId).toBe('A');
+    expect(ev?.params['amount']).toBe(100);
+  });
+
+  it('lottery: a player wins a quarter of the pool; pool never overdraws', () => {
+    const base = atBoundary((s) => {
+      s.players[0]!.money = 500;
+      s.players[1]!.money = 500;
+      s.casinoPool = 400;
+    });
+    const { state: s1, events } = forceBoundaryEvent(base, 'lottery');
+    expect(s1.casinoPool).toBe(300);
+    const totalBefore = 1000;
+    const totalAfter = s1.players[0]!.money + s1.players[1]!.money;
+    expect(totalAfter).toBe(totalBefore + 100);
+    expect(events.some((e) => e.key === 'lotteryWin')).toBe(true);
+  });
+
+  it('windfall credits every alive player', () => {
+    const base = atBoundary((s) => {
+      s.players[0]!.money = 500;
+      s.players[1]!.money = 700;
+    });
+    const { state: s1, events } = forceBoundaryEvent(base, 'windfall');
+    expect(s1.players[0]!.money).toBe(600);
+    expect(s1.players[1]!.money).toBe(800);
+    expect(events.some((e) => e.key === 'windfallCollect')).toBe(true);
+  });
+
+  it('instant events are never stored in activeEvents', () => {
+    const base = atBoundary();
+    const { state: s1 } = forceBoundaryEvent(base, 'windfall');
+    expect(s1.activeEvents.every((e) => e.id !== 'windfall')).toBe(true);
+  });
+
+  it('an earthquake fee that bankrupts the incoming player still yields a playable state', () => {
+    const base = atBoundary((s) => {
+      // A (the incoming player after wrap) has houses but only 10 LPD — the
+      // 50 LPD repair fee bankrupts them; B must end up as winner.
+      s.ownership[13] = 'A';
+      s.ownership[14] = 'A';
+      s.buildings[13] = { houses: 2, hotel: false, factory: false };
+      s.players[0]!.money = 10;
+      s.players[1]!.money = 800;
+    });
+    const { state: s1, events } = forceBoundaryEvent(base, 'earthquake');
+    expect(s1.players[0]!.alive).toBe(false);
+    expect(events.some((e) => e.key === 'bankrupt' && e.playerId === 'A')).toBe(true);
+    // Two players → the survivor wins immediately.
+    expect(s1.phase).toBe('finished');
+    expect(s1.winnerId).toBe('B');
+  });
+});
+
+describe('chaos events: multi-round modifiers', () => {
+  it('street party doubles rent only for its group and lasts 2 rounds', () => {
+    const board = getBoard('vegas');
+    const tile13 = board.tiles[13]!;
+    if (tile13.type !== 'street') throw new Error('expected street at 13');
+
+    // Land A on 13 via the peek-the-roll trick.
+    const tmp0 = twoPlayers(0);
+    const rng0 = { seed: tmp0.rng.seed };
+    const d1 = nextInt(rng0, 1, 6);
+    const d2 = nextInt(rng0, 1, 6);
+    const startPos = ((13 - (d1 + d2)) % 40 + 40) % 40;
+
+    let base = structuredClone(twoPlayers(0));
+    base.ownership[13] = 'B';
+    base.players[0]!.position = startPos;
+    base.currentPlayerIndex = 0;
+    base.phase = 'awaiting-roll';
+
+    const noParty = withEvent(base, 'quietDay');
+    const withParty = structuredClone(base);
+    withParty.activeEvents = [{ id: 'streetParty', remainingRounds: 2, group: tile13.group }];
+    const otherParty = structuredClone(base);
+    otherParty.activeEvents = [{ id: 'streetParty', remainingRounds: 2, group: '__other__' }];
+
+    const r0 = applyCommand(noParty, { type: 'ROLL_DICE' }).events.find((e) => e.key === 'rentPaid');
+    const r1 = applyCommand(withParty, { type: 'ROLL_DICE' }).events.find((e) => e.key === 'rentPaid');
+    const r2 = applyCommand(otherParty, { type: 'ROLL_DICE' }).events.find((e) => e.key === 'rentPaid');
+    expect(r1!.params['amount']).toBe((r0!.params['amount'] as number) * 2);
+    expect(r2!.params['amount']).toBe(r0!.params['amount']); // other group unaffected
+  });
+
+  it('street party drawn at a boundary carries a group and 2 rounds', () => {
+    const { state: s1 } = forceBoundaryEvent(atBoundary(), 'streetParty');
+    const party = s1.activeEvents.find((e) => e.id === 'streetParty');
+    expect(party).toBeDefined();
+    expect(party!.remainingRounds).toBe(2);
+    expect(typeof party!.group).toBe('string');
+  });
+
+  it('power outage: stations charge no rent', () => {
+    const board = getBoard('vegas');
+    const stationPos = board.tiles.find((t) => t.type === 'station')!.pos;
+    const tmp0 = twoPlayers(0);
+    const rng0 = { seed: tmp0.rng.seed };
+    const d1 = nextInt(rng0, 1, 6);
+    const d2 = nextInt(rng0, 1, 6);
+    const startPos = ((stationPos - (d1 + d2)) % 40 + 40) % 40;
+
+    let base = structuredClone(twoPlayers(0));
+    base.ownership[stationPos] = 'B';
+    base.players[0]!.position = startPos;
+    base.currentPlayerIndex = 0;
+    base.phase = 'awaiting-roll';
+
+    const normal = withEvent(base, 'quietDay');
+    const outage = structuredClone(base);
+    outage.activeEvents = [{ id: 'powerOutage', remainingRounds: 1 }];
+
+    const rNormal = applyCommand(normal, { type: 'ROLL_DICE' }).events.find((e) => e.key === 'rentPaid');
+    const rOutage = applyCommand(outage, { type: 'ROLL_DICE' }).events.find((e) => e.key === 'rentPaid');
+    expect((rNormal!.params['amount'] as number)).toBeGreaterThan(0);
+    expect(rOutage!.params['amount']).toBe(0);
+  });
+
+  it('market crash halves SELL_PROPERTY proceeds', () => {
+    const board = getBoard('vegas');
+    let base = structuredClone(twoPlayers(0));
+    base.ownership[13] = 'A';
+    base.phase = 'turn-end';
+    base.currentPlayerIndex = 0;
+
+    const normalRefund = applyCommand(withEvent(base, 'quietDay'), { type: 'SELL_PROPERTY', pos: 13 })
+      .events.find((e) => e.key === 'soldProperty')!.params['amount'] as number;
+
+    const crashed = structuredClone(base);
+    crashed.activeEvents = [{ id: 'marketCrash', remainingRounds: 2 }];
+    const crashRefund = applyCommand(crashed, { type: 'SELL_PROPERTY', pos: 13 })
+      .events.find((e) => e.key === 'soldProperty')!.params['amount'] as number;
+
+    expect(crashRefund).toBe(Math.floor(normalRefund / 2));
+    void board;
+  });
+
+  it('gold rush doubles factory landing revenue', () => {
+    const board = getBoard('vegas');
+    const streetPos = board.tiles.find((t) => t.type === 'street')!.pos;
+    const tmp0 = twoPlayers(0);
+    const rng0 = { seed: tmp0.rng.seed };
+    const d1 = nextInt(rng0, 1, 6);
+    const d2 = nextInt(rng0, 1, 6);
+    const startPos = ((streetPos - (d1 + d2)) % 40 + 40) % 40;
+
+    let base = structuredClone(twoPlayers(0));
+    base.ownership[streetPos] = 'A'; // own factory → collect on landing
+    base.buildings[streetPos] = { houses: 0, hotel: false, factory: true };
+    base.players[0]!.position = startPos;
+    base.currentPlayerIndex = 0;
+    base.phase = 'awaiting-roll';
+
+    const normal = applyCommand(withEvent(base, 'quietDay'), { type: 'ROLL_DICE' })
+      .events.find((e) => e.key === 'factoryRevenue')!.params['amount'] as number;
+
+    const rush = structuredClone(base);
+    rush.activeEvents = [{ id: 'goldRush', remainingRounds: 2 }];
+    const rushed = applyCommand(rush, { type: 'ROLL_DICE' })
+      .events.find((e) => e.key === 'factoryRevenue')!.params['amount'] as number;
+
+    expect(rushed).toBe(normal * 2);
+  });
+});
+
+describe('chaos events: stability', () => {
+  it('same seed + chaos produces identical event sequences', () => {
+    const run = (seed: number) => {
+      let s = chaosGame(seed);
+      const seen: string[] = [];
+      let guard = 0;
+      let advanced = 0;
+      while (advanced < 12 && guard++ < 3000) {
+        if (s.phase === 'finished') break;
+        if (s.phase === 'awaiting-buy') {
+          ({ state: s } = applyCommand(s, { type: 'DECLINE_PROPERTY' }));
+        } else if (s.phase === 'awaiting-casino') {
+          ({ state: s } = applyCommand(s, { type: 'ROLL_CASINO' }));
+        } else if (s.phase === 'turn-end') {
+          const res = applyCommand(s, { type: 'END_TURN' });
+          s = res.state;
+          for (const e of res.events) if (e.key.startsWith('specialEvent_')) seen.push(e.key);
+          advanced++;
+        } else {
+          ({ state: s } = applyCommand(s, { type: 'ROLL_DICE' }));
+        }
+      }
+      return seen;
+    };
+    expect(run(5)).toEqual(run(5));
+  });
+
+  it('a chaos game stays playable across many rounds (no crash, round advances)', () => {
+    const s = advanceTurns(chaosGame(2), 30);
+    expect(s.round).toBeGreaterThan(3);
+  });
+});

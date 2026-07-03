@@ -38,13 +38,37 @@ const EVENT_IDS: EventId[] = [
 ];
 
 /**
- * Draw an event id from the pool. `excludeQuiet` (chaos frequency) removes
- * quietDay so something always happens. NOTE: under the default pool this
- * consumes exactly one RNG int, preserving the historical RNG order that
- * seed-based tests depend on.
+ * Dramatic events, drawn ONLY under the "chaos" frequency: instant one-shots
+ * (applied at the round boundary, never stored) and multi-round modifiers.
+ * Kept out of "normal" so default games keep their historical balance and
+ * seed-determinism (verified by sim + tests).
  */
-function drawEventId(rng: GameState["rng"], excludeQuiet: boolean): EventId {
-  const pool = excludeQuiet ? EVENT_IDS.filter((id) => id !== 'quietDay') : EVENT_IDS;
+const INSTANT_EVENTS: EventId[] = ['earthquake', 'taxAudit', 'lottery', 'windfall'];
+const CHAOS_MODIFIERS: EventId[] = ['streetParty', 'powerOutage', 'marketCrash', 'goldRush'];
+
+/** Rounds a modifier stays active (default 1). */
+const EVENT_DURATIONS: Partial<Record<EventId, number>> = {
+  streetParty: 2,
+  powerOutage: 1,
+  marketCrash: 2,
+  goldRush: 2,
+};
+
+/** Flat repair fee per earthquake victim. */
+const EARTHQUAKE_FEE = 50;
+/** Everyone's windfall payout. */
+const WINDFALL_AMOUNT = 100;
+
+/**
+ * Draw an event id for the given frequency. Under "normal"/"rare" the pool is
+ * the classic six — one nextInt, preserving the historical RNG order that
+ * seed-based tests depend on. "chaos" draws from everything except quietDay.
+ */
+function drawEventId(rng: GameState["rng"], freq: GameState["eventFrequency"]): EventId {
+  const pool =
+    freq === "chaos"
+      ? [...EVENT_IDS.filter((id) => id !== 'quietDay'), ...INSTANT_EVENTS, ...CHAOS_MODIFIERS]
+      : EVENT_IDS;
   const idx = nextInt(rng, 0, pool.length - 1);
   return pool[idx]!;
 }
@@ -57,6 +81,97 @@ export function hasEvent(state: GameState, id: EventId): boolean {
 /** The active event with this id (for events carrying extra data), if any. */
 export function getEvent(state: GameState, id: EventId): ActiveEvent | undefined {
   return state.activeEvents.find((e) => e.id === id);
+}
+
+/** Random street group for a street party (consumes one RNG int). */
+function pickPartyGroup(rng: GameState["rng"], board: BoardDefinition): string {
+  const groups = [...new Set(
+    board.tiles.filter((t): t is StreetTile => t.type === "street").map((t) => t.group)
+  )];
+  return groups[nextInt(rng, 0, groups.length - 1)]!;
+}
+
+/**
+ * Apply a one-shot dramatic event at the round boundary. Effects use the
+ * same charge() path as everything else, so bankruptcies resolve normally;
+ * the caller re-checks the win condition afterwards.
+ */
+function applyInstantEvent(
+  state: GameState,
+  board: BoardDefinition,
+  id: EventId,
+  events: GameEvent[],
+): void {
+  const alive = state.players.filter((p) => p.alive);
+  switch (id) {
+    case 'earthquake': {
+      // Every player loses one house from their most-built street (hotels,
+      // factories and houseless players are spared) plus a flat repair fee.
+      for (const p of alive) {
+        let worstPos = -1;
+        let worstHouses = 0;
+        for (const [posStr, owner] of Object.entries(state.ownership)) {
+          if (owner !== p.id) continue;
+          const pos = Number(posStr);
+          const b = state.buildings[pos];
+          if (b && !b.hotel && !b.factory && b.houses > worstHouses) {
+            worstHouses = b.houses;
+            worstPos = pos;
+          }
+        }
+        if (worstPos < 0) continue;
+        state.buildings[worstPos]!.houses -= 1;
+        const tile = tileAt(board, worstPos);
+        events.push({
+          key: "earthquakeDamage",
+          params: { player: p.name, tile: tile.name, fee: EARTHQUAKE_FEE },
+          playerId: p.id,
+        });
+        charge(state, board, p, EARTHQUAKE_FEE, null, events);
+      }
+      break;
+    }
+    case 'taxAudit': {
+      // Richest-by-cash alive player (tie → lowest index) pays 10% into the pool.
+      let richest: PlayerState | null = null;
+      for (const p of alive) {
+        if (!richest || p.money > richest.money) richest = p;
+      }
+      if (!richest) break;
+      const amount = Math.floor(richest.money * 0.1);
+      if (amount <= 0) break;
+      richest.money -= amount; // always payable (10% of own cash)
+      state.casinoPool += amount;
+      events.push({
+        key: "taxAuditPaid",
+        params: { player: richest.name, amount },
+        playerId: richest.id,
+      });
+      break;
+    }
+    case 'lottery': {
+      // A random alive player wins a quarter of the casino pool.
+      if (alive.length === 0) break;
+      const winner = alive[nextInt(state.rng, 0, alive.length - 1)]!;
+      const win = Math.floor(state.casinoPool * 0.25);
+      if (win <= 0) break;
+      state.casinoPool -= win;
+      winner.money += win;
+      events.push({
+        key: "lotteryWin",
+        params: { player: winner.name, amount: win },
+        playerId: winner.id,
+      });
+      break;
+    }
+    case 'windfall': {
+      for (const p of alive) p.money += WINDFALL_AMOUNT;
+      events.push({ key: "windfallCollect", params: { amount: WINDFALL_AMOUNT } });
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 // ---- Action card definitions -----------------------------------------------
@@ -157,10 +272,17 @@ export function createGame(opts: NewGameOptions): GameState {
   // Draw the first round's event before building state so it consumes the RNG
   // in order (preserves historical seed-based dice streams under the default
   // frequency). "off"/"rare" start without an event and consume no RNG.
-  const activeEvents: ActiveEvent[] =
-    eventFrequency === "normal" || eventFrequency === "chaos"
-      ? [{ id: drawEventId(rng, eventFrequency === "chaos"), remainingRounds: 1 }]
-      : [];
+  let activeEvents: ActiveEvent[] = [];
+  if (eventFrequency === "normal" || eventFrequency === "chaos") {
+    const firstId = drawEventId(rng, eventFrequency);
+    // Instant events make no sense before anyone has assets; re-drawing would
+    // shift RNG, so map an instant first-draw to quiet start instead.
+    if (!INSTANT_EVENTS.includes(firstId)) {
+      const ev: ActiveEvent = { id: firstId, remainingRounds: EVENT_DURATIONS[firstId] ?? 1 };
+      if (firstId === 'streetParty') ev.group = pickPartyGroup(rng, board);
+      activeEvents = [ev];
+    }
+  }
   // House rule: mark N random streets no-build. Drawn AFTER the first-event
   // draw so the default (count 0) leaves the historical RNG order untouched.
   const unbuildableCount = opts.settings?.unbuildableCount ?? 0;
@@ -467,21 +589,25 @@ function streetRent(state: GameState, board: BoardDefinition, pos: number): numb
   const b = state.buildings[pos];
   const ownerId = state.ownership[pos]!;
   if (b?.factory) return 0; // factory pays its owner, never charges visitors
+  let rent: number;
   if (b?.hotel) {
-    const r = tile.rent[5];
-    return hasEvent(state, 'recession') ? Math.floor(r / 2) : r;
+    rent = tile.rent[5];
+  } else if (b && b.houses > 0) {
+    rent = tile.rent[b.houses]!;
+  } else {
+    // no buildings: base rent, doubled if owner holds the whole colour group
+    const base = tile.rent[0];
+    rent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
   }
-  if (b && b.houses > 0) {
-    const r = tile.rent[b.houses]!;
-    return hasEvent(state, 'recession') ? Math.floor(r / 2) : r;
-  }
-  // no buildings: base rent, doubled if owner holds the whole colour group
-  const base = tile.rent[0];
-  const fullGroupRent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
-  return hasEvent(state, 'recession') ? Math.floor(fullGroupRent / 2) : fullGroupRent;
+  if (hasEvent(state, 'recession')) rent = Math.floor(rent / 2);
+  // Street party doubles rent in its group for the event's duration.
+  const party = getEvent(state, 'streetParty');
+  if (party?.group && party.group === tile.group) rent *= 2;
+  return rent;
 }
 
 function stationRent(state: GameState, board: BoardDefinition, pos: number): number {
+  if (hasEvent(state, 'powerOutage')) return 0; // stations charge nothing this round
   const ownerId = state.ownership[pos]!;
   const count = groupOwnedCount(state, board, ownerId, "station");
   return board.rules.station.rent[Math.max(0, count - 1)] ?? 0;
@@ -759,7 +885,7 @@ function resolveLanding(
     if (ownerId === player.id) {
       // own a factory street -> collect revenue
       if (tile.type === "street" && state.buildings[pos]?.factory) {
-        const rev = (tile as StreetTile).factoryRevenue;
+        const rev = (tile as StreetTile).factoryRevenue * (hasEvent(state, 'goldRush') ? 2 : 1);
         player.money += rev;
         events.push({ key: "factoryRevenue", params: { player: player.name, tile: tile.name, amount: rev }, playerId: player.id });
       }
@@ -953,15 +1079,34 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
       : freq === "rare" ? nextInt(state.rng, 1, 3) === 1
       : true; // normal + chaos draw every round
     if (draws) {
-      const id = drawEventId(state.rng, freq === "chaos");
-      // Announce the draw; extend/refresh rather than duplicate if already active.
-      const existing = state.activeEvents.find((e) => e.id === id);
-      if (existing) existing.remainingRounds = Math.max(existing.remainingRounds, 1);
-      else state.activeEvents.push({ id, remainingRounds: 1 });
-      events.push({
-        key: `specialEvent_${id}` as string,
-        params: { round: state.round },
-      });
+      const id = drawEventId(state.rng, freq);
+      const board = getBoard(state.boardId);
+      if (INSTANT_EVENTS.includes(id)) {
+        // One-shot: announce, apply immediately, never stored.
+        events.push({ key: `specialEvent_${id}` as string, params: { round: state.round } });
+        applyInstantEvent(state, board, id, events);
+        // An instant fee can bankrupt players — including the incoming
+        // current player. Re-seat and re-check the win condition.
+        if (checkWin(state, events)) return;
+        if (!currentPlayer(state).alive) {
+          state.currentPlayerIndex = nextAliveIndex(state);
+        }
+      } else {
+        const duration = EVENT_DURATIONS[id] ?? 1;
+        const group = id === 'streetParty' ? pickPartyGroup(state.rng, board) : undefined;
+        // Extend/refresh rather than duplicate if the same event is already running.
+        const existing = state.activeEvents.find((e) => e.id === id);
+        if (existing) {
+          existing.remainingRounds = Math.max(existing.remainingRounds, duration);
+          if (group) existing.group = group;
+        } else {
+          state.activeEvents.push(group ? { id, remainingRounds: duration, group } : { id, remainingRounds: duration });
+        }
+        events.push({
+          key: `specialEvent_${id}` as string,
+          params: group ? { round: state.round, group } : { round: state.round },
+        });
+      }
     }
   }
 
@@ -1208,7 +1353,8 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
       if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before selling property");
-      const refund = Math.floor(tilePrice(board, tile) / 2);
+      let refund = Math.floor(tilePrice(board, tile) / 2);
+      if (hasEvent(state, 'marketCrash')) refund = Math.floor(refund / 2); // crash halves sale value
       p.money += refund;
       delete state.ownership[pos];
       delete state.buildings[pos];

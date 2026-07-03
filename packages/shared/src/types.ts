@@ -28,12 +28,23 @@ export type GamePhase =
   | "finished";
 
 export type EventId =
+  // Classic round modifiers (1 round each) — the "normal" frequency pool.
   | 'circus'
   | 'boom'
   | 'recession'
   | 'jackpot'
   | 'buildingSale'
-  | 'quietDay';
+  | 'quietDay'
+  // Dramatic events (chaos frequency only): instant one-shots…
+  | 'earthquake'
+  | 'taxAudit'
+  | 'lottery'
+  | 'windfall'
+  // …and multi-round modifiers.
+  | 'streetParty'
+  | 'powerOutage'
+  | 'marketCrash'
+  | 'goldRush';
 
 /** How often round events are drawn (game setting). */
 export type EventFrequency = "off" | "rare" | "normal" | "chaos";

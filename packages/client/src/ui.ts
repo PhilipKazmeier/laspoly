@@ -729,6 +729,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino-Jackpot-Nacht",
     "event.buildingSale": "🏗️ Bau-Rabatt",
     "event.quietDay": "😴 Ruhiger Tag",
+    "event.streetParty": "🎉 Straßenfest",
+    "event.powerOutage": "🔌 Stromausfall",
+    "event.marketCrash": "📉 Marktcrash",
+    "event.goldRush": "⛏️ Goldrausch",
     // Player list
     "player.jail": " (Knast)",
     // My properties panel
@@ -933,6 +937,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino Jackpot Night",
     "event.buildingSale": "🏗️ Building Sale",
     "event.quietDay": "😴 Quiet Day",
+    "event.streetParty": "🎉 Street Party",
+    "event.powerOutage": "🔌 Power Outage",
+    "event.marketCrash": "📉 Market Crash",
+    "event.goldRush": "⛏️ Gold Rush",
     // Player list
     "player.jail": " (Jail)",
     // My properties panel
