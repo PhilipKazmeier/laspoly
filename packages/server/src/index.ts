@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { applyCommand, botDecide, currentPlayer, formatEvent } from "@laspoly/shared";
 import type { GameEvent, Locale } from "@laspoly/shared";
-import { RoomManager, GameRoom, pickAutoAction } from "./room.js";
+import { RoomManager, GameRoom, pickAutoAction, validateTokenImage, MAX_TOKEN_IMAGE_CHARS } from "./room.js";
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
 const PORT = Number(process.env["PORT"] ?? 8080);
@@ -53,6 +53,71 @@ function log(msg: string): void {
 // ---- HTTP server -----------------------------------------------------------
 
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // Custom token-image upload. HTTP POST instead of a WS message: the 8KB
+  // WebSocket payload cap is server-wide and raising it would multiply the
+  // JSON-parse DoS surface for EVERY message. Auth = the session resume token
+  // (random 16 bytes) — strictly stronger than any new scheme.
+  if (req.url === "/api/token-image") {
+    // Dev CORS: the vite client origin (4173/5173) differs from 8080.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+    if (req.method !== "POST") { res.writeHead(405); res.end(); return; }
+    // Read the body with a hard byte cap (data URL chars + JSON overhead).
+    const MAX_BODY = MAX_TOKEN_IMAGE_CHARS + 4096;
+    let body = "";
+    let overflow = false;
+    req.on("data", (chunk: Buffer) => {
+      if (overflow) return;
+      body += chunk.toString("utf8");
+      if (body.length > MAX_BODY) {
+        overflow = true;
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "payload too large" }));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (overflow) return;
+      try {
+        const parsed: unknown = JSON.parse(body);
+        const { roomId, playerId, token, image } = parsed as Record<string, unknown>;
+        if (typeof roomId !== "string" || typeof playerId !== "string" || typeof token !== "string") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "roomId, playerId, token required" }));
+          return;
+        }
+        const room = rooms.get(roomId);
+        if (!room || room.getToken(playerId) !== token) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid credentials" }));
+          return;
+        }
+        const imgErr = validateTokenImage(image);
+        if (imgErr) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: imgErr }));
+          return;
+        }
+        const setErr = room.setCustomImage(playerId, image as string);
+        if (setErr) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: setErr }));
+          return;
+        }
+        // Memory note: worst case 50 rooms × 6 players × 200KB ≈ 60MB — acceptable.
+        broadcastToRoom(room, { t: "room", room: room.toView() });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid JSON" }));
+      }
+    });
+    return;
+  }
+
   // Health endpoint for container/orchestrator health checks
   if (req.url === "/health" || req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -687,6 +752,10 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       log(`room:${room.id} ${nickname} reconnected`);
       send(ws, { t: "resumed", roomId: room.id, playerId: msg.playerId });
       if (room.started && room.state) {
+        // Room view FIRST so cosmetics (custom token images) are cached before
+        // the state snap renders tokens; the client suppresses the room PANEL
+        // while resuming but always caches the cosmetics.
+        send(ws, { t: "room", room: room.toView() });
         send(ws, { t: "state", state: room.state, events: [] });
       } else {
         send(ws, { t: "room", room: room.toView() });

@@ -309,6 +309,15 @@ net.onMessage((msg) => {
       ui.onJoined(msg.roomId, msg.playerId);
       break;
     case "room":
+      // ALWAYS cache cosmetics (custom standee images) — even while resuming,
+      // where the room panel itself stays hidden.
+      board3d.setCustomTokens(
+        new Map(
+          msg.room.players
+            .filter((p) => p.customImage)
+            .map((p) => [p.id, p.customImage!] as [string, string]),
+        ),
+      );
       // Server sends the current room view whenever something changes (player
       // joins, figure pick, etc.). Show the room panel with the start button.
       // Also handles post-rematch reset (game-over banner → room waiting panel).

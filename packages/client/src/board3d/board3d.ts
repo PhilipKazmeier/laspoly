@@ -22,7 +22,7 @@ import {
   SceneLoader,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
-import { getBoard, listBoards, JAIL_POS } from "@laspoly/shared";
+import { getBoard, listBoards, JAIL_POS, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 import { getTheme } from "../theme.js";
 import { getQuality } from "../quality.js";
@@ -46,6 +46,7 @@ import { DiceRig } from "./dice.js";
 import { BuildingRenderer } from "./buildings.js";
 import { Effects } from "./effects.js";
 import { animateCardDrawAsync } from "./cards.js";
+import { buildProceduralToken, makeStandee } from "../tokenFactory.js";
 
 export class Board3D {
   private engine: Engine;
@@ -56,6 +57,10 @@ export class Board3D {
   // Car OBJ models (player tokens): one merged template mesh per car index 1-5
   private carModels: Map<number, Mesh> = new Map();
   private carsLoaded = false;
+  // Procedural token templates (figureIndex 6-8), built lazily.
+  private procTemplates: Map<number, Mesh> = new Map();
+  // Uploaded standee images per player (cached from RoomView broadcasts).
+  private customImages: Map<string, string> = new Map();
   private lastState: GameState | null = null;
   private lastMyId: string | null = null;
   private tokenLabels: Map<string, AbstractMesh> = new Map();
@@ -300,6 +305,49 @@ export class Board3D {
     return clone;
   }
 
+  /** Clone a procedural token template (figureIndex 6-8), tinted like the cars. */
+  private cloneProceduralToken(figureIndex: number, color: Color3, playerId: string): AbstractMesh | undefined {
+    let tpl = this.procTemplates.get(figureIndex);
+    if (!tpl) {
+      const built = buildProceduralToken(this.scene, figureIndex);
+      if (!built) return undefined;
+      built.setEnabled(false);
+      built.isPickable = false;
+      this.procTemplates.set(figureIndex, built);
+      tpl = built;
+    }
+    const clone = tpl.clone(`token_${playerId}`);
+    if (!clone) return undefined;
+    clone.setEnabled(true);
+    clone.isPickable = false;
+    const bright = brighten(color);
+    const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
+    mat.diffuseColor = bright;
+    mat.specularColor = new Color3(0.4, 0.4, 0.4);
+    mat.emissiveColor = bright.scale(0.7);
+    clone.material = mat;
+    this.effects.addShadowCaster(clone);
+    return clone;
+  }
+
+  /** Build the right token mesh for a player: standee, procedural, car, or fallback. */
+  private makeTokenMesh(playerId: string, figureIndex: number, color: Color3): AbstractMesh {
+    if (figureIndex === CUSTOM_FIGURE_INDEX) {
+      const img = this.customImages.get(playerId);
+      // Standee planes are neither glow-registered nor shadow casters (alpha
+      // planes cast ugly shadows).
+      if (img) return makeStandee(this.scene, img, brighten(color), `token_${playerId}`);
+    }
+    if (figureIndex >= 6 && figureIndex !== CUSTOM_FIGURE_INDEX) {
+      const proc = this.cloneProceduralToken(figureIndex, color, playerId);
+      if (proc) return proc;
+    }
+    if (this.carsLoaded) {
+      return this.cloneCarToken(figureIndex, color, playerId) ?? this.makeFallbackToken(playerId, color);
+    }
+    return this.makeFallbackToken(playerId, color);
+  }
+
   /** Fallback token: a coloured cylinder (clearly visible on tile). */
   private makeFallbackToken(playerId: string, color: Color3): AbstractMesh {
     const mesh = MeshBuilder.CreateCylinder(
@@ -419,10 +467,7 @@ export class Board3D {
       let mesh = this.tokenMeshes.get(player.id);
       if (!mesh) {
         const color = playerColor3(player.color);
-        const carIdx = player.figureIndex ?? 0;
-        mesh = this.carsLoaded
-          ? (this.cloneCarToken(carIdx, color, player.id) ?? this.makeFallbackToken(player.id, color))
-          : this.makeFallbackToken(player.id, color);
+        mesh = this.makeTokenMesh(player.id, player.figureIndex ?? 0, color);
         this.tokenMeshes.set(player.id, mesh);
         if (!this.tokenLabels.has(player.id)) {
           this.addTokenLabel(player.id, player.name, player.color);
@@ -458,10 +503,7 @@ export class Board3D {
     const player = state.players.find((p) => p.id === playerId);
     if (!player) return;
     const color = playerColor3(player.color);
-    const carIdx = player.figureIndex ?? 0;
-    const mesh = this.carsLoaded
-      ? (this.cloneCarToken(carIdx, color, playerId) ?? this.makeFallbackToken(playerId, color))
-      : this.makeFallbackToken(playerId, color);
+    const mesh = this.makeTokenMesh(playerId, player.figureIndex ?? 0, color);
     this.tokenMeshes.set(playerId, mesh);
     if (!this.tokenLabels.has(playerId)) {
       this.addTokenLabel(playerId, player.name, player.color);
@@ -669,6 +711,21 @@ export class Board3D {
       plane.visibility = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
       if (t >= 1) finish();
     });
+  }
+
+  /**
+   * Cache uploaded standee images per player (from RoomView broadcasts, incl.
+   * the resume path). If a player's image changed while their token exists,
+   * the token is dropped so the next rebuild shows the new picture.
+   */
+  setCustomTokens(images: Map<string, string>): void {
+    for (const [pid, url] of images) {
+      if (this.customImages.get(pid) !== url) {
+        this.customImages.set(pid, url);
+        const existing = this.tokenMeshes.get(pid);
+        if (existing) { existing.dispose(); this.tokenMeshes.delete(pid); }
+      }
+    }
   }
 
   /** Register a callback invoked when the player clicks the dice cup to roll. */

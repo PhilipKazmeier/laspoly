@@ -282,3 +282,47 @@ describe("private rooms", () => {
     expect(room.resumeHuman(pid, token!)).toBe("Alice"); // returns the nickname on success
   });
 });
+
+// ---------------------------------------------------------------------------
+// Custom token images
+// ---------------------------------------------------------------------------
+
+import { validateTokenImage, MAX_TOKEN_IMAGE_CHARS } from "./room.js";
+import { CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
+
+describe("custom token images", () => {
+  // 1×1 red pixel PNG / JPEG headers for magic-byte checks.
+  const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const validPng = `data:image/png;base64,${PNG_B64}`;
+
+  it("accepts a valid PNG data URL", () => {
+    expect(validateTokenImage(validPng)).toBeNull();
+  });
+
+  it("rejects SVG, mislabelled payloads, oversized and garbage input", () => {
+    expect(validateTokenImage(`data:image/svg+xml;base64,${PNG_B64}`)).toMatch(/PNG or JPEG/);
+    // JPEG label with PNG payload → magic-byte mismatch.
+    expect(validateTokenImage(`data:image/jpeg;base64,${PNG_B64}`)).toMatch(/not a JPEG/);
+    expect(validateTokenImage("data:image/png;base64," + "A".repeat(MAX_TOKEN_IMAGE_CHARS + 10))).toMatch(/too large/);
+    expect(validateTokenImage(42)).toMatch(/string/);
+    expect(validateTokenImage("hello")).toMatch(/PNG or JPEG/);
+  });
+
+  it("chooseFigure with CUSTOM_FIGURE_INDEX requires an uploaded image; standees may repeat", () => {
+    const room = new GameRoom("Std", "vegas", 0);
+    const a = room.addHuman("Alice");
+    const b = room.addHuman("Bob");
+    const pa = room.players.find((p) => p.id === a)!;
+    const pb = room.players.find((p) => p.id === b)!;
+
+    expect(room.chooseFigure(a, pa.color, CUSTOM_FIGURE_INDEX, 0)).toMatch(/Upload/);
+    expect(room.setCustomImage(a, validPng)).toBeNull();
+    expect(room.chooseFigure(a, pa.color, CUSTOM_FIGURE_INDEX, 0)).toBeNull();
+    // Second player with their own image can ALSO pick the standee.
+    expect(room.setCustomImage(b, validPng)).toBeNull();
+    expect(room.chooseFigure(b, pb.color, CUSTOM_FIGURE_INDEX, 0)).toBeNull();
+    // toView carries the image; toSummary never does.
+    expect(room.toView().players.find((p) => p.id === a)?.customImage).toBe(validPng);
+    expect(JSON.stringify(room.toSummary())).not.toContain("base64");
+  });
+});

@@ -14,7 +14,7 @@ import {
   canTravelFrom,
   netWorth,
 } from "@laspoly/shared";
-import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
 import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile, GameSettings } from "@laspoly/shared";
 import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
@@ -23,6 +23,7 @@ import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
 import { getTheme, setTheme, type Theme } from "./theme.js";
 import { getQuality, setQuality, type Quality } from "./quality.js";
+import { API_BASE, loadSession } from "./net.js";
 
 const css = `
   /* ── Neon-Vegas glass design system ─────────────────────────────── */
@@ -791,6 +792,12 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     // Figure picker tooltip
     "figurePicker.colorTaken": "hat diese Farbe",
     "room.diceSkin": "Würfel-Design",
+    "room.customToken": "Eigenes Bild als Figur",
+    "room.uploadHint": "PNG/JPEG, wird auf 256×256 zugeschnitten",
+    "room.uploadTooBig": "Bild konnte nicht verarbeitet werden (zu groß?)",
+    "figure.topHat": "Zylinder",
+    "figure.pawn": "Spielstein",
+    "figure.rocket": "Rakete",
     "dice.classic": "Klassisch",
     "dice.neon": "Neon",
     "dice.gold": "Gold",
@@ -1039,6 +1046,12 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     // Figure picker tooltip
     "figurePicker.colorTaken": "has this colour",
     "room.diceSkin": "Dice skin",
+    "room.customToken": "Your picture as token",
+    "room.uploadHint": "PNG/JPEG, cover-cropped to 256×256",
+    "room.uploadTooBig": "Could not process the image (too large?)",
+    "figure.topHat": "Top Hat",
+    "figure.pawn": "Pawn",
+    "figure.rocket": "Rocket",
     "dice.classic": "Classic",
     "dice.neon": "Neon",
     "dice.gold": "Gold",
@@ -2586,7 +2599,7 @@ export class UI {
       red: "#ef4444", blue: "#3b82f6", green: "#22c55e",
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
-    const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police"];
+    const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police", "🎩 " + t("figure.topHat"), "♟ " + t("figure.pawn"), "🚀 " + t("figure.rocket")];
 
     // Colour is assigned by the server (bug 2): read it from this player's seat.
     const me = room.players.find((p) => p.id === this.net.playerId);
@@ -2688,6 +2701,84 @@ export class UI {
     });
     restyleDice();
     container.appendChild(diceRow);
+
+    // ---- Custom-image standee upload ---------------------------------------
+    const customTitle = document.createElement("div");
+    customTitle.className = "fp-title";
+    customTitle.style.marginTop = "10px";
+    customTitle.textContent = t("room.customToken");
+    container.appendChild(customTitle);
+
+    const customRow = document.createElement("div");
+    customRow.style.cssText = "display:flex;gap:8px;align-items:center;";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/png,image/jpeg";
+    fileInput.id = "customTokenFile";
+    fileInput.style.cssText = "font-size:11px;max-width:180px;";
+    customRow.appendChild(fileInput);
+    const hint = document.createElement("span");
+    hint.style.cssText = "font-size:10px;color:#888;";
+    hint.textContent = t("room.uploadHint");
+    customRow.appendChild(hint);
+    container.appendChild(customRow);
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      void this.uploadCustomToken(file);
+    });
+  }
+
+  /**
+   * Client-side pipeline for the custom standee: cover-crop to 256×256 JPEG,
+   * hard size cap, POST to the server (session-token auth), then pick the
+   * custom figure. The server re-validates mime + magic bytes.
+   */
+  private async uploadCustomToken(file: File): Promise<void> {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const S = 256;
+      const canvas = document.createElement("canvas");
+      canvas.width = S;
+      canvas.height = S;
+      const ctx = canvas.getContext("2d")!;
+      // Cover-crop: scale the shorter side to S, centre the overflow.
+      const scale = Math.max(S / bitmap.width, S / bitmap.height);
+      const w = bitmap.width * scale;
+      const h = bitmap.height * scale;
+      ctx.drawImage(bitmap, (S - w) / 2, (S - h) / 2, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      if (dataUrl.length > 200_000) {
+        this.showError(t("room.uploadTooBig"));
+        return;
+      }
+      const session = loadSession();
+      if (!session) {
+        this.showError("No session");
+        return;
+      }
+      const res = await fetch(`${API_BASE}/api/token-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: session.roomId,
+          playerId: session.playerId,
+          token: session.token,
+          image: dataUrl,
+        }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        this.showError(err?.error ?? `Upload failed (${res.status})`);
+        return;
+      }
+      // Success → select the standee token.
+      this.myFigureIndex = CUSTOM_FIGURE_INDEX;
+      this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: CUSTOM_FIGURE_INDEX, diceSkin: this.myDiceSkin });
+    } catch {
+      this.showError(t("room.uploadTooBig"));
+    }
   }
 
   /** Dispose the lobby 3D vehicle preview engine (when leaving the room / game starts). */

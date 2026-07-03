@@ -9,6 +9,9 @@ const WS_URL =
   (import.meta.env.VITE_WS_URL as string | undefined) ||
   `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
 
+/** HTTP base of the game server (follows WS_URL — needed for split-port dev). */
+export const API_BASE = WS_URL.replace(/^ws/, "http");
+
 type Handler = (msg: ServerMessage) => void;
 
 export interface SavedSession {

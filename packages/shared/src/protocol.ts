@@ -24,6 +24,8 @@ export interface RoomPlayer {
   ready: boolean;
   /** cosmetic dice skin 0-4 (no uniqueness — skins may repeat) */
   diceSkin?: number;
+  /** uploaded standee image (validated data URL), if any */
+  customImage?: string;
 }
 
 // Available palette — client + server both import these to stay in sync.
@@ -31,7 +33,9 @@ export const FIGURE_COLORS = ["red", "blue", "green", "yellow", "purple", "orang
 export type FigureColor = typeof FIGURE_COLORS[number];
 // figureIndex 0-5 → car1..car5, police
 export const DICE_SKIN_COUNT = 5;
-export const FIGURE_COUNT = 6;
+/** Sentinel figureIndex for the custom-image standee (requires an uploaded image). */
+export const CUSTOM_FIGURE_INDEX = 99;
+export const FIGURE_COUNT = 9;
 
 export interface RoomView {
   id: string;
