@@ -1114,3 +1114,86 @@ describe("TRAVEL – once per turn", () => {
     expect(legalCommands(s2)).toContain("TRAVEL");
   });
 });
+
+// ---------------------------------------------------------------------------
+// House rules: round limit + no-rent-in-jail
+// ---------------------------------------------------------------------------
+
+import { netWorth } from "./engine.js";
+
+function playersWithSettings(settings: Record<string, unknown>, seed = 0) {
+  return createGame({
+    boardId: "vegas",
+    seed,
+    players: [
+      { id: "A", name: "Alice", isBot: true, color: "red" },
+      { id: "B", name: "Bob", isBot: true, color: "blue" },
+    ],
+    settings,
+  });
+}
+
+describe("house rule: round limit", () => {
+  it("ends the game at the boundary past the limit with the net-worth leader as winner", () => {
+    let s = structuredClone(playersWithSettings({ roundLimit: 1, eventFrequency: "off" }));
+    // B is clearly richer: more cash + a property.
+    s.players[0]!.money = 300;
+    s.players[1]!.money = 2000;
+    s.ownership[13] = "B";
+    // Park at the LAST player's turn-end so END_TURN wraps the round.
+    s.phase = "turn-end";
+    s.currentPlayerIndex = 1;
+
+    const { state: s1, events } = applyCommand(s, { type: "END_TURN" });
+    expect(s1.phase).toBe("finished");
+    expect(s1.winnerId).toBe("B");
+    expect(events.some((e) => e.key === "roundLimitReached")).toBe(true);
+    expect(events.some((e) => e.key === "gameOver")).toBe(true);
+    // Winner's reported worth matches netWorth.
+    const ev = events.find((e) => e.key === "roundLimitReached")!;
+    expect(ev.params["worth"]).toBe(netWorth(s, "B"));
+    // Further commands are rejected.
+    expect(() => applyCommand(s1, { type: "ROLL_DICE" })).toThrow("finished");
+  });
+
+  it("roundLimit 0 (default) never ends the game by rounds", () => {
+    let s = structuredClone(playersWithSettings({ eventFrequency: "off" }));
+    s.phase = "turn-end";
+    s.currentPlayerIndex = 1;
+    const { state: s1 } = applyCommand(s, { type: "END_TURN" });
+    expect(s1.phase).not.toBe("finished");
+    expect(s1.round).toBe(2);
+  });
+});
+
+describe("house rule: no rent while owner is in jail", () => {
+  function landAOn13(noRent: boolean): { events: { key: string; params: Record<string, unknown> }[] } {
+    // Peek the first roll of seed 0 and place A to land exactly on 13 (street).
+    const tmp = playersWithSettings({}, 0);
+    const rng0 = { seed: tmp.rng.seed };
+    const d1 = nextInt(rng0, 1, 6);
+    const d2 = nextInt(rng0, 1, 6);
+    const startPos = ((13 - (d1 + d2)) % 40 + 40) % 40;
+
+    let s = structuredClone(playersWithSettings(noRent ? { noRentInJail: true } : {}, 0));
+    s.ownership[13] = "B";
+    s.players[1]!.inJail = true;
+    s.players[1]!.jailTurns = 2;
+    s.players[0]!.position = startPos;
+    s.currentPlayerIndex = 0;
+    s.phase = "awaiting-roll";
+    return applyCommand(s, { type: "ROLL_DICE" });
+  }
+
+  it("skips rent and announces it when the rule is on", () => {
+    const { events } = landAOn13(true);
+    expect(events.some((e) => e.key === "rentSkippedJail")).toBe(true);
+    expect(events.some((e) => e.key === "rentPaid")).toBe(false);
+  });
+
+  it("charges rent normally when the rule is off", () => {
+    const { events } = landAOn13(false);
+    expect(events.some((e) => e.key === "rentPaid")).toBe(true);
+    expect(events.some((e) => e.key === "rentSkippedJail")).toBe(false);
+  });
+});

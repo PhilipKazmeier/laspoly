@@ -72,6 +72,8 @@ const de: Catalogue = {
   taxAuditPaid: '🧾 {player} zahlt {amount} LPD Steuern in den Casino-Pool.',
   lotteryWin: '🎟️ {player} gewinnt {amount} LPD in der Lotterie!',
   windfallCollect: '💸 Alle Spieler erhalten {amount} LPD.',
+  roundLimitReached: '🏁 Rundenlimit ({round}) erreicht! {player} gewinnt mit {worth} LPD Gesamtvermögen.',
+  rentSkippedJail: '🔒 Keine Miete für {tile} — {owner} sitzt im Gefängnis (Hausregel).',
 };
 
 const en: Catalogue = {
@@ -142,6 +144,8 @@ const en: Catalogue = {
   taxAuditPaid: '🧾 {player} pays {amount} LPD in taxes into the casino pool.',
   lotteryWin: '🎟️ {player} wins {amount} LPD in the lottery!',
   windfallCollect: '💸 All players receive {amount} LPD.',
+  roundLimitReached: '🏁 Round limit ({round}) reached! {player} wins with a net worth of {worth} LPD.',
+  rentSkippedJail: '🔒 No rent for {tile} — {owner} is in jail (house rule).',
 };
 
 const catalogues: Record<Locale, Catalogue> = { de, en };

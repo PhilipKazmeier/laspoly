@@ -269,6 +269,8 @@ export function createGame(opts: NewGameOptions): GameState {
   }));
   const rng = makeRng(opts.seed);
   const eventFrequency = opts.settings?.eventFrequency ?? "normal";
+  const roundLimit = opts.settings?.roundLimit ?? 0;
+  const noRentInJail = opts.settings?.noRentInJail ?? false;
   // Draw the first round's event before building state so it consumes the RNG
   // in order (preserves historical seed-based dice streams under the default
   // frequency). "off"/"rare" start without an event and consume no RNG.
@@ -315,6 +317,8 @@ export function createGame(opts: NewGameOptions): GameState {
     activeEvents,
     eventFrequency,
     unbuildableFields,
+    roundLimit,
+    noRentInJail,
     builtThisTurn: false,
     traveledThisTurn: false,
     buildingCostMult,
@@ -895,6 +899,17 @@ function resolveLanding(
       events.push({ key: "rentMortgaged", params: { tile: tile.name }, playerId: player.id });
       return;
     }
+    // House rule: a jailed owner collects no rent (TRAVEL tickets are a
+    // service fee, not rent — they stay unaffected).
+    const jailedOwner = playerById(state, ownerId);
+    if (state.noRentInJail && jailedOwner?.inJail) {
+      events.push({
+        key: "rentSkippedJail",
+        params: { tile: tile.name, owner: jailedOwner.name },
+        playerId: player.id,
+      });
+      return;
+    }
     // pay rent
     const diceSum = player.lastRoll[0] + player.lastRoll[1];
     let rent = 0;
@@ -1066,6 +1081,24 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
   // Round boundary: index wrapped (new index <= old, meaning we cycled past the end)
   if (state.currentPlayerIndex <= oldIdx) {
     state.round += 1;
+
+    // House rule: round limit — the game ends here with a net-worth winner.
+    if (state.roundLimit > 0 && state.round > state.roundLimit) {
+      const ranked = state.players
+        .map((p, idx) => ({ p, idx, worth: p.alive ? netWorth(state, p.id) : -1 }))
+        .filter((x) => x.p.alive)
+        .sort((a, b) => (b.worth - a.worth) || (a.idx - b.idx));
+      const winner = ranked[0]!.p;
+      state.winnerId = winner.id;
+      state.phase = "finished";
+      events.push({
+        key: "roundLimitReached",
+        params: { round: state.roundLimit, player: winner.name, worth: ranked[0]!.worth },
+        playerId: winner.id,
+      });
+      events.push({ key: "gameOver", params: { player: winner.name }, playerId: winner.id });
+      return;
+    }
 
     // Expire running events first: decrement durations, drop the finished ones.
     state.activeEvents = state.activeEvents

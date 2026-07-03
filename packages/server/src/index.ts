@@ -759,6 +759,16 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
           throw new Error("unbuildableCount must be an integer");
         settings.unbuildableCount = Math.min(8, Math.max(0, s["unbuildableCount"] as number));
       }
+      if (s["roundLimit"] !== undefined) {
+        if (typeof s["roundLimit"] !== "number" || !Number.isInteger(s["roundLimit"] as number))
+          throw new Error("roundLimit must be an integer");
+        settings.roundLimit = Math.min(500, Math.max(0, s["roundLimit"] as number));
+      }
+      if (s["noRentInJail"] !== undefined) {
+        if (typeof s["noRentInJail"] !== "boolean")
+          throw new Error("noRentInJail must be a boolean");
+        settings.noRentInJail = s["noRentInJail"] as boolean;
+      }
       room.updateSettings(settings);
       broadcastToRoom(room, { t: "room", room: room.toView() });
       break;

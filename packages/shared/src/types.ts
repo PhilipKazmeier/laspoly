@@ -91,6 +91,10 @@ export interface GameState {
   eventFrequency: EventFrequency;
   /** street positions where building is forbidden (house rule; drawn at game start) */
   unbuildableFields: number[];
+  /** game ends after this round with a net-worth winner (0 = off; house rule) */
+  roundLimit: number;
+  /** jailed owners collect no street/station/attraction rent (house rule) */
+  noRentInJail: boolean;
   /** True once the current player has built one building this turn; reset on turn advance. */
   builtThisTurn: boolean;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
@@ -154,6 +158,10 @@ export interface GameSettings {
   eventFrequency?: EventFrequency; // default "normal"
   /** number of random streets marked no-build at game start (house rule; default 0) */
   unbuildableCount?: number;
+  /** end the game after N rounds with a net-worth winner (0/undefined = off) */
+  roundLimit?: number;
+  /** jailed owners collect no rent (default false) */
+  noRentInJail?: boolean;
 }
 
 export interface NewGameOptions {

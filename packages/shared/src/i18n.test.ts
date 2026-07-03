@@ -73,6 +73,8 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   taxAuditPaid: { player: "Alice", amount: 120 },
   lotteryWin: { player: "Alice", amount: 200 },
   windfallCollect: { amount: 100 },
+  roundLimitReached: { round: 40, player: "Alice", worth: 2450 },
+  rentSkippedJail: { tile: "Park Lane", owner: "Alice" },
 };
 
 describe("i18n", () => {
