@@ -24,6 +24,8 @@ import {
   SHAKE_AMP,
   DIE_SIZE,
   DICE_SAFETY_MS,
+  DICE_SKINS,
+  DiceSkin,
 } from "./constants.js";
 import type { Effects } from "./effects.js";
 
@@ -32,6 +34,9 @@ export class DiceRig {
   private dieMesh1: AbstractMesh | null = null;
   private dieMesh2: AbstractMesh | null = null;
   private diceAnimating = false;
+  /** Lazily built per-skin materials (atlas texture + surface params). */
+  private skinMaterials: Map<number, StandardMaterial> = new Map();
+  private currentSkin = -1;
 
   constructor(private scene: Scene, private palette: ThemePalette, private effects?: Effects) {
     this.initDice();
@@ -96,14 +101,14 @@ export class DiceRig {
   }
 
   /** Draw a standard Western die pip pattern for `value` (1–6) onto a W×H canvas. */
-  private drawPipFace(ctx: CanvasRenderingContext2D, value: number, W: number, H: number) {
-    ctx.fillStyle = "#f4f4ee";
+  private drawPipFace(ctx: CanvasRenderingContext2D, value: number, W: number, H: number, skin: DiceSkin) {
+    ctx.fillStyle = skin.face;
     ctx.fillRect(0, 0, W, H);
     // Thin border so adjacent faces read as separate.
-    ctx.strokeStyle = "#ccccc4";
+    ctx.strokeStyle = skin.border;
     ctx.lineWidth = W * 0.03;
     ctx.strokeRect(0, 0, W, H);
-    ctx.fillStyle = "#161616";
+    ctx.fillStyle = skin.pip;
     const r = W * 0.1;   // pip radius
     const m = W * 0.27;  // margin from edge to pip centre
     const c = W / 2;     // centre
@@ -131,28 +136,43 @@ export class DiceRig {
    * top=1, bottom=6, front=2, back=5, right=3, left=4. orientDie() then rotates the
    * die so the rolled value faces up. (Face index i shows value faceValues[i].)
    */
-  private createPipDie(name: string, size: number): Mesh {
+  /** Per-skin die material (6-column pip atlas + surface params), cached. */
+  private getSkinMaterial(skinIdx: number): StandardMaterial {
+    const cached = this.skinMaterials.get(skinIdx);
+    if (cached) return cached;
+    const skin = DICE_SKINS[skinIdx] ?? DICE_SKINS[0]!;
     const COLS = 6;
     const CELL = 128;
-    const ATLAS_W = COLS * CELL;
-    const ATLAS_H = CELL;
-
     // pip value per faceUV index [front,back,right,left,top,bottom]
     const faceValues = [2, 5, 3, 4, 1, 6];
-
-    // Draw the atlas (6 pip faces side by side)
-    const atlas = new DynamicTexture(`dieAtlas_${name}`, { width: ATLAS_W, height: ATLAS_H }, this.scene, false);
+    const atlas = new DynamicTexture(`dieAtlas_${skinIdx}`, { width: COLS * CELL, height: CELL }, this.scene, false);
     const actx = atlas.getContext() as CanvasRenderingContext2D;
     for (let col = 0; col < COLS; col++) {
-      const pipValue = faceValues[col]!;
-      // Sub-region: col * CELL .. (col+1) * CELL wide
       actx.save();
       actx.translate(col * CELL, 0);
-      this.drawPipFace(actx, pipValue, CELL, CELL);
+      this.drawPipFace(actx, faceValues[col]!, CELL, CELL, skin);
       actx.restore();
     }
     atlas.update();
+    const mat = new StandardMaterial(`dieMat_skin${skinIdx}`, this.scene);
+    mat.diffuseTexture = atlas;
+    mat.specularColor = new Color3(...skin.specular);
+    mat.emissiveColor = new Color3(...skin.emissive);
+    this.skinMaterials.set(skinIdx, mat);
+    return mat;
+  }
 
+  /** Swap both dice to the given skin's material (no-op when unchanged). */
+  private setSkin(skinIdx: number): void {
+    if (skinIdx === this.currentSkin) return;
+    this.currentSkin = skinIdx;
+    const mat = this.getSkinMaterial(skinIdx);
+    if (this.dieMesh1) this.dieMesh1.material = mat;
+    if (this.dieMesh2) this.dieMesh2.material = mat;
+  }
+
+  private createPipDie(name: string, size: number): Mesh {
+    const COLS = 6;
     // Map each face to its column in the atlas via faceUV
     // Vector4(u0, v0, u1, v1) in UV space; each column is 1/6 wide.
     const faceUV: Vector4[] = [];
@@ -161,14 +181,8 @@ export class DiceRig {
       const u1 = (i + 1) / COLS;
       faceUV.push(new Vector4(u0, 0, u1, 1));
     }
-
     const box = MeshBuilder.CreateBox(name, { size, faceUV, wrap: true }, this.scene);
-
-    const mat = new StandardMaterial(`dieMat_${name}`, this.scene);
-    mat.diffuseTexture = atlas;
-    mat.specularColor = new Color3(0.12, 0.12, 0.12);
-    mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
-    box.material = mat;
+    box.material = this.getSkinMaterial(0);
     return box;
   }
 
@@ -306,7 +320,9 @@ export class DiceRig {
    * token move only after the cup animation finished AND the dice are shown. A
    * safety timeout guarantees the queue never deadlocks if rAF is throttled.
    */
-  playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
+  playDiceAnimationAsync(d1: number, d2: number, skinIdx = 0): Promise<void> {
+    // Re-skin for the current roller before the sequence starts.
+    this.setSkin(skinIdx);
     // Force any stale animation to end so we always start a fresh, full sequence.
     this.diceAnimating = false;
     return new Promise<void>((resolve) => {

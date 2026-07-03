@@ -125,6 +125,7 @@ class StateQueue {
 
     // 2. Diff against the last-rendered state: detect the roll and the movers.
     let rolledD1 = 0, rolledD2 = 0;
+    let rollerId: string | null = null;
     const movers: Array<{ id: string; from: number; to: number }> = [];
 
     if (prev) {
@@ -139,6 +140,7 @@ class StateQueue {
         ) {
           rolledD1 = p.lastRoll[0];
           rolledD2 = p.lastRoll[1];
+          rollerId = p.id;
         }
         const prevPos = pp.inJail ? JAIL_POS : pp.position;
         const newPos = p.inJail ? JAIL_POS : p.position;
@@ -152,8 +154,9 @@ class StateQueue {
     //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
       audio.play("dice");
+      const rollerSkin = state.players.find((p) => p.id === rollerId)?.diceSkin ?? 0;
       await Promise.race([
-        this.board.playDiceAnimationAsync(rolledD1, rolledD2),
+        this.board.playDiceAnimationAsync(rolledD1, rolledD2, rollerSkin),
         timeout(4_000),
       ]);
     }

@@ -730,8 +730,8 @@ export class Board3D {
    * Plays the dice animation and resolves EXACTLY when the dice have settled
    * (see DiceRig.playDiceAnimationAsync for the safety-timeout contract).
    */
-  playDiceAnimationAsync(d1: number, d2: number): Promise<void> {
-    return this.dice.playDiceAnimationAsync(d1, d2);
+  playDiceAnimationAsync(d1: number, d2: number, skinIdx = 0): Promise<void> {
+    return this.dice.playDiceAnimationAsync(d1, d2, skinIdx);
   }
 
   /**

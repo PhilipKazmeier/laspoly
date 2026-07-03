@@ -717,7 +717,9 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (!room) throw new Error("Room not found");
       if (!isStr(msg.color)) throw new Error("color must be a string");
       if (!isFiniteInt(msg.figureIndex)) throw new Error("figureIndex must be an integer");
-      const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex);
+      if (msg.diceSkin !== undefined && !isFiniteInt(msg.diceSkin))
+        throw new Error("diceSkin must be an integer");
+      const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex, msg.diceSkin);
       if (err) throw new Error(err);
       broadcastToRoom(room, { t: "room", room: room.toView() });
       break;

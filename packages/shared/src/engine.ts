@@ -275,6 +275,7 @@ export function createGame(opts: NewGameOptions): GameState {
     lastRoll: [0, 0],
     color: p.color,
     figureIndex: p.figureIndex ?? 0,
+    diceSkin: p.diceSkin ?? 0,
   }));
   const rng = makeRng(opts.seed);
   const eventFrequency = opts.settings?.eventFrequency ?? "normal";

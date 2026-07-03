@@ -13,7 +13,7 @@ import {
   type Locale,
   type GameSettings,
 } from "@laspoly/shared";
-import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT, DICE_SKIN_COUNT } from "@laspoly/shared";
 import type { FormattedEvent, RoomView, RoomSummary } from "@laspoly/shared";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,7 @@ export interface LobbyPlayer {
   color: string;
   figureIndex: number;
   ready: boolean; // humans must mark ready before game can start
+  diceSkin: number;
 }
 
 let _nextRoomId = 1;
@@ -105,7 +106,7 @@ export class GameRoom {
     const figureIndex = this._nextFreeFigureIndex();
     // Default humans to ready so a host can start immediately (the ready-up UI,
     // when present, lets a player toggle this off). Avoids blocking the start flow.
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, ready: true };
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, diceSkin: 0, ready: true };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
@@ -139,7 +140,7 @@ export class GameRoom {
    * Allows a human player to choose their colour and figure.
    * Returns an error string if validation fails, or null on success.
    */
-  chooseFigure(playerId: string, color: string, figureIndex: number): string | null {
+  chooseFigure(playerId: string, color: string, figureIndex: number, diceSkin?: number): string | null {
     if (this.started) return "Game already started";
     if (!FIGURE_COLORS.includes(color as typeof FIGURE_COLORS[number])) {
       return `Invalid colour. Choose from: ${FIGURE_COLORS.join(", ")}`;
@@ -152,6 +153,12 @@ export class GameRoom {
     if (others.some((p) => p.figureIndex === figureIndex)) return "Figure already taken";
     const p = this.players.find((p) => p.id === playerId);
     if (!p) return "Player not found";
+    if (diceSkin !== undefined) {
+      if (!Number.isInteger(diceSkin) || diceSkin < 0 || diceSkin >= DICE_SKIN_COUNT) {
+        return `Invalid diceSkin. Must be 0\u2013${DICE_SKIN_COUNT - 1}`;
+      }
+      p.diceSkin = diceSkin; // cosmetic — deliberately NOT uniqueness-checked
+    }
     p.color = color;
     p.figureIndex = figureIndex;
     return null;
@@ -202,7 +209,7 @@ export class GameRoom {
       const id = `b${_nextPlayerId++}`;
       const color = this._nextFreeColor();
       const figureIndex = this._nextFreeFigureIndex();
-      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex, ready: true });
+      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex, diceSkin: 0, ready: true });
     }
 
     const allPlayers = this.players.map((p) => ({
@@ -211,6 +218,7 @@ export class GameRoom {
       isBot: p.isBot,
       color: p.color,
       figureIndex: p.figureIndex,
+      diceSkin: p.diceSkin,
     }));
 
     this.state = createGame({ boardId: this.boardId, seed, players: allPlayers, settings: this.settings });
@@ -369,6 +377,7 @@ export class GameRoom {
         isBot: p.isBot,
         color: p.color,
         figureIndex: p.figureIndex,
+        diceSkin: p.diceSkin,
         ready: p.isBot ? true : p.ready,
       })),
       started: this.started,

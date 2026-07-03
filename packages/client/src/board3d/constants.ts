@@ -156,6 +156,24 @@ export const SHAKE_AMP = 0.28;        // dice cup shake amplitude
 export const DIE_SIZE = 0.48;         // pip die edge length
 export const DICE_SAFETY_MS = 4000;   // playDiceAnimationAsync safety cap
 
+/** Cosmetic dice skins (index = RoomPlayer.diceSkin). Canvas colours + material params. */
+export interface DiceSkin {
+  name: string;
+  face: string;    // canvas face fill
+  pip: string;     // pip colour
+  border: string;  // face border stroke
+  emissive: [number, number, number];
+  specular: [number, number, number];
+}
+
+export const DICE_SKINS: DiceSkin[] = [
+  { name: "classic",  face: "#f4f4ee", pip: "#161616", border: "#ccccc4", emissive: [0.15, 0.15, 0.15], specular: [0.12, 0.12, 0.12] },
+  { name: "neon",     face: "#1a1030", pip: "#22d3ee", border: "#3b2a63", emissive: [0.3, 0.28, 0.42],  specular: [0.2, 0.2, 0.3] },
+  { name: "gold",     face: "#d4af37", pip: "#2a1f04", border: "#a3842a", emissive: [0.28, 0.22, 0.06], specular: [0.6, 0.5, 0.2] },
+  { name: "obsidian", face: "#17171c", pip: "#f2f2f2", border: "#33333c", emissive: [0.08, 0.08, 0.1],  specular: [0.45, 0.45, 0.5] },
+  { name: "ruby",     face: "#7f1d1d", pip: "#ffe4e6", border: "#5c1414", emissive: [0.2, 0.06, 0.06],  specular: [0.4, 0.2, 0.2] },
+];
+
 /** World XZ for the centre of tile at board position [0..40]. */
 export function tileXZ(pos: number): [number, number] {
   if (pos === JAIL_POS) return [0, 0]; // jailed tokens → cage in felt centre

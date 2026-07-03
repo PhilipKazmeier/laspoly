@@ -21,6 +21,8 @@ export interface PlayerState {
   lastRoll: [number, number];
   color: string;
   figureIndex: number; // 0-5 → car1..car5, police (chosen vehicle model)
+  /** cosmetic dice skin 0-4; static data the engine never reads */
+  diceSkin: number;
 }
 
 export type GamePhase =
@@ -178,6 +180,6 @@ export interface GameSettings {
 export interface NewGameOptions {
   boardId: string;
   seed: number;
-  players: { id: string; name: string; isBot: boolean; color: string; figureIndex?: number }[];
+  players: { id: string; name: string; isBot: boolean; color: string; figureIndex?: number; diceSkin?: number }[];
   settings?: GameSettings;
 }

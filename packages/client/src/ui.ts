@@ -790,6 +790,12 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "tooltip.onlyYourTurn": "Nur in deinem Zug verfügbar",
     // Figure picker tooltip
     "figurePicker.colorTaken": "hat diese Farbe",
+    "room.diceSkin": "Würfel-Design",
+    "dice.classic": "Klassisch",
+    "dice.neon": "Neon",
+    "dice.gold": "Gold",
+    "dice.obsidian": "Obsidian",
+    "dice.ruby": "Rubin",
     // Turn toast
     "turn.mine.toast": "Du bist am Zug",
     "turn.atReihe": "ist an der Reihe.",
@@ -1032,6 +1038,12 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "tooltip.onlyYourTurn": "Only available on your turn",
     // Figure picker tooltip
     "figurePicker.colorTaken": "has this colour",
+    "room.diceSkin": "Dice skin",
+    "dice.classic": "Classic",
+    "dice.neon": "Neon",
+    "dice.gold": "Gold",
+    "dice.obsidian": "Obsidian",
+    "dice.ruby": "Ruby",
     // Turn toast
     "turn.mine.toast": "Your turn",
     "turn.atReihe": "is playing now.",
@@ -1177,6 +1189,7 @@ export class UI {
   private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
   private myColor: string = "red";
   private myFigureIndex: number = 0;
+  private myDiceSkin = 0;
   private figurePreview: FigurePreview | null = null;
   private currentLocale: Locale = _locale;
   // Payment toast (feature #4)
@@ -2627,7 +2640,7 @@ export class UI {
       btn.addEventListener("click", () => {
         if (this.myFigureIndex === fi) return;
         this.myFigureIndex = fi;
-        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: fi });
+        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: fi, diceSkin: this.myDiceSkin });
         void this.figurePreview?.show(fi, myHex);
         restyle();
       });
@@ -2636,6 +2649,45 @@ export class UI {
     }
     restyle();
     container.appendChild(grid);
+
+    // ---- Dice skin swatches (cosmetic; may repeat between players) --------
+    const diceTitle = document.createElement("div");
+    diceTitle.className = "fp-title";
+    diceTitle.style.marginTop = "10px";
+    diceTitle.textContent = t("room.diceSkin");
+    container.appendChild(diceTitle);
+
+    const DICE_SWATCHES: { name: string; face: string; pip: string }[] = [
+      { name: t("dice.classic"),  face: "#f4f4ee", pip: "#161616" },
+      { name: t("dice.neon"),     face: "#1a1030", pip: "#22d3ee" },
+      { name: t("dice.gold"),     face: "#d4af37", pip: "#2a1f04" },
+      { name: t("dice.obsidian"), face: "#17171c", pip: "#f2f2f2" },
+      { name: t("dice.ruby"),     face: "#7f1d1d", pip: "#ffe4e6" },
+    ];
+    const diceRow = document.createElement("div");
+    diceRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+    const diceBtns: HTMLButtonElement[] = [];
+    const restyleDice = () => {
+      diceBtns.forEach((b, i) => {
+        b.style.borderColor = this.myDiceSkin === i ? "#facc15" : "rgba(255,255,255,0.15)";
+      });
+    };
+    DICE_SWATCHES.forEach((sw, i) => {
+      const btn = document.createElement("button");
+      btn.title = sw.name;
+      btn.style.cssText = "width:34px;height:34px;border-radius:6px;cursor:pointer;border:2px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:15px;background:" + sw.face + ";color:" + sw.pip + ";";
+      btn.textContent = "⚄";
+      btn.addEventListener("click", () => {
+        if (this.myDiceSkin === i) return;
+        this.myDiceSkin = i;
+        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: this.myFigureIndex, diceSkin: i });
+        restyleDice();
+      });
+      diceBtns.push(btn);
+      diceRow.appendChild(btn);
+    });
+    restyleDice();
+    container.appendChild(diceRow);
   }
 
   /** Dispose the lobby 3D vehicle preview engine (when leaving the room / game starts). */

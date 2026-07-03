@@ -136,3 +136,36 @@ describe("GameRoom", () => {
     expect(p?.connected).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dice skins (cosmetic per-player)
+// ---------------------------------------------------------------------------
+
+describe("dice skins", () => {
+  it("diceSkin round-trips chooseFigure → toView → start → GameState", () => {
+    const room = new GameRoom("Skins", "vegas", 1);
+    const pid = room.addHuman("Alice");
+    const me = room.players.find((p) => p.id === pid)!;
+    expect(me.diceSkin).toBe(0);
+
+    const err = room.chooseFigure(pid, me.color, me.figureIndex, 2);
+    expect(err).toBeNull();
+    expect(room.toView().players.find((p) => p.id === pid)?.diceSkin).toBe(2);
+
+    const state = room.start(1);
+    expect(state.players.find((p) => p.id === pid)?.diceSkin).toBe(2);
+    // Bots default to skin 0.
+    expect(state.players.filter((p) => p.isBot).every((p) => p.diceSkin === 0)).toBe(true);
+  });
+
+  it("invalid diceSkin rejected; two players may share a skin", () => {
+    const room = new GameRoom("Skins2", "vegas", 0);
+    const a = room.addHuman("Alice");
+    const b = room.addHuman("Bob");
+    const pa = room.players.find((p) => p.id === a)!;
+    const pb = room.players.find((p) => p.id === b)!;
+    expect(room.chooseFigure(a, pa.color, pa.figureIndex, 99)).toMatch(/diceSkin/);
+    expect(room.chooseFigure(a, pa.color, pa.figureIndex, 3)).toBeNull();
+    expect(room.chooseFigure(b, pb.color, pb.figureIndex, 3)).toBeNull(); // same skin OK
+  });
+});
