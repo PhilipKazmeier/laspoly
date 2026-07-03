@@ -587,6 +587,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
   de: {
     // Lobby
     "lobby.roomName": "Spielname",
+    "lobby.password": "Passwort (privater Raum)",
+    "lobby.passwordOptional": "Leer = öffentlich",
+    "lobby.passwordPrompt": "Passwort eingeben…",
+    "lobby.join": "Beitreten",
     "lobby.noRooms": "Keine offenen Spiele — erstelle eins!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
@@ -820,6 +824,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
   en: {
     // Lobby
     "lobby.roomName": "Room name",
+    "lobby.password": "Password (private room)",
+    "lobby.passwordOptional": "Empty = public",
+    "lobby.passwordPrompt": "Enter password…",
+    "lobby.join": "Join",
     "lobby.noRooms": "No open games — create one!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
@@ -1213,6 +1221,8 @@ export class UI {
           <option value="4">4</option>
           <option value="5">5</option>
         </select>
+        <label id="lobbyPasswordLabel">${t("lobby.password")}</label>
+        <input id="roomPassword" type="password" maxlength="64" autocomplete="off" placeholder="${t("lobby.passwordOptional")}" />
         <button id="createRoom" style="margin-top:12px;width:100%;">${t("lobby.createRoom")}</button>
       </div>
     `;
@@ -1255,12 +1265,15 @@ export class UI {
       const boardId = this.boardIdSelect.value || listBoards()[0]?.id || "vegas";
       const botCount = parseInt(this.botCountSelect.value, 10);
       const safeBotCount = Number.isNaN(botCount) ? 3 : Math.max(0, Math.min(5, botCount));
+      const pwInput = document.getElementById("roomPassword") as HTMLInputElement | null;
+      const password = pwInput?.value ?? "";
       this.net.send({
         t: "createRoom",
         name: roomName.slice(0, 60),
         nickname,
         boardId,
         botCount: safeBotCount,
+        ...(password ? { password } : {}),
       });
     });
   }
@@ -2716,14 +2729,42 @@ export class UI {
     for (const room of joinable) {
       const item = document.createElement("div");
       item.className = "room-item";
-      const lock = (room as { hasPassword?: boolean }).hasPassword ? " 🔒" : "";
+      const locked = room.hasPassword;
       item.innerHTML =
-        `<strong>${room.name}</strong>${lock}` +
+        `<strong>${room.name}</strong>${locked ? " 🔒" : ""}` +
         `<span style="color:#aaa;font-size:12px;margin-left:6px;">${boardNames.get(room.boardId) ?? room.boardId}</span>` +
         `<span style="color:#aaa;font-size:12px;margin-left:6px;">👥 ${room.playerCount}</span>`;
       item.addEventListener("click", () => {
         const nickname = this.nicknameInput.value.trim() || "Player";
-        this.net.send({ t: "joinRoom", roomId: room.id, nickname });
+        if (!locked) {
+          this.net.send({ t: "joinRoom", roomId: room.id, nickname });
+          return;
+        }
+        // Private room: swap the card content for an inline password prompt.
+        if (item.querySelector(".room-pw-input")) return; // prompt already open
+        item.innerHTML = `<strong>${room.name}</strong> 🔒`;
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:6px;margin-top:6px;";
+        const pw = document.createElement("input");
+        pw.type = "password";
+        pw.className = "room-pw-input";
+        pw.placeholder = t("lobby.passwordPrompt");
+        pw.style.cssText = "flex:1;";
+        pw.addEventListener("click", (e) => e.stopPropagation());
+        const joinBtn = document.createElement("button");
+        joinBtn.textContent = t("lobby.join");
+        joinBtn.className = "room-pw-join";
+        joinBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.net.send({ t: "joinRoom", roomId: room.id, nickname: this.nicknameInput.value.trim() || "Player", password: pw.value });
+        });
+        pw.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") joinBtn.click();
+        });
+        row.appendChild(pw);
+        row.appendChild(joinBtn);
+        item.appendChild(row);
+        pw.focus();
       });
       this.roomList.appendChild(item);
     }

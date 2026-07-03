@@ -530,8 +530,15 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         throw new Error("Server is full");
       if (cs.roomsCreated >= MAX_ROOMS_PER_CONN)
         throw new Error("Room creation limit reached");
+      // Optional room password (empty string = public). NEVER logged.
+      let password: string | null = null;
+      if (msg.password !== undefined && msg.password !== "") {
+        if (!isStr(msg.password) || msg.password.length > 64)
+          throw new Error("Password must be 1\u201364 characters");
+        password = msg.password;
+      }
       const botCount = Math.max(0, Math.min(MAX_BOT_COUNT, msg.botCount));
-      const room = rooms.create(msg.name, msg.boardId, botCount);
+      const room = rooms.create(msg.name, msg.boardId, botCount, password);
       const playerId = room.addHuman(msg.nickname);
       const token = room.getToken(playerId)!;
       cs.roomId = room.id;
@@ -553,6 +560,10 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         throw new Error(`Nickname must be 1–${MAX_NICKNAME_LEN} characters`);
       const room = rooms.get(msg.roomId);
       if (!room) throw new Error("Room not found");
+      // Password gate FIRST so locked rooms leak no state details. Plaintext
+      // compare by design (see GameRoom.password); resume tokens bypass this.
+      if (room.password !== null && msg.password !== room.password)
+        throw new Error("Wrong password");
       if (room.started) throw new Error("Game already started");
       const humanCount = room.players.filter((p) => !p.isBot).length;
       if (humanCount + room.botCount >= MAX_PLAYERS_PER_ROOM) throw new Error("Room is full");

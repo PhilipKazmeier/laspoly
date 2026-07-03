@@ -64,11 +64,20 @@ export class GameRoom {
   state: GameState | null = null;
   settings: GameSettings = {};
 
-  constructor(name: string, boardId: string, botCount: number) {
+  /**
+   * Optional room password. Plaintext compare is deliberate and acceptable
+   * here: rooms are ephemeral in-memory objects, the password is casual
+   * gate-keeping among friends, and the random resume token remains the real
+   * credential. It must never be logged or included in any outgoing message.
+   */
+  password: string | null = null;
+
+  constructor(name: string, boardId: string, botCount: number, password: string | null = null) {
     this.id = String(_nextRoomId++);
     this.name = name;
     this.boardId = boardId;
     this.botCount = botCount;
+    this.password = password;
   }
 
   /** Returns the first color not already taken by any player (human or bot). */
@@ -343,6 +352,7 @@ export class GameRoom {
       boardId: this.boardId,
       playerCount: this.players.filter((p) => !p.isBot).length,
       started: this.started,
+      hasPassword: this.password !== null,
     };
   }
 
@@ -371,8 +381,8 @@ export class GameRoom {
 export class RoomManager {
   private rooms = new Map<string, GameRoom>();
 
-  create(name: string, boardId: string, botCount: number): GameRoom {
-    const room = new GameRoom(name, boardId, botCount);
+  create(name: string, boardId: string, botCount: number, password: string | null = null): GameRoom {
+    const room = new GameRoom(name, boardId, botCount, password);
     this.rooms.set(room.id, room);
     return room;
   }

@@ -255,3 +255,30 @@ describe("Room limits", () => {
     expect(room.state!.players.length).toBeLessThanOrEqual(6);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Private rooms (password)
+// ---------------------------------------------------------------------------
+
+describe("private rooms", () => {
+  it("summary exposes hasPassword but never the password itself", () => {
+    const pub = new GameRoom("Public", "vegas", 1);
+    const priv = new GameRoom("Private", "vegas", 1, "geheim");
+    expect(pub.toSummary().hasPassword).toBe(false);
+    expect(priv.toSummary().hasPassword).toBe(true);
+    expect(JSON.stringify(priv.toSummary())).not.toContain("geheim");
+    priv.addHuman("Host");
+    expect(JSON.stringify(priv.toView())).not.toContain("geheim");
+  });
+
+  it("password stored on the room; resume token remains independent", () => {
+    const room = new GameRoom("P", "vegas", 1, "pw123");
+    const pid = room.addHuman("Alice");
+    const token = room.getToken(pid);
+    expect(room.password).toBe("pw123");
+    expect(token).toBeTruthy();
+    expect(token).not.toBe("pw123");
+    // Resume path validates the token, not the password.
+    expect(room.resumeHuman(pid, token!)).toBe("Alice"); // returns the nickname on success
+  });
+});

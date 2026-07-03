@@ -11,6 +11,8 @@ export interface RoomSummary {
   boardId: string;
   playerCount: number;
   started: boolean;
+  /** true when joining requires a password (private room) */
+  hasPassword: boolean;
 }
 
 export interface RoomPlayer {
@@ -43,8 +45,8 @@ export interface RoomView {
 // ---- Wire messages ---------------------------------------------------------
 
 export type ClientMessage =
-  | { t: "createRoom"; name: string; nickname: string; boardId: string; botCount: number }
-  | { t: "joinRoom"; roomId: string; nickname: string }
+  | { t: "createRoom"; name: string; nickname: string; boardId: string; botCount: number; password?: string }
+  | { t: "joinRoom"; roomId: string; nickname: string; password?: string }
   | { t: "leaveRoom" }
   | { t: "startGame" }
   | { t: "command"; command: Command }
