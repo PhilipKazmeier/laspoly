@@ -22,6 +22,7 @@ import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
 import { getQuality, setQuality, type Quality } from "./quality.js";
+import { renderDeedCard } from "./ui/deed-card.js";
 import { API_BASE, loadSession } from "./net.js";
 
 
@@ -164,6 +165,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "prop.unmortgage": "Ablösen",
     "prop.sell": "Verkaufen",
     // Deed card
+    "deed.title": "Besitzurkunde",
     "deed.price": "Preis",
     "deed.mortgage": "Hypothek",
     "deed.baseRent": "Grundmiete",
@@ -422,6 +424,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "prop.unmortgage": "Unmortgage",
     "prop.sell": "Sell",
     // Deed card
+    "deed.title": "Title Deed",
     "deed.price": "Price",
     "deed.mortgage": "Mortgage",
     "deed.baseRent": "Base rent",
@@ -1418,31 +1421,77 @@ export class UI {
     if (this.actionCardTimer) { clearTimeout(this.actionCardTimer); this.actionCardTimer = null; }
   }
 
+  // The buy prompt IS the deed card: it rises from the landed tile (anchored
+  // to the projected tile position every frame — the Director is moving the
+  // camera at the same time) with Kaufen/Ablehnen printed on the card.
+  private buyOfferAnchorRaf: number | null = null;
+  private buyOfferPos: number | null = null;
+
   private buildBuyOfferPanel() {
     const panel = document.createElement("div");
     panel.id = "buyOfferPanel";
-    panel.innerHTML = `
-      <div class="buy-header">${t("buy.header")}</div>
-      <div class="buy-body">
-        <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:var(--gold);margin-bottom:6px;font-size:13px;">—</div>
-        <div class="buy-detail" id="buyPrice">${t("buy.price")} —</div>
-        <div class="buy-detail" id="buyBalance">${t("buy.balance")} —</div>
-        <div class="buy-btns">
-          <button id="buyOfferBuyBtn" style="background:#16a34a;flex:1;">${t("buy.buy")}</button>
-          <button id="buyOfferDeclineBtn" style="background:#991b1b;flex:1;">${t("buy.decline")}</button>
-        </div>
-      </div>
-    `;
     hide(panel);
     this.gameHud.appendChild(panel);
     this.buyOfferPanel = panel;
+  }
 
-    (document.getElementById("buyOfferBuyBtn") as HTMLButtonElement).addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } })
-    );
-    (document.getElementById("buyOfferDeclineBtn") as HTMLButtonElement).addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } })
-    );
+  private showBuyOffer(pos: number, state: GameState) {
+    const panel = this.buyOfferPanel;
+    const me = state.players.find((p) => p.id === this.net.playerId);
+    // Re-render only when the tile changes (state ticks arrive every turn).
+    if (this.buyOfferPos !== pos || panel.style.display === "none") {
+      panel.innerHTML = "";
+      panel.appendChild(renderDeedCard({
+        state,
+        pos,
+        tr: t,
+        groupColor: (g) => this.groupCssColor(g),
+        nameId: "buyTileName",
+        priceId: "buyPrice",
+        footnote: { id: "buyBalance", text: `${t("buy.balance")} ${me?.money ?? 0} LPD` },
+        actions: [
+          {
+            id: "buyOfferBuyBtn", label: t("buy.buy"), kind: "primary",
+            onClick: () => this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } }),
+          },
+          {
+            id: "buyOfferDeclineBtn", label: t("buy.decline"), kind: "quiet",
+            onClick: () => this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } }),
+          },
+        ],
+      }));
+      panel.classList.remove("deed-rise");
+      void panel.offsetWidth; // restart the rise animation
+      panel.classList.add("deed-rise");
+      this.buyOfferPos = pos;
+    } else {
+      // Same tile, fresh state: keep the card, update the balance line.
+      const balanceEl = document.getElementById("buyBalance");
+      if (balanceEl) balanceEl.textContent = `${t("buy.balance")} ${me?.money ?? 0} LPD`;
+    }
+    show(panel, "block");
+
+    // Anchor to the tile until hidden (the camera moves underneath us).
+    if (this.buyOfferAnchorRaf === null) {
+      const step = () => {
+        if (panel.style.display === "none" || this.buyOfferPos === null) {
+          this.buyOfferAnchorRaf = null;
+          return;
+        }
+        const { x, y } = this.board3d.projectTile(this.buyOfferPos);
+        const w = panel.offsetWidth || 280;
+        const h = panel.offsetHeight || 340;
+        panel.style.left = `${Math.min(Math.max(8, x - w / 2), window.innerWidth - w - 8)}px`;
+        panel.style.top = `${Math.min(Math.max(8, y - h - 24), window.innerHeight - h - 8)}px`;
+        this.buyOfferAnchorRaf = requestAnimationFrame(step);
+      };
+      this.buyOfferAnchorRaf = requestAnimationFrame(step);
+    }
+  }
+
+  private hideBuyOffer() {
+    hide(this.buyOfferPanel);
+    this.buyOfferPos = null;
   }
 
   private buildDeedCardPopup() {
@@ -1459,147 +1508,47 @@ export class UI {
     panel.innerHTML = "";
 
     if (!state) { hide(panel); this.deedCardPos = null; return; }
-
     const board = getBoard(state.boardId);
     const tile = board.tiles[pos];
     if (!tile) { hide(panel); this.deedCardPos = null; return; }
     this.deedCardPos = pos;
 
-    // Colour bar
-    const group = (tile as { group?: string }).group;
-    const barColor = group ? this.groupCssColor(group) : "#444";
-    const bar = document.createElement("div");
-    bar.className = "dc-color-bar";
-    bar.style.background = barColor;
-    panel.appendChild(bar);
-
-    // Header row: name + close
-    const hdr = document.createElement("div");
-    hdr.className = "dc-header";
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = tile.name;
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "dc-close";
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => { hide(panel); this.deedCardPos = null; });
-    hdr.appendChild(nameSpan);
-    hdr.appendChild(closeBtn);
-    panel.appendChild(hdr);
-
-    // Body
-    const body = document.createElement("div");
-    body.className = "dc-body";
-
-    // Determine the currently-applicable rent row key so we can highlight it
     const ownerId = state.ownership[pos];
-    const bld = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-    const isMortgaged = !!state.mortgaged[pos];
+    const myId = this.net.playerId;
+    const bld = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false, skyscraper: false };
 
-    // Compute which rent key applies for street tiles
-    const streetActiveKey = (() => {
-      if (!ownerId || isMortgaged) return null;
-      if (tile.type !== "street") return null;
-      if (bld.factory) return "deed.factory";
-      if (bld.hotel) return "deed.hotel";
-      if (bld.houses >= 4) return "deed.house4";
-      if (bld.houses === 3) return "deed.house3";
-      if (bld.houses === 2) return "deed.house2";
-      if (bld.houses === 1) return "deed.house1";
-      // No buildings: base rent applies if owner has monopoly (whole group owned)
-      return "deed.baseRent";
-    })();
-
-    // Station: rent tier is based on how many stations the owner has
-    const stationPositions = [5, 15, 25, 35];
-    const stationActiveKey = (() => {
-      if (!ownerId || tile.type !== "station" || isMortgaged) return null;
-      const count = stationPositions.filter(p => state.ownership[p] === ownerId).length;
-      return count >= 4 ? "deed.rentStation4"
-           : count === 3 ? "deed.rentStation3"
-           : count === 2 ? "deed.rentStation2"
-           : "deed.rentStation1";
-    })();
-
-    // Attraction: rent is dice-based; highlight tier based on how many owner has
-    const attractionActiveKey = (() => {
-      if (!ownerId || tile.type !== "attraction" || isMortgaged) return null;
-      const attrPositions = board.tiles
-        .map((t, i) => ({ t, i }))
-        .filter(({ t: tt }) => tt.type === "attraction")
-        .map(({ i }) => i);
-      const count = attrPositions.filter(p => state.ownership[p] === ownerId).length;
-      return count >= 2 ? "deed.rentAttr2" : "deed.rentAttr1";
-    })();
-
-    const rowHighlighted = (label: string, value: string, activeKey: string | null, rowKey: string) => {
-      const r = document.createElement("div");
-      r.className = "dc-row";
-      const active = activeKey === rowKey;
-      if (active) {
-        r.style.cssText = "background:rgba(250,204,21,0.2);border-radius:3px;font-weight:bold;border-bottom:1px solid #333;padding:2px 0;";
-      }
-      r.innerHTML = `<span class="dc-label" style="${active ? 'color:var(--gold);' : ''}">${label}</span><span class="dc-value" style="${active ? 'color:var(--gold);' : ''}">${value}</span>`;
-      body.appendChild(r);
-    };
-
-    const row = (label: string, value: string) => rowHighlighted(label, value, null, "");
-
-    if (tile.type === "street") {
-      const st = tile as StreetTile;
-      row(t("deed.price"), `${st.price} LPD`);
-      row(t("deed.mortgage"), `${st.mortgage} LPD`);
-      rowHighlighted(t("deed.baseRent"), `${st.rent[0]} LPD`, streetActiveKey, "deed.baseRent");
-      rowHighlighted(t("deed.house1"), `${st.rent[1]} LPD`, streetActiveKey, "deed.house1");
-      rowHighlighted(t("deed.house2"), `${st.rent[2]} LPD`, streetActiveKey, "deed.house2");
-      rowHighlighted(t("deed.house3"), `${st.rent[3]} LPD`, streetActiveKey, "deed.house3");
-      rowHighlighted(t("deed.house4"), `${st.rent[4]} LPD`, streetActiveKey, "deed.house4");
-      rowHighlighted(t("deed.hotel"), `${st.rent[5]} LPD`, streetActiveKey, "deed.hotel");
-      rowHighlighted(t("deed.factory"), `${st.factoryRevenue} LPD`, streetActiveKey, "deed.factory");
-      row(t("deed.houseCost"), `${st.houseCost} LPD`);
-      row(t("deed.hotelCost"), `${st.hotelCost} LPD`);
-      row(t("deed.factoryCost"), `${st.factoryCost} LPD`);
-    } else if (tile.type === "station") {
-      const r = board.rules.station;
-      row(t("deed.price"), `${r.price} LPD`);
-      row(t("deed.mortgage"), `${r.mortgage} LPD`);
-      rowHighlighted(t("deed.rentStation1"), `${r.rent[0] ?? 0} LPD`, stationActiveKey, "deed.rentStation1");
-      rowHighlighted(t("deed.rentStation2"), `${r.rent[1] ?? 0} LPD`, stationActiveKey, "deed.rentStation2");
-      rowHighlighted(t("deed.rentStation3"), `${r.rent[2] ?? 0} LPD`, stationActiveKey, "deed.rentStation3");
-      rowHighlighted(t("deed.rentStation4"), `${r.rent[3] ?? 0} LPD`, stationActiveKey, "deed.rentStation4");
-    } else if (tile.type === "attraction") {
-      const a = board.rules.attraction;
-      row(t("deed.price"), `${a.price} LPD`);
-      row(t("deed.mortgage"), `${a.mortgage} LPD`);
-      rowHighlighted(t("deed.rentAttr1"), `${t("deed.diceX")}${a.factorOne}`, attractionActiveKey, "deed.rentAttr1");
-      rowHighlighted(t("deed.rentAttr2"), `${t("deed.diceX")}${a.factorBoth}`, attractionActiveKey, "deed.rentAttr2");
-    }
-
-    // Owner + buildings (ownerId / bld / isMortgaged already computed above)
-    if (ownerId) {
-      const owner = state.players.find(p => p.id === ownerId);
-      const ownerDiv = document.createElement("div");
-      ownerDiv.className = "dc-owner";
-      ownerDiv.textContent = `${t("deed.owner")} ${owner?.name ?? "?"}`;
-      body.appendChild(ownerDiv);
-
-      // Bug 12: if this property belongs to ANOTHER player, offer a trade from here.
-      const myId = this.net.playerId;
-      if (myId && ownerId !== myId && (state.players.find(p => p.id === myId)?.alive ?? false)) {
-        const tradeBtn = document.createElement("button");
-        tradeBtn.className = "prop-btn";
-        tradeBtn.style.cssText = "margin-top:8px;background:#7c3aed;";
-        tradeBtn.textContent = t("props.trade");
-        tradeBtn.addEventListener("click", () => {
+    // Foreign property: offer a trade straight from the card (bug 12).
+    const actions = [];
+    if (ownerId && myId && ownerId !== myId && (state.players.find(p => p.id === myId)?.alive ?? false)) {
+      actions.push({
+        label: t("props.trade"), kind: "quiet" as const,
+        onClick: () => {
           hide(panel);
           this.deedCardPos = null;
           this.refreshTradePanel(state, myId, ownerId);
           show(this.tradePanel, "block");
-        });
-        body.appendChild(tradeBtn);
-      }
+        },
+      });
+    }
 
+    const card = renderDeedCard({
+      state, pos, tr: t,
+      groupColor: (g) => this.groupCssColor(g),
+      onClose: () => { hide(panel); this.deedCardPos = null; },
+      actions,
+    });
+
+    // Status extras under the rent table.
+    const body = card.querySelector(".deed-body");
+    if (body) {
+      if (!ownerId) {
+        const unowned = document.createElement("div");
+        unowned.className = "dc-owner deed-owner";
+        unowned.textContent = t("deed.unowned");
+        body.appendChild(unowned);
+      }
       let buildStr = "";
-      if (bld.skyscraper) buildStr = t("deed.skyscraper");
+      if ((bld as { skyscraper?: boolean }).skyscraper) buildStr = t("deed.skyscraper");
       else if (bld.hotel) buildStr = t("deed.hotel");
       else if (bld.factory) buildStr = t("deed.factory");
       else if (bld.houses > 0) buildStr = `${bld.houses} ${bld.houses > 1 ? t("deed.houses") : t("deed.house")}`;
@@ -1609,29 +1558,15 @@ export class UI {
         bDiv.textContent = `${t("deed.building")} ${buildStr}`;
         body.appendChild(bDiv);
       }
-
-      if (isMortgaged) {
-        const mDiv = document.createElement("div");
-        mDiv.className = "dc-status";
-        mDiv.textContent = t("deed.mortgaged");
-        body.appendChild(mDiv);
+      if (state.unbuildableFields?.includes(pos)) {
+        const nb = document.createElement("div");
+        nb.className = "dc-status";
+        nb.textContent = t("deed.unbuildable");
+        body.appendChild(nb);
       }
-    } else {
-      const unownedDiv = document.createElement("div");
-      unownedDiv.className = "dc-owner";
-      unownedDiv.textContent = t("deed.unowned");
-      body.appendChild(unownedDiv);
     }
 
-    // House rule: no-build field.
-    if (state.unbuildableFields?.includes(pos)) {
-      const nb = document.createElement("div");
-      nb.className = "dc-status";
-      nb.textContent = t("deed.unbuildable");
-      body.appendChild(nb);
-    }
-
-    panel.appendChild(body);
+    panel.appendChild(card);
     show(panel, "block");
   }
 
@@ -2865,20 +2800,11 @@ export class UI {
     if (showEndTurn) { show(this.endTurnBtn, "inline-block"); this.endTurnBtn.disabled = false; }
     else { hide(this.endTurnBtn); this.endTurnBtn.disabled = true; }
 
-    // Buy offer panel (tile name / price / balance)
+    // Buy offer: the deed card rises from the landed tile.
     if (showBuy && myId && state.pendingPurchase !== null) {
-      const board = getBoard(state.boardId);
-      const tile = board.tiles[state.pendingPurchase];
-      const price = tile ? tilePrice(board, tile) : 0;
-      const tileNameEl = document.getElementById("buyTileName");
-      const priceEl = document.getElementById("buyPrice");
-      const balanceEl = document.getElementById("buyBalance");
-      if (tileNameEl) tileNameEl.textContent = tile?.name ?? "—";
-      if (priceEl) priceEl.textContent = `${t("buy.price")} ${price} LPD`;
-      if (balanceEl) balanceEl.textContent = `${t("buy.balance")} ${me?.money ?? 0} LPD`;
-      show(this.buyOfferPanel, "block");
+      this.showBuyOffer(state.pendingPurchase, state);
     } else {
-      hide(this.buyOfferPanel);
+      this.hideBuyOffer();
     }
 
     // Spectator banner

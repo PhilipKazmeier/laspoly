@@ -12,6 +12,7 @@ import {
   HemisphericLight,
   DirectionalLight,
   Vector3,
+  Matrix,
   MeshBuilder,
   StandardMaterial,
   PBRMaterial,
@@ -997,6 +998,27 @@ export class Board3D {
   /** The token mesh for a player, if it exists (Director follow targets). */
   getTokenMesh(playerId: string): AbstractMesh | null {
     return this.tokenMeshes.get(playerId) ?? null;
+  }
+
+  /**
+   * Screen-space pixel position of a tile centre — the anchor for DOM
+   * elements that pretend to sit on the table (the rising deed card).
+   * Recompute every frame while anchored: the Director moves the camera.
+   */
+  projectTile(pos: number): { x: number; y: number } {
+    const [wx, wz] = tileXZ(pos);
+    const p = Vector3.Project(
+      new Vector3(wx, 0.15, wz),
+      Matrix.Identity(),
+      this.scene.getTransformMatrix(),
+      this.camera.viewport.toGlobal(
+        this.engine.getRenderWidth(),
+        this.engine.getRenderHeight(),
+      ),
+    );
+    // Engine pixels → CSS pixels (retina safety).
+    const scale = 1 / this.engine.getHardwareScalingLevel();
+    return { x: p.x / scale, y: p.y / scale };
   }
 
   // -------------------------------------------------------------------------
