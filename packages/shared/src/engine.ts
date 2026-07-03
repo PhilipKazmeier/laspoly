@@ -161,6 +161,15 @@ export function createGame(opts: NewGameOptions): GameState {
     eventFrequency === "normal" || eventFrequency === "chaos"
       ? [{ id: drawEventId(rng, eventFrequency === "chaos"), remainingRounds: 1 }]
       : [];
+  // House rule: mark N random streets no-build. Drawn AFTER the first-event
+  // draw so the default (count 0) leaves the historical RNG order untouched.
+  const unbuildableCount = opts.settings?.unbuildableCount ?? 0;
+  const unbuildableFields =
+    unbuildableCount > 0
+      ? shuffle(rng, board.tiles.filter((t) => t.type === "street").map((t) => t.pos))
+          .slice(0, unbuildableCount)
+          .sort((a, b) => a - b)
+      : [];
   const actionDeck: number[] = [];
   return {
     boardId: opts.boardId,
@@ -183,6 +192,7 @@ export function createGame(opts: NewGameOptions): GameState {
     round: 1,
     activeEvents,
     eventFrequency,
+    unbuildableFields,
     builtThisTurn: false,
     traveledThisTurn: false,
     buildingCostMult,
@@ -256,6 +266,7 @@ export function buildingChargeCost(
 // ---- building validation --------------------------------------------------
 
 function canConstructHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses >= 4) return false;
@@ -275,6 +286,7 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
 }
 
 function canConstructHotel(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 4) return false;
@@ -294,6 +306,7 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
 }
 
 function canConstructFactory(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
   if (b.hotel || b.factory || b.houses !== 0) return false;

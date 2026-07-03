@@ -155,7 +155,62 @@ export class BuildingRenderer {
   update(state: GameState): number[] {
     const changed = this.updateBuildings(state);
     this.updateOwnershipMarkers(state);
+    this.updateUnbuildableMarkers(state);
     return changed;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Unbuildable-field markers (house rule): a ⛔ badge on the building spot of
+  // each no-build street. The set is fixed per game — cached by signature so
+  // markers rebuild only on a new game/rematch.
+  // ---------------------------------------------------------------------------
+  private unbuildableSig = "";
+  private unbuildableMeshes: AbstractMesh[] = [];
+  private noBuildTex: DynamicTexture | null = null;
+
+  private getNoBuildTex(): DynamicTexture {
+    if (this.noBuildTex) return this.noBuildTex;
+    const S = 128;
+    const tex = new DynamicTexture("noBuildTex", { width: S, height: S }, this.scene, true);
+    tex.hasAlpha = true;
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.clearRect(0, 0, S, S);
+    ctx.font = "104px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("⛔", S / 2, S / 2 + 6);
+    tex.update();
+    this.noBuildTex = tex;
+    return tex;
+  }
+
+  private updateUnbuildableMarkers(state: GameState) {
+    const fields = state.unbuildableFields ?? [];
+    const sig = fields.join(",");
+    if (sig === this.unbuildableSig) return;
+    this.unbuildableSig = sig;
+    this.unbuildableMeshes.forEach((m) => m.dispose());
+    this.unbuildableMeshes = [];
+
+    for (const pos of fields) {
+      const [x, z] = tileXZ(pos);
+      const [odx, odz] = outerDirection(pos);
+      // The building spot at the inner edge stays empty on these tiles — the
+      // badge occupies it so the rule is readable at a glance.
+      const plane = MeshBuilder.CreatePlane(`nobuild_${pos}`, { width: 0.5, height: 0.5 }, this.scene);
+      plane.rotation.x = Math.PI / 2;
+      plane.rotation.y = (getFieldAngle(pos) * Math.PI) / 180;
+      plane.position.set(x - odx * (TILE_D / 2 - 0.35), 0.14, z - odz * (TILE_D / 2 - 0.35));
+      plane.isPickable = false;
+      const mat = new StandardMaterial(`nobuildMat_${pos}`, this.scene);
+      mat.diffuseTexture = this.getNoBuildTex();
+      mat.opacityTexture = this.getNoBuildTex();
+      mat.emissiveColor = new Color3(0.9, 0.9, 0.9);
+      mat.specularColor = new Color3(0, 0, 0);
+      mat.backFaceCulling = false;
+      plane.material = mat;
+      this.unbuildableMeshes.push(plane);
+    }
   }
 
   /**

@@ -749,6 +749,16 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
           throw new Error("botDifficulty must be 'easy', 'normal', or 'hard'");
         settings.botDifficulty = s["botDifficulty"] as "easy" | "normal" | "hard";
       }
+      if (s["eventFrequency"] !== undefined) {
+        if (!["off", "rare", "normal", "chaos"].includes(s["eventFrequency"] as string))
+          throw new Error("eventFrequency must be 'off', 'rare', 'normal', or 'chaos'");
+        settings.eventFrequency = s["eventFrequency"] as import("@laspoly/shared").EventFrequency;
+      }
+      if (s["unbuildableCount"] !== undefined) {
+        if (typeof s["unbuildableCount"] !== "number" || !Number.isInteger(s["unbuildableCount"] as number))
+          throw new Error("unbuildableCount must be an integer");
+        settings.unbuildableCount = Math.min(8, Math.max(0, s["unbuildableCount"] as number));
+      }
       room.updateSettings(settings);
       broadcastToRoom(room, { t: "room", room: room.toView() });
       break;

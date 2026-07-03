@@ -78,6 +78,8 @@ export interface GameState {
   activeEvents: ActiveEvent[];
   /** event draw frequency (from game settings, default "normal") */
   eventFrequency: EventFrequency;
+  /** street positions where building is forbidden (house rule; drawn at game start) */
+  unbuildableFields: number[];
   /** True once the current player has built one building this turn; reset on turn advance. */
   builtThisTurn: boolean;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
@@ -139,6 +141,8 @@ export interface GameSettings {
   buildingCostMult?: number;    // default 1.0
   botDifficulty?: "easy" | "normal" | "hard"; // default "normal"
   eventFrequency?: EventFrequency; // default "normal"
+  /** number of random streets marked no-build at game start (house rule; default 0) */
+  unbuildableCount?: number;
 }
 
 export interface NewGameOptions {

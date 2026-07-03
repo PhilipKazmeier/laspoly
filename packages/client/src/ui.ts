@@ -647,6 +647,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "buildBlock.singleStreetNoHotel": "Auf Einzelstraßen-Gruppen kann kein Hotel gebaut werden (Balance-Regel).",
     "buildBlock.evenBuild": "Gleichmäßig bauen: erst die anderen Straßen der Gruppe aufstocken.",
     "buildBlock.mortgagedInGroup": "Eine Straße der Gruppe ist mit Hypothek belastet.",
+    "deed.unbuildable": "⛔ Nicht bebaubar (Hausregel)",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
@@ -850,6 +851,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "buildBlock.singleStreetNoHotel": "Single-street groups cannot build a hotel (balance rule).",
     "buildBlock.evenBuild": "Build evenly: raise the other streets in the group first.",
     "buildBlock.mortgagedInGroup": "A street in this group is mortgaged.",
+    "deed.unbuildable": "⛔ No building allowed (house rule)",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
@@ -2045,6 +2047,14 @@ export class UI {
       body.appendChild(unownedDiv);
     }
 
+    // House rule: no-build field.
+    if (state.unbuildableFields?.includes(pos)) {
+      const nb = document.createElement("div");
+      nb.className = "dc-status";
+      nb.textContent = t("deed.unbuildable");
+      body.appendChild(nb);
+    }
+
     panel.appendChild(body);
     show(panel, "block");
   }
@@ -3130,9 +3140,12 @@ export class UI {
       else buildingStr = "—";
 
       const mortgageStr = isMortgaged ? ` <span style='color:#f87171;'>[${t("deed.mortgaged")}]</span>` : "";
+      const noBuildStr = state.unbuildableFields?.includes(pos)
+        ? ` <span title="${t("deed.unbuildable")}">⛔</span>`
+        : "";
 
       row.innerHTML = `
-        <div class="prop-name">${groupColor}${tile.name}${mortgageStr}</div>
+        <div class="prop-name">${groupColor}${tile.name}${mortgageStr}${noBuildStr}</div>
         <div class="prop-detail">${t("deed.building")} ${buildingStr}</div>
       `;
       row.style.cursor = "pointer";

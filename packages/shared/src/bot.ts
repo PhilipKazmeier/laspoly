@@ -47,6 +47,7 @@ function canSellHouseAt(state: GameState, board: ReturnType<typeof getBoard>, po
  * Used to pre-validate before issuing BUILD so we never throw.
  */
 function canBuildHouseAt(state: GameState, board: ReturnType<typeof getBoard>, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule — engine would throw
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
   if (state.mortgaged[pos]) return false;
@@ -69,6 +70,7 @@ function canBuildHouseAt(state: GameState, board: ReturnType<typeof getBoard>, p
  * Returns whether a hotel can be built at `pos` (mirrors engine canConstructHotel logic).
  */
 function canBuildHotelAt(state: GameState, board: ReturnType<typeof getBoard>, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule — engine would throw
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
   const b = state.buildings[pos];
