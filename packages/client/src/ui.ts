@@ -273,9 +273,42 @@ const css = `
   }
   #tradePanel {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 340px;
+    width: 560px;
+    max-width: 92vw;
     max-height: 80vh;
     overflow-y: auto;
+  }
+  .trade-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .trade-col-title { font-size: 12px; color: var(--text-dim); font-weight: bold; margin-bottom: 6px; }
+  .trade-card {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; margin: 3px 0;
+    border: 1px solid var(--hairline-soft); border-radius: 6px;
+    background: var(--glass-light);
+    font-size: 12px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .trade-card:hover { border-color: var(--gold); }
+  .trade-card.selected { border-color: var(--gold); background: rgba(201,162,39,0.16); }
+  .trade-card.selected::after { content: "✓"; margin-left: auto; color: var(--gold); font-weight: bold; }
+  .trade-card .tc-chip { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .trade-card .tc-value { color: #aaa; margin-left: auto; }
+  .trade-card.selected .tc-value { margin-left: 6px; }
+  .player-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; margin: 0 6px 6px 0;
+    border: 1px solid var(--hairline-soft); border-radius: 999px;
+    background: var(--glass-light); font-size: 12px; cursor: pointer;
+  }
+  .player-chip.selected { border-color: var(--gold); background: rgba(201,162,39,0.16); font-weight: bold; }
+  .money-stepper { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+  .money-stepper button { padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.08); }
+  .money-stepper input { width: 70px; text-align: center; }
+  #tradeSummary {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px; padding: 8px; border-radius: 6px;
+    background: var(--glass-light); border: 1px solid var(--hairline-soft);
+    font-size: 12px;
   }
   #incomingSwapPanel {
     position: absolute; bottom: 80px; right: 16px;
@@ -591,6 +624,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "lobby.passwordOptional": "Leer = öffentlich",
     "lobby.passwordPrompt": "Passwort eingeben…",
     "lobby.join": "Beitreten",
+    "trade.youGive": "Du gibst",
+    "trade.youReceive": "Du erhältst",
+    "trade.approxValue": "Richtwert: Kaufpreise + Geld (keine Miet-Bewertung)",
+    "trade.pending": "Tauschangebot wartet auf",
+    "trade.empty": "Keine tauschbaren Grundstücke",
     "lobby.noRooms": "Keine offenen Spiele — erstelle eins!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
@@ -828,6 +866,11 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "lobby.passwordOptional": "Empty = public",
     "lobby.passwordPrompt": "Enter password…",
     "lobby.join": "Join",
+    "trade.youGive": "You give",
+    "trade.youReceive": "You receive",
+    "trade.approxValue": "Indicative: purchase prices + money (no rent valuation)",
+    "trade.pending": "Trade offer awaiting",
+    "trade.empty": "No tradable properties",
     "lobby.noRooms": "No open games — create one!",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
@@ -3552,148 +3595,178 @@ export class UI {
 
     const board = getBoard(state.boardId);
     const alivePlayers = state.players.filter((p) => p.alive && p.id !== myId);
+    const me = state.players.find((p) => p.id === myId);
+    if (alivePlayers.length === 0 || !me) { hide(panel); return; }
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:10px;";
+    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;";
     title.textContent = t("trade.title");
     panel.appendChild(title);
 
-    // Target player selector
-    const targetLabel = document.createElement("label");
-    targetLabel.textContent = t("trade.offerTo");
-    panel.appendChild(targetLabel);
-
-    const targetSelect = document.createElement("select");
+    // ---- Target player chips -------------------------------------------
+    const chipRow = document.createElement("div");
+    let targetId = preselectTarget && alivePlayers.some((p) => p.id === preselectTarget)
+      ? preselectTarget
+      : alivePlayers[0]!.id;
+    const chips = new Map<string, HTMLButtonElement>();
     for (const p of alivePlayers) {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.name;
-      targetSelect.appendChild(opt);
+      const chip = document.createElement("button");
+      chip.className = "player-chip" + (p.id === targetId ? " selected" : "");
+      chip.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${p.color};display:inline-block;"></span>${p.name}`;
+      chip.addEventListener("click", () => {
+        targetId = p.id;
+        chips.forEach((c, id) => c.classList.toggle("selected", id === targetId));
+        rebuildReceiveColumn();
+        updateSummary();
+      });
+      chips.set(p.id, chip);
+      chipRow.appendChild(chip);
     }
-    if (preselectTarget && alivePlayers.some((p) => p.id === preselectTarget)) {
-      targetSelect.value = preselectTarget;
-    }
-    panel.appendChild(targetSelect);
+    panel.appendChild(chipRow);
 
-    // My props to give (unbuilt, unmortgaged only)
-    const myProps = ownedPropsOf(state, myId).filter((pos) => {
+    // ---- Two-column offer builder ---------------------------------------
+    const eligibleOf = (pid: string) => ownedPropsOf(state, pid).filter((pos) => {
       const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-      return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+      return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper) && !state.mortgaged[pos];
     });
 
-    const giveSection = document.createElement("div");
-    giveSection.className = "swap-section";
-    giveSection.innerHTML = `<div class="swap-label">${t("trade.give")}</div>`;
+    const grid = document.createElement("div");
+    grid.className = "trade-grid";
+    const giveCol = document.createElement("div");
+    const recvCol = document.createElement("div");
+    grid.appendChild(giveCol);
+    grid.appendChild(recvCol);
+    panel.appendChild(grid);
 
-    const giveChecks = new Map<number, HTMLInputElement>();
-    for (const pos of myProps) {
-      const tile = board.tiles[pos];
-      if (!tile) continue;
-      const row = document.createElement("div");
-      row.className = "swap-check-row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      const lbl = document.createElement("label");
-      lbl.textContent = tile.name;
-      row.appendChild(cb);
-      row.appendChild(lbl);
-      giveSection.appendChild(row);
-      giveChecks.set(pos, cb);
-    }
+    const giveSel = new Set<number>();
+    const recvSel = new Set<number>();
 
-    const giveMoneyRow = document.createElement("div");
-    giveMoneyRow.className = "swap-check-row";
-    const giveMoneyInput = document.createElement("input");
-    giveMoneyInput.type = "number";
-    giveMoneyInput.min = "0";
-    giveMoneyInput.value = "0";
-    giveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
-    giveMoneyInput.id = "giveMoneyInput";
-    const giveMoneyLbl = document.createElement("label");
-    giveMoneyLbl.textContent = t("trade.giveMoney");
-    giveMoneyRow.appendChild(giveMoneyLbl);
-    giveMoneyRow.appendChild(giveMoneyInput);
-    const giveMoneyUnit = document.createElement("span");
-    giveMoneyUnit.textContent = " LPD";
-    giveMoneyRow.appendChild(giveMoneyUnit);
-    giveSection.appendChild(giveMoneyRow);
-    panel.appendChild(giveSection);
-
-    // Target props to receive
-    const receiveSection = document.createElement("div");
-    receiveSection.className = "swap-section";
-    panel.appendChild(receiveSection);
-
-    const receiveMoneySection = document.createElement("div");
-    receiveMoneySection.className = "swap-section";
-    const receiveMoneyInput = document.createElement("input");
-    receiveMoneyInput.type = "number";
-    receiveMoneyInput.min = "0";
-    receiveMoneyInput.value = "0";
-    receiveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
-    receiveMoneyInput.id = "receiveMoneyInput";
-    const recvLbl = document.createElement("label");
-    recvLbl.textContent = t("trade.receiveMoneyLabel");
-    const recvUnit = document.createElement("span");
-    recvUnit.textContent = " LPD";
-    receiveMoneySection.innerHTML = `<div class="swap-label">${t("trade.receiveMoney")}</div>`;
-    const recvMoneyRow = document.createElement("div");
-    recvMoneyRow.className = "swap-check-row";
-    recvMoneyRow.appendChild(recvLbl);
-    recvMoneyRow.appendChild(receiveMoneyInput);
-    recvMoneyRow.appendChild(recvUnit);
-    receiveMoneySection.appendChild(recvMoneyRow);
-    panel.appendChild(receiveMoneySection);
-
-    const receiveChecks = new Map<number, HTMLInputElement>();
-
-    const rebuildReceiveSection = () => {
-      const tId = targetSelect.value;
-      const targetName = targetSelect.options[targetSelect.selectedIndex]?.text ?? "?";
-      receiveSection.innerHTML = `<div class="swap-label">${t("trade.receive")} ${targetName}):</div>`;
-      receiveChecks.clear();
-      const theirProps = ownedPropsOf(state, tId).filter((pos) => {
-        const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-        return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+    const makeCard = (pos: number, selSet: Set<number>) => {
+      const tile = board.tiles[pos]!;
+      const group = (tile as { group?: string }).group;
+      const card = document.createElement("div");
+      card.className = "trade-card";
+      card.innerHTML =
+        `<span class="tc-chip" style="background:${group ? this.groupCssColor(group) : "#555"};"></span>` +
+        `<span>${tile.name}</span>` +
+        `<span class="tc-value">${tilePrice(board, tile)}</span>`;
+      card.addEventListener("click", () => {
+        if (selSet.has(pos)) selSet.delete(pos);
+        else selSet.add(pos);
+        card.classList.toggle("selected", selSet.has(pos));
+        updateSummary();
       });
-      for (const pos of theirProps) {
-        const tile = board.tiles[pos];
-        if (!tile) continue;
-        const row = document.createElement("div");
-        row.className = "swap-check-row";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        const lbl = document.createElement("label");
-        lbl.textContent = tile.name;
-        row.appendChild(cb);
-        row.appendChild(lbl);
-        receiveSection.appendChild(row);
-        receiveChecks.set(pos, cb);
-      }
+      return card;
     };
 
-    rebuildReceiveSection();
-    targetSelect.addEventListener("change", rebuildReceiveSection);
+    const makeMoneyStepper = (col: HTMLElement, maxOf: () => number): HTMLInputElement => {
+      const row = document.createElement("div");
+      row.className = "money-stepper";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.value = "0";
+      const clamp = () => {
+        const v = Math.max(0, Math.min(maxOf(), parseInt(input.value, 10) || 0));
+        input.value = String(v);
+        updateSummary();
+      };
+      const step = (d: number) => {
+        input.value = String((parseInt(input.value, 10) || 0) + d);
+        clamp();
+      };
+      for (const [label, d] of [["−100", -100], ["−10", -10]] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.addEventListener("click", () => step(d));
+        row.appendChild(b);
+      }
+      row.appendChild(input);
+      for (const [label, d] of [["+10", 10], ["+100", 100]] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.addEventListener("click", () => step(d));
+        row.appendChild(b);
+      }
+      const unit = document.createElement("span");
+      unit.textContent = "LPD";
+      unit.style.cssText = "font-size:11px;color:#aaa;";
+      row.appendChild(unit);
+      input.addEventListener("change", clamp);
+      col.appendChild(row);
+      return input;
+    };
 
-    // Offer + cancel buttons
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
+    // Give column (mine — static per open)
+    giveCol.innerHTML = `<div class="trade-col-title">${t("trade.youGive")}</div>`;
+    const myEligible = eligibleOf(myId);
+    if (myEligible.length === 0) {
+      const none = document.createElement("div");
+      none.style.cssText = "font-size:11px;color:#777;";
+      none.textContent = t("trade.empty");
+      giveCol.appendChild(none);
+    }
+    for (const pos of myEligible) giveCol.appendChild(makeCard(pos, giveSel));
+    const giveMoney = makeMoneyStepper(giveCol, () => me.money);
+
+    // Receive column (target's — rebuilt on chip change)
+    let recvMoney!: HTMLInputElement;
+    const recvCards = document.createElement("div");
+    const rebuildReceiveColumn = () => {
+      recvSel.clear();
+      recvCol.innerHTML = `<div class="trade-col-title">${t("trade.youReceive")}</div>`;
+      recvCards.innerHTML = "";
+      const theirEligible = eligibleOf(targetId);
+      if (theirEligible.length === 0) {
+        const none = document.createElement("div");
+        none.style.cssText = "font-size:11px;color:#777;";
+        none.textContent = t("trade.empty");
+        recvCards.appendChild(none);
+      }
+      for (const pos of theirEligible) recvCards.appendChild(makeCard(pos, recvSel));
+      recvCol.appendChild(recvCards);
+      recvMoney = makeMoneyStepper(recvCol, () => state.players.find((p) => p.id === targetId)?.money ?? 0);
+    };
+    rebuildReceiveColumn();
+
+    // ---- Live value summary ---------------------------------------------
+    const summary = document.createElement("div");
+    summary.id = "tradeSummary";
+    panel.appendChild(summary);
 
     const offerBtn = document.createElement("button");
+
+    const legValue = (sel: Set<number>, money: number) =>
+      [...sel].reduce((sum, pos) => sum + tilePrice(board, board.tiles[pos]!), 0) + money;
+
+    const updateSummary = () => {
+      const give = legValue(giveSel, parseInt(giveMoney.value, 10) || 0);
+      const recv = legValue(recvSel, parseInt(recvMoney.value, 10) || 0);
+      const delta = recv - give;
+      const deltaColor = delta === 0 ? "#aaa" : delta > 0 ? "#22c55e" : "#ef4444";
+      summary.innerHTML =
+        `<span>${t("trade.youGive")}: <strong>${give}</strong></span>` +
+        `<span style="color:${deltaColor};font-weight:bold;">Δ ${delta > 0 ? "+" : ""}${delta}</span>` +
+        `<span>${t("trade.youReceive")}: <strong>${recv}</strong></span>`;
+      summary.title = t("trade.approxValue");
+      offerBtn.disabled = giveSel.size === 0 && recvSel.size === 0 &&
+        (parseInt(giveMoney.value, 10) || 0) === 0 && (parseInt(recvMoney.value, 10) || 0) === 0;
+      offerBtn.style.opacity = offerBtn.disabled ? "0.4" : "1";
+    };
+    updateSummary();
+
+    // ---- Offer / cancel ---------------------------------------------------
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
     offerBtn.textContent = t("trade.offer");
     offerBtn.addEventListener("click", () => {
-      const toId = targetSelect.value;
-      const giveProps = [...giveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
-      const recvProps = [...receiveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
-      const giveMoneyVal = parseInt(giveMoneyInput.value, 10) || 0;
-      const recvMoneyVal = parseInt(receiveMoneyInput.value, 10) || 0;
       this.net.send({
         t: "command",
         command: {
           type: "PROPOSE_SWAP",
-          toId,
-          give: { props: giveProps, money: giveMoneyVal },
-          receive: { props: recvProps, money: recvMoneyVal },
+          toId: targetId,
+          give: { props: [...giveSel], money: parseInt(giveMoney.value, 10) || 0 },
+          receive: { props: [...recvSel], money: parseInt(recvMoney.value, 10) || 0 },
         },
       });
       hide(panel);
@@ -3713,13 +3786,25 @@ export class UI {
     const panel = this.incomingSwapPanel;
     const swap = state.pendingSwap;
 
-    if (!swap || swap.toId !== myId) {
+    if (!swap || (swap.toId !== myId && swap.fromId !== myId)) {
       hide(panel);
       return;
     }
 
     panel.innerHTML = "";
     const board = getBoard(state.boardId);
+
+    // Proposer view: just a pending note while the counterparty decides.
+    if (swap.fromId === myId) {
+      const to = state.players.find((p) => p.id === swap.toId);
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:12px;color:var(--gold);";
+      note.textContent = `${t("trade.pending")} ${to?.name ?? "?"}…`;
+      panel.appendChild(note);
+      show(panel, "block");
+      return;
+    }
+
     const from = state.players.find((p) => p.id === swap.fromId);
 
     const title = document.createElement("div");
@@ -3727,21 +3812,66 @@ export class UI {
     title.textContent = `${t("swap.from")} ${from?.name ?? "?"}`;
     panel.appendChild(title);
 
-    const giveNames = swap.give.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
-    const recvNames = swap.receive.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
+    // Read-only two-column view FROM THE RECIPIENT's perspective:
+    // their "give" leg is what I RECEIVE; their "receive" leg is what I GIVE.
+    const cardList = (positions: number[], money: number): HTMLElement => {
+      const wrap = document.createElement("div");
+      for (const pos of positions) {
+        const tile = board.tiles[pos];
+        if (!tile) continue;
+        const group = (tile as { group?: string }).group;
+        const card = document.createElement("div");
+        card.className = "trade-card";
+        card.style.cursor = "default";
+        card.innerHTML =
+          `<span class="tc-chip" style="background:${group ? this.groupCssColor(group) : "#555"};"></span>` +
+          `<span>${tile.name}</span>` +
+          `<span class="tc-value">${tilePrice(board, tile)}</span>`;
+        wrap.appendChild(card);
+      }
+      if (money > 0 || positions.length === 0) {
+        const m = document.createElement("div");
+        m.style.cssText = "font-size:12px;color:#ccc;margin-top:4px;";
+        m.textContent = `+ ${money} LPD`;
+        wrap.appendChild(m);
+      }
+      return wrap;
+    };
 
-    const info = document.createElement("div");
-    info.style.cssText = "font-size:12px;color:#ccc;margin-bottom:10px;";
-    info.innerHTML = `
-      <div><strong>${t("swap.give")}</strong> ${recvNames} + ${swap.receive.money} LPD</div>
-      <div><strong>${t("swap.receive")}</strong> ${giveNames} + ${swap.give.money} LPD</div>
-    `;
-    panel.appendChild(info);
+    const grid = document.createElement("div");
+    grid.className = "trade-grid";
+
+    const giveCol = document.createElement("div");
+    giveCol.innerHTML = `<div class="trade-col-title">${t("trade.youGive")}</div>`;
+    giveCol.appendChild(cardList(swap.receive.props, swap.receive.money));
+    const recvCol = document.createElement("div");
+    recvCol.innerHTML = `<div class="trade-col-title">${t("trade.youReceive")}</div>`;
+    recvCol.appendChild(cardList(swap.give.props, swap.give.money));
+    grid.appendChild(giveCol);
+    grid.appendChild(recvCol);
+    panel.appendChild(grid);
+
+    // Value delta from my perspective.
+    const legValue = (positions: number[], money: number) =>
+      positions.reduce((sum, pos) => sum + tilePrice(board, board.tiles[pos]!), 0) + money;
+    const iGive = legValue(swap.receive.props, swap.receive.money);
+    const iGet = legValue(swap.give.props, swap.give.money);
+    const delta = iGet - iGive;
+    const summary = document.createElement("div");
+    summary.id = "tradeSummary";
+    const deltaColor = delta === 0 ? "#aaa" : delta > 0 ? "#22c55e" : "#ef4444";
+    summary.innerHTML =
+      `<span>${t("trade.youGive")}: <strong>${iGive}</strong></span>` +
+      `<span style="color:${deltaColor};font-weight:bold;">Δ ${delta > 0 ? "+" : ""}${delta}</span>` +
+      `<span>${t("trade.youReceive")}: <strong>${iGet}</strong></span>`;
+    summary.title = t("trade.approxValue");
+    panel.appendChild(summary);
 
     const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:8px;";
+    btnRow.style.cssText = "display:flex;gap:8px;margin-top:10px;";
 
     const acceptBtn = document.createElement("button");
+    acceptBtn.style.background = "#16a34a";
     acceptBtn.textContent = t("swap.accept");
     acceptBtn.addEventListener("click", () => {
       this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: true } });
