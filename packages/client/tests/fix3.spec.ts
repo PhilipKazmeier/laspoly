@@ -189,7 +189,8 @@ test.describe("Fix-3: Figure picker, Mein Eigentum, i18n, Leave-to-lobby", () =>
     expect(rollTextDE?.trim()).toMatch(/Würfeln/i);
 
     // Open settings and toggle to EN
-    await page.locator("button[title='Einstellungen']").click();
+    // Two ⚙ buttons exist (lobby + game header) — target the in-game one.
+    await page.locator("#settingsHdrBtn").click();
     await expect(page.locator("#settingsOverlay")).toBeVisible({ timeout: 5_000 });
     await page.locator("#localeENBtn").click();
     await page.waitForTimeout(500);

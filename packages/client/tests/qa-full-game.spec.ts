@@ -15,6 +15,20 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
 
+/** Poll until the next actionable prompt (or game over) instead of a fixed sleep. */
+async function waitForNextPrompt(page: Page, timeout = 12_000): Promise<void> {
+  await page.waitForFunction(() => {
+    const vis = (id: string) => {
+      const el = document.getElementById(id);
+      return !!el && el.style.display !== "none" && el.style.display !== "";
+    };
+    return vis("buyOfferPanel") || vis("endTurnBtn") || vis("rollBtn") ||
+      vis("ransomBtn") || vis("actionCardPopup") ||
+      (document.getElementById("gameOverBanner") as HTMLElement | null)?.style.display === "flex";
+  }, undefined, { timeout }).catch(() => null);
+}
+
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SCREENSHOTS_DIR = path.join(__dirname, "__screenshots__");
@@ -369,7 +383,7 @@ test.describe("QA Full-Game Playthrough", () => {
             flags.screenshotsTaken.jail = true;
           }
           await page.locator("#ransomBtn").click();
-          await page.waitForTimeout(8_000); // wait for animation
+          await waitForNextPrompt(page);
           const endAfterRansom = await page.locator("#endTurnBtn").isVisible().catch(() => false);
           if (endAfterRansom) await page.locator("#endTurnBtn").click();
           await page.waitForTimeout(200);

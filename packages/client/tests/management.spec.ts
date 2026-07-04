@@ -11,6 +11,20 @@
  */
 import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
 
+/** Poll until the next actionable prompt (or game over) instead of a fixed sleep. */
+async function waitForNextPrompt(page: Page, timeout = 12_000): Promise<void> {
+  await page.waitForFunction(() => {
+    const vis = (id: string) => {
+      const el = document.getElementById(id);
+      return !!el && el.style.display !== "none" && el.style.display !== "";
+    };
+    return vis("buyOfferPanel") || vis("endTurnBtn") || vis("rollBtn") ||
+      vis("ransomBtn") || vis("actionCardPopup") ||
+      (document.getElementById("gameOverBanner") as HTMLElement | null)?.style.display === "flex";
+  }, undefined, { timeout }).catch(() => null);
+}
+
+
 // ---- helpers ----------------------------------------------------------------
 
 async function injectStateRelay(page: Page) {
@@ -213,7 +227,7 @@ test.describe("Phase 2c Management UI", () => {
 
             // Now roll to advance the turn
             await page.locator("#rollBtn").click();
-            await page.waitForTimeout(8_000); // wait for animation
+            await waitForNextPrompt(page);
             // Decline purchase after roll (we already did the mortgage action)
             const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
             if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
@@ -228,7 +242,7 @@ test.describe("Phase 2c Management UI", () => {
 
         // Default: roll
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(8_000); // wait for animation
+        await waitForNextPrompt(page);
 
         // After roll: buy if we can afford it (state relay check)
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
