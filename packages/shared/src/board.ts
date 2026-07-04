@@ -57,6 +57,11 @@ export interface BoardRules {
    * Reduced 2026-06 to cut casino swing: 52.9% of wins exceeded player cash at 0.5/0.25.
    */
   casino?: { sixShare: number; doubleShare: number };
+  /**
+   * Skyscraper tier (extraBuildings house rule). Cost = hotelCost × costMult,
+   * rent = hotel rent × rentMult. Engine falls back to 2.0/2.5 when absent.
+   */
+  skyscraper?: { costMult: number; rentMult: number };
 }
 
 export interface BoardDefinition {

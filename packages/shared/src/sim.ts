@@ -39,6 +39,7 @@ export function simulateGame(
   seed: number,
   numPlayers: number,
   maxTurns: number,
+  settings: import("./types.js").GameSettings = {},
 ): SimResult {
   const players = Array.from({ length: numPlayers }, (_, i) => ({
     id: `p${i}`,
@@ -47,7 +48,7 @@ export function simulateGame(
     color: `#${i}`,
   }));
 
-  let state = createGame({ boardId, seed, players });
+  let state = createGame({ boardId, seed, players, settings });
   const initialAlive = aliveCount(state);
   const maxCommands = maxTurns * numPlayers * 4; // safety cap
   let commandCount = 0;
@@ -70,7 +71,9 @@ export function simulateGame(
     winnerId: state.winnerId,
     turns: state.turn,
     finished: state.phase === "finished",
-    bankruptcies: initialAlive - aliveCount(state) - (state.phase === "finished" ? 1 : 0),
+    // Historical metric: eliminations excluding the winner seat. Clamped at 0
+    // because round-limit finishes can end with everyone alive.
+    bankruptcies: Math.max(0, initialAlive - aliveCount(state) - (state.phase === "finished" ? 1 : 0)),
     firstEliminationTurn,
   };
 }
@@ -88,11 +91,27 @@ function main(): void {
   const NUM_PLAYERS = 4;
   const MAX_TURNS = 2000;
 
-  console.log(`Simulating ${N} games, ${NUM_PLAYERS} players, maxTurns=${MAX_TURNS}...`);
+  // LASPOLY_SIM_RULES=1: regression net for the house-rule combination —
+  // every rule on at once must still terminate and keep invariants.
+  const withRules = process.env["LASPOLY_SIM_RULES"] === "1";
+  const settings: import("./types.js").GameSettings = withRules
+    ? {
+        eventFrequency: "chaos",
+        unbuildableCount: 4,
+        roundLimit: 60,
+        noRentInJail: true,
+        extraBuildings: true,
+        buildsPerTurn: 3,
+      }
+    : {};
+
+  console.log(
+    `Simulating ${N} games, ${NUM_PLAYERS} players, maxTurns=${MAX_TURNS}${withRules ? " [ALL HOUSE RULES ON]" : ""}...`,
+  );
 
   const results: SimResult[] = [];
   for (let i = 0; i < N; i++) {
-    results.push(simulateGame("vegas", i, NUM_PLAYERS, MAX_TURNS));
+    results.push(simulateGame("vegas", i, NUM_PLAYERS, MAX_TURNS, settings));
   }
 
   const finished = results.filter((r) => r.finished);

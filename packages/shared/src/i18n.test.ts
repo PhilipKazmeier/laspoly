@@ -61,6 +61,20 @@ const SAMPLE_PARAMS: Record<string, Record<string, string | number>> = {
   specialEvent_jackpot: { round: 2 },
   specialEvent_buildingSale: { round: 2 },
   specialEvent_quietDay: { round: 2 },
+  specialEvent_earthquake: { round: 2 },
+  specialEvent_taxAudit: { round: 2 },
+  specialEvent_lottery: { round: 2 },
+  specialEvent_windfall: { round: 2 },
+  specialEvent_streetParty: { round: 2, group: "mistyrose" },
+  specialEvent_powerOutage: { round: 2 },
+  specialEvent_marketCrash: { round: 2 },
+  specialEvent_goldRush: { round: 2 },
+  earthquakeDamage: { player: "Alice", tile: "Park Lane", fee: 50 },
+  taxAuditPaid: { player: "Alice", amount: 120 },
+  lotteryWin: { player: "Alice", amount: 200 },
+  windfallCollect: { amount: 100 },
+  roundLimitReached: { round: 40, player: "Alice", worth: 2450 },
+  rentSkippedJail: { tile: "Park Lane", owner: "Alice" },
 };
 
 describe("i18n", () => {

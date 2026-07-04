@@ -12,6 +12,7 @@ import {
 } from "./board.js";
 import { makeRng, nextInt, rollDie, shuffle } from "./rng.js";
 import type {
+  ActiveEvent,
   Buildings,
   Command,
   EventId,
@@ -25,6 +26,10 @@ import type {
 
 const GO_TO_JAIL_POS = 30;
 
+// Skyscraper tier fallbacks when a board's rules block lacks the entry.
+const SKYSCRAPER_COST_MULT = 2.0;
+const SKYSCRAPER_RENT_MULT = 2.5;
+
 // ---- special events -------------------------------------------------------
 
 const EVENT_IDS: EventId[] = [
@@ -36,9 +41,146 @@ const EVENT_IDS: EventId[] = [
   'quietDay',
 ];
 
-function drawEvent(state: GameState): { id: EventId } {
-  const idx = nextInt(state.rng, 0, EVENT_IDS.length - 1);
-  return { id: EVENT_IDS[idx]! };
+/**
+ * Dramatic events, drawn ONLY under the "chaos" frequency: instant one-shots
+ * (applied at the round boundary, never stored) and multi-round modifiers.
+ * Kept out of "normal" so default games keep their historical balance and
+ * seed-determinism (verified by sim + tests).
+ */
+const INSTANT_EVENTS: EventId[] = ['earthquake', 'taxAudit', 'lottery', 'windfall'];
+const CHAOS_MODIFIERS: EventId[] = ['streetParty', 'powerOutage', 'marketCrash', 'goldRush'];
+
+/** Rounds a modifier stays active (default 1). */
+const EVENT_DURATIONS: Partial<Record<EventId, number>> = {
+  streetParty: 2,
+  powerOutage: 1,
+  marketCrash: 2,
+  goldRush: 2,
+};
+
+/** Flat repair fee per earthquake victim. */
+const EARTHQUAKE_FEE = 50;
+/** Everyone's windfall payout. */
+const WINDFALL_AMOUNT = 100;
+
+/**
+ * Draw an event id for the given frequency. Under "normal"/"rare" the pool is
+ * the classic six — one nextInt, preserving the historical RNG order that
+ * seed-based tests depend on. "chaos" draws from everything except quietDay.
+ */
+function drawEventId(rng: GameState["rng"], freq: GameState["eventFrequency"]): EventId {
+  const pool =
+    freq === "chaos"
+      ? [...EVENT_IDS.filter((id) => id !== 'quietDay'), ...INSTANT_EVENTS, ...CHAOS_MODIFIERS]
+      : EVENT_IDS;
+  const idx = nextInt(rng, 0, pool.length - 1);
+  return pool[idx]!;
+}
+
+/** True when an event with this id is currently in effect. */
+export function hasEvent(state: GameState, id: EventId): boolean {
+  return state.activeEvents.some((e) => e.id === id);
+}
+
+/** The active event with this id (for events carrying extra data), if any. */
+export function getEvent(state: GameState, id: EventId): ActiveEvent | undefined {
+  return state.activeEvents.find((e) => e.id === id);
+}
+
+/** True while the current player may still build this turn (buildsPerTurn 0 = unlimited). */
+export function canBuildMore(state: GameState): boolean {
+  return state.buildsPerTurn === 0 || state.buildsThisTurn < state.buildsPerTurn;
+}
+
+/** Random street group for a street party (consumes one RNG int). */
+function pickPartyGroup(rng: GameState["rng"], board: BoardDefinition): string {
+  const groups = [...new Set(
+    board.tiles.filter((t): t is StreetTile => t.type === "street").map((t) => t.group)
+  )];
+  return groups[nextInt(rng, 0, groups.length - 1)]!;
+}
+
+/**
+ * Apply a one-shot dramatic event at the round boundary. Effects use the
+ * same charge() path as everything else, so bankruptcies resolve normally;
+ * the caller re-checks the win condition afterwards.
+ */
+function applyInstantEvent(
+  state: GameState,
+  board: BoardDefinition,
+  id: EventId,
+  events: GameEvent[],
+): void {
+  const alive = state.players.filter((p) => p.alive);
+  switch (id) {
+    case 'earthquake': {
+      // Every player loses one house from their most-built street (hotels,
+      // factories and houseless players are spared) plus a flat repair fee.
+      for (const p of alive) {
+        let worstPos = -1;
+        let worstHouses = 0;
+        for (const [posStr, owner] of Object.entries(state.ownership)) {
+          if (owner !== p.id) continue;
+          const pos = Number(posStr);
+          const b = state.buildings[pos];
+          if (b && !b.hotel && !b.factory && b.houses > worstHouses) {
+            worstHouses = b.houses;
+            worstPos = pos;
+          }
+        }
+        if (worstPos < 0) continue;
+        state.buildings[worstPos]!.houses -= 1;
+        const tile = tileAt(board, worstPos);
+        events.push({
+          key: "earthquakeDamage",
+          params: { player: p.name, tile: tile.name, fee: EARTHQUAKE_FEE },
+          playerId: p.id,
+        });
+        charge(state, board, p, EARTHQUAKE_FEE, null, events);
+      }
+      break;
+    }
+    case 'taxAudit': {
+      // Richest-by-cash alive player (tie → lowest index) pays 10% into the pool.
+      let richest: PlayerState | null = null;
+      for (const p of alive) {
+        if (!richest || p.money > richest.money) richest = p;
+      }
+      if (!richest) break;
+      const amount = Math.floor(richest.money * 0.1);
+      if (amount <= 0) break;
+      richest.money -= amount; // always payable (10% of own cash)
+      state.casinoPool += amount;
+      events.push({
+        key: "taxAuditPaid",
+        params: { player: richest.name, amount },
+        playerId: richest.id,
+      });
+      break;
+    }
+    case 'lottery': {
+      // A random alive player wins a quarter of the casino pool.
+      if (alive.length === 0) break;
+      const winner = alive[nextInt(state.rng, 0, alive.length - 1)]!;
+      const win = Math.floor(state.casinoPool * 0.25);
+      if (win <= 0) break;
+      state.casinoPool -= win;
+      winner.money += win;
+      events.push({
+        key: "lotteryWin",
+        params: { player: winner.name, amount: win },
+        playerId: winner.id,
+      });
+      break;
+    }
+    case 'windfall': {
+      for (const p of alive) p.money += WINDFALL_AMOUNT;
+      events.push({ key: "windfallCollect", params: { amount: WINDFALL_AMOUNT } });
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 // ---- Action card definitions -----------------------------------------------
@@ -133,11 +275,37 @@ export function createGame(opts: NewGameOptions): GameState {
     lastRoll: [0, 0],
     color: p.color,
     figureIndex: p.figureIndex ?? 0,
+    diceSkin: p.diceSkin ?? 0,
   }));
   const rng = makeRng(opts.seed);
-  // Draw the first round's event before building state so it consumes the RNG in order
-  const firstEventIdx = nextInt(rng, 0, EVENT_IDS.length - 1);
-  const firstEvent: { id: EventId } = { id: EVENT_IDS[firstEventIdx]! };
+  const eventFrequency = opts.settings?.eventFrequency ?? "normal";
+  const roundLimit = opts.settings?.roundLimit ?? 0;
+  const noRentInJail = opts.settings?.noRentInJail ?? false;
+  const extraBuildings = opts.settings?.extraBuildings ?? false;
+  const buildsPerTurn = opts.settings?.buildsPerTurn ?? 1;
+  // Draw the first round's event before building state so it consumes the RNG
+  // in order (preserves historical seed-based dice streams under the default
+  // frequency). "off"/"rare" start without an event and consume no RNG.
+  let activeEvents: ActiveEvent[] = [];
+  if (eventFrequency === "normal" || eventFrequency === "chaos") {
+    const firstId = drawEventId(rng, eventFrequency);
+    // Instant events make no sense before anyone has assets; re-drawing would
+    // shift RNG, so map an instant first-draw to quiet start instead.
+    if (!INSTANT_EVENTS.includes(firstId)) {
+      const ev: ActiveEvent = { id: firstId, remainingRounds: EVENT_DURATIONS[firstId] ?? 1 };
+      if (firstId === 'streetParty') ev.group = pickPartyGroup(rng, board);
+      activeEvents = [ev];
+    }
+  }
+  // House rule: mark N random streets no-build. Drawn AFTER the first-event
+  // draw so the default (count 0) leaves the historical RNG order untouched.
+  const unbuildableCount = opts.settings?.unbuildableCount ?? 0;
+  const unbuildableFields =
+    unbuildableCount > 0
+      ? shuffle(rng, board.tiles.filter((t) => t.type === "street").map((t) => t.pos))
+          .slice(0, unbuildableCount)
+          .sort((a, b) => a - b)
+      : [];
   const actionDeck: number[] = [];
   return {
     boardId: opts.boardId,
@@ -158,8 +326,14 @@ export function createGame(opts: NewGameOptions): GameState {
     actionDiscard: [],
     pendingSwap: null,
     round: 1,
-    activeEvent: firstEvent,
-    builtThisTurn: false,
+    activeEvents,
+    eventFrequency,
+    unbuildableFields,
+    roundLimit,
+    noRentInJail,
+    extraBuildings,
+    buildsThisTurn: 0,
+    buildsPerTurn,
     traveledThisTurn: false,
     buildingCostMult,
     botDifficulty,
@@ -212,10 +386,16 @@ function isInPendingSwap(state: GameState, pos: number): boolean {
  */
 export function buildingChargeCost(
   tile: StreetTile,
-  kind: "house" | "hotel" | "factory",
+  kind: "house" | "hotel" | "factory" | "skyscraper",
   state: GameState,
 ): number {
-  const isSale = state.activeEvent?.id === 'buildingSale';
+  const isSale = hasEvent(state, 'buildingSale');
+  if (kind === "skyscraper") {
+    const mult = getBoard(state.boardId).rules.skyscraper?.costMult ?? SKYSCRAPER_COST_MULT;
+    const sky = tile.hotelCost * mult;
+    const base = isSale ? Math.floor(sky / 2) : sky;
+    return Math.round(base * state.buildingCostMult);
+  }
   if (kind === "house") {
     const base = isSale ? Math.floor(tile.houseCost / 2) : tile.houseCost;
     return Math.round(base * state.buildingCostMult);
@@ -232,9 +412,10 @@ export function buildingChargeCost(
 // ---- building validation --------------------------------------------------
 
 function canConstructHouse(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses >= 4) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses >= 4) return false;
   const members = groupMembers(board, tile.group);
   // Even build: this street can't have more houses than any other (build in order)
   for (const m of members) {
@@ -242,7 +423,7 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
     if (bm.factory) return false; // factory in group blocks houses
     if (state.mortgaged[m]) return false; // mortgaged in group blocks build
     if (m !== pos) {
-      const otherCount = bm.hotel ? 5 : bm.houses;
+      const otherCount = bm.hotel || bm.skyscraper ? 5 : bm.houses;
       // Can't build on this if another member has fewer houses
       if (otherCount < b.houses) return false;
     }
@@ -251,9 +432,10 @@ function canConstructHouse(state: GameState, board: BoardDefinition, pos: number
 }
 
 function canConstructHotel(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses !== 4) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses !== 4) return false;
   // Balance: single-street colour groups may build houses but NOT a hotel. A lone
   // street reaches its 4th house in only a few one-per-turn builds, and its hotel
   // rent (e.g. 2210 on Edison Walker) is a guaranteed early one-shot KO. Capping it
@@ -263,16 +445,17 @@ function canConstructHotel(state: GameState, board: BoardDefinition, pos: number
   for (const m of members) {
     if (m === pos) continue;
     const bm = getBuildingsAt(state, m);
-    // Others must have 4 houses or already a hotel
-    if (!bm.hotel && bm.houses !== 4) return false;
+    // Others must have 4 houses, a hotel, or already a skyscraper
+    if (!bm.hotel && !bm.skyscraper && bm.houses !== 4) return false;
   }
   return true;
 }
 
 function canConstructFactory(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
   const tile = tileAt(board, pos) as StreetTile;
   const b = getBuildingsAt(state, pos);
-  if (b.hotel || b.factory || b.houses !== 0) return false;
+  if (b.hotel || b.factory || b.skyscraper || b.houses !== 0) return false;
   const members = groupMembers(board, tile.group);
   for (const m of members) {
     if (state.mortgaged[m]) return false; // mortgaged blocks factory
@@ -280,6 +463,27 @@ function canConstructFactory(state: GameState, board: BoardDefinition, pos: numb
     const bm = getBuildingsAt(state, m);
     // Others must be empty or have a factory (no houses/hotels)
     if (!bm.factory && (bm.houses > 0 || bm.hotel)) return false;
+  }
+  return true;
+}
+
+/**
+ * Skyscraper (extraBuildings house rule): the tier above the hotel. Requires
+ * the rule enabled, a hotel standing here, and every group member carrying a
+ * hotel or skyscraper (top-tier even-build); mortgaged members block.
+ */
+function canConstructSkyscraper(state: GameState, board: BoardDefinition, pos: number): boolean {
+  if (!state.extraBuildings) return false;
+  if (state.unbuildableFields.includes(pos)) return false; // house rule
+  const tile = tileAt(board, pos) as StreetTile;
+  const b = getBuildingsAt(state, pos);
+  if (!b.hotel || b.skyscraper || b.factory) return false;
+  const members = groupMembers(board, tile.group);
+  for (const m of members) {
+    if (state.mortgaged[m]) return false;
+    if (m === pos) continue;
+    const bm = getBuildingsAt(state, m);
+    if (!bm.hotel && !bm.skyscraper) return false;
   }
   return true;
 }
@@ -357,17 +561,18 @@ function _addManagementCommands(
     const tile = board.tiles[pos];
     if (!tile) continue;
     const b = getBuildingsAt(state, pos);
-    const hasBuildings = b.houses > 0 || b.hotel || b.factory;
+    const hasBuildings = b.houses > 0 || b.hotel || b.factory || !!b.skyscraper;
 
     if (tile.type === "street") {
       // BUILD only if the player hasn't already built once this turn (one-build-per-turn).
-      if (!state.builtThisTurn && ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
+      if (canBuildMore(state) && ownsWholeGroup(state, board, p.id, (tile as StreetTile).group) && !state.mortgaged[pos]) {
         if (canConstructHouse(state, board, pos)) cmds.push("BUILD");
         if (canConstructHotel(state, board, pos)) cmds.push("BUILD");
         if (canConstructFactory(state, board, pos)) cmds.push("BUILD");
+        if (canConstructSkyscraper(state, board, pos)) cmds.push("BUILD");
       }
       if (hasBuildings) {
-        if (b.hotel || b.factory) cmds.push("SELL_BUILDING");
+        if (b.hotel || b.factory || b.skyscraper) cmds.push("SELL_BUILDING");
         else if (b.houses > 0 && canSellHouse(state, board, pos)) cmds.push("SELL_BUILDING");
       }
     } else {
@@ -425,37 +630,63 @@ export function legalCommandsFor(state: GameState, playerId: string): Command["t
 
 // ---- rent ---------------------------------------------------------------
 
-function streetRent(state: GameState, board: BoardDefinition, pos: number): number {
+// Rent-modifier collector: rent functions push event keys explaining WHY the
+// final amount differs from the printed card (money legibility — a player
+// must never wonder where a number came from). Keys are emitted as their own
+// events right after rentPaid.
+function streetRent(state: GameState, board: BoardDefinition, pos: number, mods?: string[]): number {
   const tile = tileAt(board, pos) as StreetTile;
   const b = state.buildings[pos];
   const ownerId = state.ownership[pos]!;
   if (b?.factory) return 0; // factory pays its owner, never charges visitors
-  if (b?.hotel) {
-    const r = tile.rent[5];
-    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+  let rent: number;
+  if (b?.skyscraper) {
+    const mult = board.rules.skyscraper?.rentMult ?? SKYSCRAPER_RENT_MULT;
+    rent = Math.floor(tile.rent[5] * mult);
+  } else if (b?.hotel) {
+    rent = tile.rent[5];
+  } else if (b && b.houses > 0) {
+    rent = tile.rent[b.houses]!;
+  } else {
+    // no buildings: base rent, doubled if owner holds the whole colour group
+    const base = tile.rent[0];
+    const monopoly = ownsWholeGroup(state, board, ownerId, tile.group);
+    rent = monopoly ? base * 2 : base;
+    if (monopoly) mods?.push("rentModMonopoly");
   }
-  if (b && b.houses > 0) {
-    const r = tile.rent[b.houses]!;
-    return state.activeEvent?.id === 'recession' ? Math.floor(r / 2) : r;
+  if (hasEvent(state, 'recession')) {
+    rent = Math.floor(rent / 2);
+    mods?.push("rentModRecession");
   }
-  // no buildings: base rent, doubled if owner holds the whole colour group
-  const base = tile.rent[0];
-  const fullGroupRent = ownsWholeGroup(state, board, ownerId, tile.group) ? base * 2 : base;
-  return state.activeEvent?.id === 'recession' ? Math.floor(fullGroupRent / 2) : fullGroupRent;
+  // Street party doubles rent in its group for the event's duration.
+  const party = getEvent(state, 'streetParty');
+  if (party?.group && party.group === tile.group) {
+    rent *= 2;
+    mods?.push("rentModParty");
+  }
+  return rent;
 }
 
-function stationRent(state: GameState, board: BoardDefinition, pos: number): number {
+function stationRent(state: GameState, board: BoardDefinition, pos: number, mods?: string[]): number {
+  if (hasEvent(state, 'powerOutage')) {
+    mods?.push("rentModPowerOutage");
+    return 0; // stations charge nothing this round
+  }
   const ownerId = state.ownership[pos]!;
   const count = groupOwnedCount(state, board, ownerId, "station");
   return board.rules.station.rent[Math.max(0, count - 1)] ?? 0;
 }
 
-function attractionRent(state: GameState, board: BoardDefinition, pos: number, diceSum: number): number {
+function attractionRent(state: GameState, board: BoardDefinition, pos: number, diceSum: number, mods?: string[]): number {
   const ownerId = state.ownership[pos]!;
   const both = ownsWholeGroup(state, board, ownerId, 'attraction');
   const factor = both ? board.rules.attraction.factorBoth : board.rules.attraction.factorOne;
   const base = diceSum * factor;
-  return state.activeEvent?.id === 'circus' ? base * 2 : base;
+  if (hasEvent(state, 'circus')) {
+    mods?.push("rentModCircus");
+    return base * 2;
+  }
+  return base;
 }
 
 // ---- money / bankruptcy --------------------------------------------------
@@ -722,7 +953,7 @@ function resolveLanding(
     if (ownerId === player.id) {
       // own a factory street -> collect revenue
       if (tile.type === "street" && state.buildings[pos]?.factory) {
-        const rev = (tile as StreetTile).factoryRevenue;
+        const rev = (tile as StreetTile).factoryRevenue * (hasEvent(state, 'goldRush') ? 2 : 1);
         player.money += rev;
         events.push({ key: "factoryRevenue", params: { player: player.name, tile: tile.name, amount: rev }, playerId: player.id });
       }
@@ -732,18 +963,34 @@ function resolveLanding(
       events.push({ key: "rentMortgaged", params: { tile: tile.name }, playerId: player.id });
       return;
     }
+    // House rule: a jailed owner collects no rent (TRAVEL tickets are a
+    // service fee, not rent — they stay unaffected).
+    const jailedOwner = playerById(state, ownerId);
+    if (state.noRentInJail && jailedOwner?.inJail) {
+      events.push({
+        key: "rentSkippedJail",
+        params: { tile: tile.name, owner: jailedOwner.name },
+        playerId: player.id,
+      });
+      return;
+    }
     // pay rent
     const diceSum = player.lastRoll[0] + player.lastRoll[1];
     let rent = 0;
-    if (tile.type === "street") rent = streetRent(state, board, pos);
-    else if (tile.type === "station") rent = stationRent(state, board, pos);
-    else if (tile.type === "attraction") rent = attractionRent(state, board, pos, diceSum);
+    const rentMods: string[] = [];
+    if (tile.type === "street") rent = streetRent(state, board, pos, rentMods);
+    else if (tile.type === "station") rent = stationRent(state, board, pos, rentMods);
+    else if (tile.type === "attraction") rent = attractionRent(state, board, pos, diceSum, rentMods);
     const owner = playerById(state, ownerId)!;
     events.push({
       key: "rentPaid",
       params: { player: player.name, owner: owner.name, tile: tile.name, amount: rent },
       playerId: player.id,
     });
+    // Money legibility: say WHY the amount differs from the printed card.
+    for (const mod of rentMods) {
+      events.push({ key: mod, params: {}, playerId: player.id });
+    }
     charge(state, board, player, rent, ownerId, events);
     return;
   }
@@ -794,7 +1041,7 @@ function performCasinoRoll(state: GameState, board: BoardDefinition, player: Pla
     const doubleShare = board.rules.casino?.doubleShare ?? 0.25;
     const fraction = cd1 === 6 ? sixShare : doubleShare;
     const rawShare = Math.floor(state.casinoPool * fraction);
-    const share = state.activeEvent?.id === 'jackpot'
+    const share = hasEvent(state, 'jackpot')
       ? Math.floor(rawShare * 1.5)
       : rawShare;
     const actualShare = Math.min(share, state.casinoPool); // never exceed pool
@@ -822,7 +1069,7 @@ function moveBy(state: GameState, board: BoardDefinition, player: PlayerState, s
   player.position = to;
   // passed or landed on GO (wrapped past 0)
   if (to < from || steps >= 40) {
-    const boomMult = state.activeEvent?.id === 'boom' ? 2 : 1;
+    const boomMult = hasEvent(state, 'boom') ? 2 : 1;
     if (to === 0) {
       const amount = board.rules.goLandMoney * boomMult;
       player.money += amount;
@@ -894,7 +1141,7 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
   const oldIdx = state.currentPlayerIndex;
   state.doublesCount = 0;
   state.extraRoll = false;
-  state.builtThisTurn = false;
+  state.buildsThisTurn = 0;
   state.traveledThisTurn = false;
   state.currentPlayerIndex = nextAliveIndex(state);
   state.turn += 1;
@@ -903,11 +1150,66 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
   // Round boundary: index wrapped (new index <= old, meaning we cycled past the end)
   if (state.currentPlayerIndex <= oldIdx) {
     state.round += 1;
-    state.activeEvent = drawEvent(state);
-    events.push({
-      key: `specialEvent_${state.activeEvent.id}` as string,
-      params: { round: state.round },
-    });
+
+    // House rule: round limit — the game ends here with a net-worth winner.
+    if (state.roundLimit > 0 && state.round > state.roundLimit) {
+      const ranked = state.players
+        .map((p, idx) => ({ p, idx, worth: p.alive ? netWorth(state, p.id) : -1 }))
+        .filter((x) => x.p.alive)
+        .sort((a, b) => (b.worth - a.worth) || (a.idx - b.idx));
+      const winner = ranked[0]!.p;
+      state.winnerId = winner.id;
+      state.phase = "finished";
+      events.push({
+        key: "roundLimitReached",
+        params: { round: state.roundLimit, player: winner.name, worth: ranked[0]!.worth },
+        playerId: winner.id,
+      });
+      events.push({ key: "gameOver", params: { player: winner.name }, playerId: winner.id });
+      return;
+    }
+
+    // Expire running events first: decrement durations, drop the finished ones.
+    state.activeEvents = state.activeEvents
+      .map((e) => ({ ...e, remainingRounds: e.remainingRounds - 1 }))
+      .filter((e) => e.remainingRounds > 0);
+
+    // Draw per the configured frequency.
+    const freq = state.eventFrequency;
+    const draws =
+      freq === "off" ? false
+      : freq === "rare" ? nextInt(state.rng, 1, 3) === 1
+      : true; // normal + chaos draw every round
+    if (draws) {
+      const id = drawEventId(state.rng, freq);
+      const board = getBoard(state.boardId);
+      if (INSTANT_EVENTS.includes(id)) {
+        // One-shot: announce, apply immediately, never stored.
+        events.push({ key: `specialEvent_${id}` as string, params: { round: state.round } });
+        applyInstantEvent(state, board, id, events);
+        // An instant fee can bankrupt players — including the incoming
+        // current player. Re-seat and re-check the win condition.
+        if (checkWin(state, events)) return;
+        if (!currentPlayer(state).alive) {
+          state.currentPlayerIndex = nextAliveIndex(state);
+        }
+      } else {
+        const duration = EVENT_DURATIONS[id] ?? 1;
+        const group = id === 'streetParty' ? pickPartyGroup(state.rng, board) : undefined;
+        // Extend/refresh rather than duplicate if the same event is already running.
+        const existing = state.activeEvents.find((e) => e.id === id);
+        if (existing) {
+          existing.remainingRounds = Math.max(existing.remainingRounds, duration);
+          if (group) existing.group = group;
+        } else {
+          state.activeEvents.push(group ? { id, remainingRounds: duration, group } : { id, remainingRounds: duration });
+        }
+        events.push({
+          key: `specialEvent_${id}` as string,
+          params: group ? { round: state.round, group } : { round: state.round },
+        });
+      }
+    }
   }
 
   const next = currentPlayer(state);
@@ -1036,7 +1338,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (isInPendingSwap(state, pos)) throw new Error("Property is part of a pending swap");
       if (state.mortgaged[pos]) throw new Error("Property is mortgaged");
       if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) throw new Error("Must own entire group to build");
-      if (state.builtThisTurn) throw new Error("one building per turn");
+      if (!canBuildMore(state)) throw new Error("build limit reached this turn");
 
       const st = tile as StreetTile;
       if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
@@ -1058,6 +1360,15 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         b.hotel = true;
         b.factory = false;
         events.push({ key: 'built', params: { player: p.name, building: 'hotel', tile: st.name, amount: cost }, playerId: p.id });
+      } else if (command.building === 'skyscraper') {
+        if (!canConstructSkyscraper(state, board, pos)) throw new Error('Cannot build skyscraper here');
+        const cost = buildingChargeCost(st, 'skyscraper', state);
+        if (p.money < cost) throw new Error('Cannot afford skyscraper');
+        p.money -= cost;
+        b.hotel = false;
+        b.skyscraper = true;
+        b.factory = false;
+        events.push({ key: 'built', params: { player: p.name, building: 'skyscraper', tile: st.name, amount: cost }, playerId: p.id });
       } else if (command.building === 'factory') {
         if (!canConstructFactory(state, board, pos)) throw new Error('Cannot build factory here');
         const cost = buildingChargeCost(st, 'factory', state);
@@ -1068,7 +1379,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
         b.factory = true;
         events.push({ key: 'built', params: { player: p.name, building: 'factory', tile: st.name, amount: cost }, playerId: p.id });
       }
-      state.builtThisTurn = true;
+      state.buildsThisTurn += 1;
       // BUILD does not advance the turn
       break;
     }
@@ -1082,7 +1393,17 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       const tile = tileAt(board, pos) as StreetTile;
       const b = getBuildingsAt(state, pos);
 
-      if (b.hotel) {
+      if (b.skyscraper) {
+        // skyscraper knockdown -> the hotel beneath reappears, refund = 2× mortgage
+        const refund = tile.mortgage * 2;
+        if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
+        state.buildings[pos]!.skyscraper = false;
+        state.buildings[pos]!.hotel = true;
+        state.buildings[pos]!.houses = 0;
+        state.buildings[pos]!.factory = false;
+        p.money += refund;
+        events.push({ key: "soldBuilding", params: { player: p.name, building: "skyscraper", tile: tile.name, amount: refund }, playerId: p.id });
+      } else if (b.hotel) {
         // hotel knockdown -> 4 houses appear, refund = mortgage value
         const refund = tile.mortgage;
         if (!state.buildings[pos]) state.buildings[pos] = { houses: 0, hotel: false, factory: false };
@@ -1119,7 +1440,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (state.mortgaged[pos]) throw new Error("Property is already mortgaged");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
-      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before mortgaging");
+      if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error("Must sell buildings before mortgaging");
       const mv = mortgageValue(board, tile);
       state.mortgaged[pos] = true;
       p.money += mv;
@@ -1152,8 +1473,9 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       if (state.mortgaged[pos]) throw new Error("Cannot sell mortgaged property directly");
       const tile = tileAt(board, pos);
       const b = getBuildingsAt(state, pos);
-      if (b.houses > 0 || b.hotel || b.factory) throw new Error("Must sell buildings before selling property");
-      const refund = Math.floor(tilePrice(board, tile) / 2);
+      if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error("Must sell buildings before selling property");
+      let refund = Math.floor(tilePrice(board, tile) / 2);
+      if (hasEvent(state, 'marketCrash')) refund = Math.floor(refund / 2); // crash halves sale value
       p.money += refund;
       delete state.ownership[pos];
       delete state.buildings[pos];
@@ -1222,7 +1544,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       for (const pos of give.props) {
         if (state.ownership[pos] !== proposer.id) throw new Error(`Proposer does not own property at ${pos}`);
         const b = getBuildingsAt(state, pos);
-        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error(`Property at ${pos} has buildings - sell them first`);
         if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
       }
       if (give.money < 0) throw new Error("Give money must be non-negative");
@@ -1232,7 +1554,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       for (const pos of receive.props) {
         if (state.ownership[pos] !== toId) throw new Error(`Target does not own property at ${pos}`);
         const b = getBuildingsAt(state, pos);
-        if (b.houses > 0 || b.hotel || b.factory) throw new Error(`Property at ${pos} has buildings - sell them first`);
+        if (b.houses > 0 || b.hotel || b.factory || b.skyscraper) throw new Error(`Property at ${pos} has buildings - sell them first`);
         if (state.mortgaged[pos]) throw new Error(`Property at ${pos} is mortgaged`);
       }
       if (receive.money < 0) throw new Error("Receive money must be non-negative");
@@ -1330,7 +1652,7 @@ export function applyCommand(prev: GameState, command: Command): ReduceResult {
       // proposal and accept (the proposer can act on their own turn meanwhile).
       for (const pos of [...swap.give.props, ...swap.receive.props]) {
         const b = getBuildingsAt(state, pos);
-        if (state.mortgaged[pos] || b.houses > 0 || b.hotel || b.factory) {
+        if (state.mortgaged[pos] || b.houses > 0 || b.hotel || b.factory || b.skyscraper) {
           state.pendingSwap = null;
           events.push({ key: "swapFailed", params: { from: from.name, to: to.name, reason: "property encumbered" }, playerId: from.id });
           return { state, events };
@@ -1392,8 +1714,8 @@ export function ownedPropsOf(state: GameState, playerId: string): number[] {
     .map(([pos]) => Number(pos));
 }
 
-export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory"): boolean {
-  if (state.builtThisTurn) return false; // one-build-per-turn
+export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" | "factory" | "skyscraper"): boolean {
+  if (!canBuildMore(state)) return false; // per-turn build limit
   const board = getBoard(state.boardId);
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
@@ -1403,7 +1725,76 @@ export function canBuild(state: GameState, pos: number, kind: "house" | "hotel" 
   if (kind === "house") return canConstructHouse(state, board, pos);
   if (kind === "hotel") return canConstructHotel(state, board, pos);
   if (kind === "factory") return canConstructFactory(state, board, pos);
+  if (kind === "skyscraper") return canConstructSkyscraper(state, board, pos);
   return false;
+}
+
+export type BuildBlockReason =
+  | "buildLimitUsed"       // an otherwise-legal build is masked by the one-per-turn limit
+  | "needFourOnAll"        // hotel: other group members lack their 4 houses
+  | "singleStreetNoHotel"  // hotel: single-street groups are hotel-capped (balance rule)
+  | "evenBuild"            // house: another member has fewer houses — build there first
+  | "mortgagedInGroup";    // house: a mortgaged group member blocks building
+
+/**
+ * Explains WHY a build the player might reasonably expect is currently
+ * blocked (UI transparency: the client shows a disabled button with this
+ * reason instead of silently hiding it). Returns null when the build is
+ * either possible or not a sensible expectation on this tile at all
+ * (e.g. hotel on a street without 4 houses yet).
+ */
+export function buildBlockReason(
+  state: GameState,
+  pos: number,
+  kind: "house" | "hotel" | "factory",
+): BuildBlockReason | null {
+  const board = getBoard(state.boardId);
+  const tile = board.tiles[pos];
+  if (!tile || tile.type !== "street") return null;
+  const p = currentPlayer(state);
+  if (state.ownership[pos] !== p.id) return null;
+  if (!ownsWholeGroup(state, board, p.id, (tile as StreetTile).group)) return null;
+  if (state.mortgaged[pos]) return null;
+
+  // The per-turn build limit masking an otherwise legal build.
+  if (!canBuildMore(state)) {
+    const legal =
+      kind === "house" ? canConstructHouse(state, board, pos)
+      : kind === "hotel" ? canConstructHotel(state, board, pos)
+      : canConstructFactory(state, board, pos);
+    if (legal) return "buildLimitUsed";
+  }
+
+  const b = getBuildingsAt(state, pos);
+  const members = groupMembers(board, (tile as StreetTile).group);
+
+  if (kind === "hotel") {
+    // Only explain when the player is plausibly AT the hotel step here.
+    if (b.hotel || b.factory || b.skyscraper || b.houses !== 4) return null;
+    if (members.length < 2) return "singleStreetNoHotel";
+    for (const m of members) {
+      if (m === pos) continue;
+      const bm = getBuildingsAt(state, m);
+      if (!bm.hotel && bm.houses !== 4) return "needFourOnAll";
+    }
+    return null;
+  }
+
+  if (kind === "house") {
+    if (b.hotel || b.factory || b.skyscraper || b.houses >= 4) return null;
+    for (const m of members) {
+      if (state.mortgaged[m]) return "mortgagedInGroup";
+    }
+    for (const m of members) {
+      if (m === pos) continue;
+      const bm = getBuildingsAt(state, m);
+      const otherCount = bm.hotel ? 5 : bm.houses;
+      if (otherCount < b.houses) return "evenBuild";
+    }
+    return null;
+  }
+
+  return null;
 }
 
 export function canSellBuilding(state: GameState, pos: number): boolean {
@@ -1411,6 +1802,7 @@ export function canSellBuilding(state: GameState, pos: number): boolean {
   const tile = board.tiles[pos];
   if (!tile || tile.type !== "street") return false;
   const b = getBuildingsAt(state, pos);
+  if (b.skyscraper) return true;
   if (b.hotel) return true;
   if (b.factory) return true;
   if (b.houses > 0) return canSellHouse(state, board, pos);
@@ -1423,7 +1815,7 @@ export function canMortgage(state: GameState, pos: number): boolean {
   if (!tile) return false;
   if (state.mortgaged[pos]) return false;
   const b = getBuildingsAt(state, pos);
-  return !(b.houses > 0 || b.hotel || b.factory);
+  return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper);
 }
 
 export function canUnmortgage(state: GameState, pos: number): boolean {
@@ -1443,7 +1835,7 @@ export function canSellProperty(state: GameState, pos: number): boolean {
   if (!tile) return false;
   if (state.mortgaged[pos]) return false;
   const b = getBuildingsAt(state, pos);
-  return !(b.houses > 0 || b.hotel || b.factory);
+  return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper);
 }
 
 export function canTravelFrom(state: GameState, playerId: string): number[] {
@@ -1504,8 +1896,10 @@ export function netWorth(state: GameState, playerId: string): number {
     if (!b) continue;
     if (tile.type === "street") {
       const st = tile as import("./board.js").StreetTile;
+      // Skyscraper sell-back chain: 2×mortgage (own refund) + the hotel beneath
+      if (b.skyscraper) total += st.mortgage * 2 + st.mortgage;
       // Hotel sell-back: st.mortgage (mirrors SELL_BUILDING hotel)
-      if (b.hotel) total += st.mortgage;
+      else if (b.hotel) total += st.mortgage;
       // Houses sell-back: st.mortgage per house
       else if (b.houses > 0) total += b.houses * st.mortgage;
       // Factory sell-back: st.houseCost (mirrors SELL_BUILDING factory)

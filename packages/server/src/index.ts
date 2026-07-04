@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { applyCommand, botDecide, currentPlayer, formatEvent } from "@laspoly/shared";
 import type { GameEvent, Locale } from "@laspoly/shared";
-import { RoomManager, GameRoom, pickAutoAction } from "./room.js";
+import { RoomManager, GameRoom, pickAutoAction, validateTokenImage, MAX_TOKEN_IMAGE_CHARS } from "./room.js";
 import type { ClientMessage, ServerMessage } from "@laspoly/shared";
 
 const PORT = Number(process.env["PORT"] ?? 8080);
@@ -53,6 +53,71 @@ function log(msg: string): void {
 // ---- HTTP server -----------------------------------------------------------
 
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // Custom token-image upload. HTTP POST instead of a WS message: the 8KB
+  // WebSocket payload cap is server-wide and raising it would multiply the
+  // JSON-parse DoS surface for EVERY message. Auth = the session resume token
+  // (random 16 bytes) — strictly stronger than any new scheme.
+  if (req.url === "/api/token-image") {
+    // Dev CORS: the vite client origin (4173/5173) differs from 8080.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+    if (req.method !== "POST") { res.writeHead(405); res.end(); return; }
+    // Read the body with a hard byte cap (data URL chars + JSON overhead).
+    const MAX_BODY = MAX_TOKEN_IMAGE_CHARS + 4096;
+    let body = "";
+    let overflow = false;
+    req.on("data", (chunk: Buffer) => {
+      if (overflow) return;
+      body += chunk.toString("utf8");
+      if (body.length > MAX_BODY) {
+        overflow = true;
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "payload too large" }));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (overflow) return;
+      try {
+        const parsed: unknown = JSON.parse(body);
+        const { roomId, playerId, token, image } = parsed as Record<string, unknown>;
+        if (typeof roomId !== "string" || typeof playerId !== "string" || typeof token !== "string") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "roomId, playerId, token required" }));
+          return;
+        }
+        const room = rooms.get(roomId);
+        if (!room || room.getToken(playerId) !== token) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid credentials" }));
+          return;
+        }
+        const imgErr = validateTokenImage(image);
+        if (imgErr) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: imgErr }));
+          return;
+        }
+        const setErr = room.setCustomImage(playerId, image as string);
+        if (setErr) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: setErr }));
+          return;
+        }
+        // Memory note: worst case 50 rooms × 6 players × 200KB ≈ 60MB — acceptable.
+        broadcastToRoom(room, { t: "room", room: room.toView() });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid JSON" }));
+      }
+    });
+    return;
+  }
+
   // Health endpoint for container/orchestrator health checks
   if (req.url === "/health" || req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -363,8 +428,8 @@ function validateCommand(cmd: unknown): string | null {
     case "BUILD": {
       const pos = cmd["pos"]; const building = cmd["building"];
       if (!isFiniteInt(pos) || pos < 0 || pos > 39) return "BUILD.pos must be integer 0–39";
-      if (!isStr(building) || !["house","hotel","factory"].includes(building))
-        return "BUILD.building must be 'house', 'hotel', or 'factory'";
+      if (!isStr(building) || !["house","hotel","factory","skyscraper"].includes(building))
+        return "BUILD.building must be 'house', 'hotel', 'factory', or 'skyscraper'";
       break;
     }
     case "SELL_BUILDING": case "MORTGAGE": case "UNMORTGAGE": case "SELL_PROPERTY": {
@@ -530,8 +595,15 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         throw new Error("Server is full");
       if (cs.roomsCreated >= MAX_ROOMS_PER_CONN)
         throw new Error("Room creation limit reached");
+      // Optional room password (empty string = public). NEVER logged.
+      let password: string | null = null;
+      if (msg.password !== undefined && msg.password !== "") {
+        if (!isStr(msg.password) || msg.password.length > 64)
+          throw new Error("Password must be 1\u201364 characters");
+        password = msg.password;
+      }
       const botCount = Math.max(0, Math.min(MAX_BOT_COUNT, msg.botCount));
-      const room = rooms.create(msg.name, msg.boardId, botCount);
+      const room = rooms.create(msg.name, msg.boardId, botCount, password);
       const playerId = room.addHuman(msg.nickname);
       const token = room.getToken(playerId)!;
       cs.roomId = room.id;
@@ -553,6 +625,10 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         throw new Error(`Nickname must be 1–${MAX_NICKNAME_LEN} characters`);
       const room = rooms.get(msg.roomId);
       if (!room) throw new Error("Room not found");
+      // Password gate FIRST so locked rooms leak no state details. Plaintext
+      // compare by design (see GameRoom.password); resume tokens bypass this.
+      if (room.password !== null && msg.password !== room.password)
+        throw new Error("Wrong password");
       if (room.started) throw new Error("Game already started");
       const humanCount = room.players.filter((p) => !p.isBot).length;
       if (humanCount + room.botCount >= MAX_PLAYERS_PER_ROOM) throw new Error("Room is full");
@@ -676,6 +752,10 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       log(`room:${room.id} ${nickname} reconnected`);
       send(ws, { t: "resumed", roomId: room.id, playerId: msg.playerId });
       if (room.started && room.state) {
+        // Room view FIRST so cosmetics (custom token images) are cached before
+        // the state snap renders tokens; the client suppresses the room PANEL
+        // while resuming but always caches the cosmetics.
+        send(ws, { t: "room", room: room.toView() });
         send(ws, { t: "state", state: room.state, events: [] });
       } else {
         send(ws, { t: "room", room: room.toView() });
@@ -706,7 +786,9 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
       if (!room) throw new Error("Room not found");
       if (!isStr(msg.color)) throw new Error("color must be a string");
       if (!isFiniteInt(msg.figureIndex)) throw new Error("figureIndex must be an integer");
-      const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex);
+      if (msg.diceSkin !== undefined && !isFiniteInt(msg.diceSkin))
+        throw new Error("diceSkin must be an integer");
+      const err = room.chooseFigure(cs.playerId, msg.color, msg.figureIndex, msg.diceSkin);
       if (err) throw new Error(err);
       broadcastToRoom(room, { t: "room", room: room.toView() });
       break;
@@ -748,6 +830,36 @@ function handleMessage(ws: WebSocket, cs: ConnState, msg: ClientMessage): void {
         if (!["easy", "normal", "hard"].includes(s["botDifficulty"] as string))
           throw new Error("botDifficulty must be 'easy', 'normal', or 'hard'");
         settings.botDifficulty = s["botDifficulty"] as "easy" | "normal" | "hard";
+      }
+      if (s["eventFrequency"] !== undefined) {
+        if (!["off", "rare", "normal", "chaos"].includes(s["eventFrequency"] as string))
+          throw new Error("eventFrequency must be 'off', 'rare', 'normal', or 'chaos'");
+        settings.eventFrequency = s["eventFrequency"] as import("@laspoly/shared").EventFrequency;
+      }
+      if (s["unbuildableCount"] !== undefined) {
+        if (typeof s["unbuildableCount"] !== "number" || !Number.isInteger(s["unbuildableCount"] as number))
+          throw new Error("unbuildableCount must be an integer");
+        settings.unbuildableCount = Math.min(8, Math.max(0, s["unbuildableCount"] as number));
+      }
+      if (s["roundLimit"] !== undefined) {
+        if (typeof s["roundLimit"] !== "number" || !Number.isInteger(s["roundLimit"] as number))
+          throw new Error("roundLimit must be an integer");
+        settings.roundLimit = Math.min(500, Math.max(0, s["roundLimit"] as number));
+      }
+      if (s["noRentInJail"] !== undefined) {
+        if (typeof s["noRentInJail"] !== "boolean")
+          throw new Error("noRentInJail must be a boolean");
+        settings.noRentInJail = s["noRentInJail"] as boolean;
+      }
+      if (s["extraBuildings"] !== undefined) {
+        if (typeof s["extraBuildings"] !== "boolean")
+          throw new Error("extraBuildings must be a boolean");
+        settings.extraBuildings = s["extraBuildings"] as boolean;
+      }
+      if (s["buildsPerTurn"] !== undefined) {
+        if (typeof s["buildsPerTurn"] !== "number" || !Number.isInteger(s["buildsPerTurn"] as number))
+          throw new Error("buildsPerTurn must be an integer");
+        settings.buildsPerTurn = Math.min(10, Math.max(0, s["buildsPerTurn"] as number));
       }
       room.updateSettings(settings);
       broadcastToRoom(room, { t: "room", room: room.toView() });

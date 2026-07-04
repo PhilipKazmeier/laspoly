@@ -282,6 +282,45 @@ class AudioPlayer {
     document.addEventListener("keydown", unlock, { once: true });
   }
 
+  // Lazy shared context for short synthesized UI tones (no audio assets).
+  private uiCtx: AudioContext | null = null;
+
+  /**
+   * Short synthesized UI tone: "card" = quick two-note rising blip on a card
+   * draw, "turn" = soft two-note chord when it becomes YOUR turn. Both well
+   * under 0.5s so they never outlast their moment.
+   */
+  playUiTone(kind: "card" | "turn"): void {
+    if (this.muted) return;
+    try {
+      if (!this.uiCtx) this.uiCtx = new AudioContext();
+      const ctx = this.uiCtx;
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+      const vol = this.sfxVolume * 0.22;
+      const note = (freq: number, start: number, dur: number) => {
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        const env = ctx.createGain();
+        const t0 = ctx.currentTime + start;
+        env.gain.setValueAtTime(0, t0);
+        env.gain.linearRampToValueAtTime(vol, t0 + 0.02);
+        env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(env);
+        env.connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.05);
+      };
+      if (kind === "card") {
+        note(660, 0, 0.16);
+        note(880, 0.12, 0.2);
+      } else {
+        note(523.3, 0, 0.3);
+        note(659.3, 0.02, 0.32);
+      }
+    } catch { /* unsupported browser — ignore */ }
+  }
+
   get isMuted(): boolean { return this.muted; }
   get currentSfxVolume(): number { return this.sfxVolume; }
   get currentMusicVolume(): number { return this.musicVolume; }
@@ -322,8 +361,14 @@ class AudioPlayer {
     } catch { /* ignore */ }
   }
 
-  // Maximum playback duration in seconds for sounds that can be too long.
+  // Maximum playback duration in seconds, matched to the on-screen action so
+  // sounds never outlast what they accompany. Raw file lengths for reference:
+  // dice 2.06s (roll sequence ≈1.8s), buy 2.09s (instant), build 4.57s
+  // (placement ≈0.4s), jail 32s (siren), rent 0.72s + gameover 5.12s uncapped.
   private static readonly MAX_DURATION: Partial<Record<SfxName, number>> = {
+    dice: 1.9,
+    buy: 1.0,
+    build: 0.7,
     jail: 1.2,
   };
 
@@ -340,12 +385,22 @@ class AudioPlayer {
       const clone = el.cloneNode() as HTMLAudioElement;
       clone.volume = this.sfxVolume;
       void clone.play().catch(() => {/* autoplay blocked — ignore */});
-      // Cap duration for sounds that would otherwise run too long (e.g. jail siren)
+      // Cap duration, fading out over ~150ms instead of a hard cut.
       const maxDur = AudioPlayer.MAX_DURATION[name];
       if (maxDur !== undefined) {
         setTimeout(() => {
-          clone.pause();
-          clone.currentTime = 0;
+          const FADE_STEPS = 6;
+          const startVol = clone.volume;
+          let step = 0;
+          const fade = setInterval(() => {
+            step++;
+            clone.volume = Math.max(0, startVol * (1 - step / FADE_STEPS));
+            if (step >= FADE_STEPS) {
+              clearInterval(fade);
+              clone.pause();
+              clone.currentTime = 0;
+            }
+          }, 25);
         }, maxDur * 1000);
       }
     } catch {

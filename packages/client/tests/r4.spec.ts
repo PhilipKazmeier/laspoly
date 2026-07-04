@@ -64,7 +64,7 @@ test("r4-figure-picker", async ({ page }) => {
   // is assigned by the server (no colour grid).
   await expect(page.locator("#figurePicker canvas")).toBeVisible({ timeout: 5_000 });
   const vehBtns = page.locator("#figurePicker button");
-  expect(await vehBtns.count()).toBe(6);
+  expect(await vehBtns.count()).toBeGreaterThanOrEqual(9); // 5 cars + police + 3 procedural figures
   // The assigned-colour line is shown read-only.
   await expect(page.locator("#figurePicker")).toContainText("Deine Farbe");
 

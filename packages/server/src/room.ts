@@ -13,7 +13,7 @@ import {
   type Locale,
   type GameSettings,
 } from "@laspoly/shared";
-import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT, DICE_SKIN_COUNT, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
 import type { FormattedEvent, RoomView, RoomSummary } from "@laspoly/shared";
 
 // ---------------------------------------------------------------------------
@@ -48,10 +48,40 @@ export interface LobbyPlayer {
   color: string;
   figureIndex: number;
   ready: boolean; // humans must mark ready before game can start
+  diceSkin: number;
+  /** uploaded standee image (validated data URL), if any */
+  customImage?: string;
 }
 
 let _nextRoomId = 1;
 let _nextPlayerId = 1;
+
+/** Hard cap for uploaded token images (data-URL characters ≈ bytes × 4/3). */
+export const MAX_TOKEN_IMAGE_CHARS = 200_000;
+
+/**
+ * Validate an uploaded token image. Returns an error string or null when OK.
+ * Only PNG/JPEG data URLs are accepted — SVG is explicitly forbidden (it is
+ * script-capable if ever rendered in the DOM) — and the base64 payload's
+ * magic bytes must match the declared type (cheap mislabel/bomb guard).
+ */
+export function validateTokenImage(image: unknown): string | null {
+  if (typeof image !== "string" || image.length === 0) return "image must be a non-empty string";
+  if (image.length > MAX_TOKEN_IMAGE_CHARS) return `image too large (max ${MAX_TOKEN_IMAGE_CHARS} chars)`;
+  const m = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(image);
+  if (!m) return "image must be a PNG or JPEG data URL";
+  let head: Buffer;
+  try {
+    head = Buffer.from(m[2]!.slice(0, 16), "base64");
+  } catch {
+    return "invalid base64 payload";
+  }
+  const isPng = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+  const isJpeg = head[0] === 0xff && head[1] === 0xd8;
+  if (m[1] === "png" && !isPng) return "payload is not a PNG";
+  if (m[1] === "jpeg" && !isJpeg) return "payload is not a JPEG";
+  return null;
+}
 
 export class GameRoom {
   readonly id: string;
@@ -64,11 +94,20 @@ export class GameRoom {
   state: GameState | null = null;
   settings: GameSettings = {};
 
-  constructor(name: string, boardId: string, botCount: number) {
+  /**
+   * Optional room password. Plaintext compare is deliberate and acceptable
+   * here: rooms are ephemeral in-memory objects, the password is casual
+   * gate-keeping among friends, and the random resume token remains the real
+   * credential. It must never be logged or included in any outgoing message.
+   */
+  password: string | null = null;
+
+  constructor(name: string, boardId: string, botCount: number, password: string | null = null) {
     this.id = String(_nextRoomId++);
     this.name = name;
     this.boardId = boardId;
     this.botCount = botCount;
+    this.password = password;
   }
 
   /** Returns the first color not already taken by any player (human or bot). */
@@ -96,7 +135,7 @@ export class GameRoom {
     const figureIndex = this._nextFreeFigureIndex();
     // Default humans to ready so a host can start immediately (the ready-up UI,
     // when present, lets a player toggle this off). Avoids blocking the start flow.
-    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, ready: true };
+    const player: LobbyPlayer = { id, nickname, isBot: false, connected: true, token, color, figureIndex, diceSkin: 0, ready: true };
     this.players.push(player);
     if (this.players.filter((p) => !p.isBot).length === 1) {
       this.host = id;
@@ -130,21 +169,39 @@ export class GameRoom {
    * Allows a human player to choose their colour and figure.
    * Returns an error string if validation fails, or null on success.
    */
-  chooseFigure(playerId: string, color: string, figureIndex: number): string | null {
+  chooseFigure(playerId: string, color: string, figureIndex: number, diceSkin?: number): string | null {
     if (this.started) return "Game already started";
     if (!FIGURE_COLORS.includes(color as typeof FIGURE_COLORS[number])) {
       return `Invalid colour. Choose from: ${FIGURE_COLORS.join(", ")}`;
     }
-    if (!Number.isInteger(figureIndex) || figureIndex < 0 || figureIndex >= FIGURE_COUNT) {
+    const isCustom = figureIndex === CUSTOM_FIGURE_INDEX;
+    if (!isCustom && (!Number.isInteger(figureIndex) || figureIndex < 0 || figureIndex >= FIGURE_COUNT)) {
       return `Invalid figureIndex. Must be 0–${FIGURE_COUNT - 1}`;
     }
-    const others = this.players.filter((p) => !p.isBot && p.id !== playerId);
-    if (others.some((p) => p.color === color)) return "Colour already taken";
-    if (others.some((p) => p.figureIndex === figureIndex)) return "Figure already taken";
     const p = this.players.find((p) => p.id === playerId);
     if (!p) return "Player not found";
+    if (isCustom && !p.customImage) return "Upload a picture before choosing the custom token";
+    const others = this.players.filter((o) => !o.isBot && o.id !== playerId);
+    if (others.some((o) => o.color === color)) return "Colour already taken";
+    // Custom standees may repeat (each shows a different picture).
+    if (!isCustom && others.some((o) => o.figureIndex === figureIndex)) return "Figure already taken";
+    if (diceSkin !== undefined) {
+      if (!Number.isInteger(diceSkin) || diceSkin < 0 || diceSkin >= DICE_SKIN_COUNT) {
+        return `Invalid diceSkin. Must be 0\u2013${DICE_SKIN_COUNT - 1}`;
+      }
+      p.diceSkin = diceSkin; // cosmetic — deliberately NOT uniqueness-checked
+    }
     p.color = color;
     p.figureIndex = figureIndex;
+    return null;
+  }
+
+  /** Store a validated custom token image on a player (lobby only). */
+  setCustomImage(playerId: string, image: string): string | null {
+    if (this.started) return "Game already started";
+    const p = this.players.find((pl) => pl.id === playerId);
+    if (!p || p.isBot) return "Player not found";
+    p.customImage = image;
     return null;
   }
 
@@ -193,7 +250,7 @@ export class GameRoom {
       const id = `b${_nextPlayerId++}`;
       const color = this._nextFreeColor();
       const figureIndex = this._nextFreeFigureIndex();
-      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex, ready: true });
+      this.players.push({ id, nickname: `Bot ${i + 1}`, isBot: true, connected: false, token: "", color, figureIndex, diceSkin: 0, ready: true });
     }
 
     const allPlayers = this.players.map((p) => ({
@@ -202,6 +259,7 @@ export class GameRoom {
       isBot: p.isBot,
       color: p.color,
       figureIndex: p.figureIndex,
+      diceSkin: p.diceSkin,
     }));
 
     this.state = createGame({ boardId: this.boardId, seed, players: allPlayers, settings: this.settings });
@@ -343,6 +401,7 @@ export class GameRoom {
       boardId: this.boardId,
       playerCount: this.players.filter((p) => !p.isBot).length,
       started: this.started,
+      hasPassword: this.password !== null,
     };
   }
 
@@ -359,6 +418,8 @@ export class GameRoom {
         isBot: p.isBot,
         color: p.color,
         figureIndex: p.figureIndex,
+        diceSkin: p.diceSkin,
+        ...(p.customImage ? { customImage: p.customImage } : {}),
         ready: p.isBot ? true : p.ready,
       })),
       started: this.started,
@@ -371,8 +432,8 @@ export class GameRoom {
 export class RoomManager {
   private rooms = new Map<string, GameRoom>();
 
-  create(name: string, boardId: string, botCount: number): GameRoom {
-    const room = new GameRoom(name, boardId, botCount);
+  create(name: string, boardId: string, botCount: number, password: string | null = null): GameRoom {
+    const room = new GameRoom(name, boardId, botCount, password);
     this.rooms.set(room.id, room);
     return room;
   }

@@ -71,7 +71,8 @@ test.describe("Fix-3: Figure picker, Mein Eigentum, i18n, Leave-to-lobby", () =>
     // shown as a live 3D model. Expect a preview canvas + 6 vehicle buttons.
     await expect(page.locator("#figurePicker canvas")).toBeVisible({ timeout: 5_000 });
     const vehBtns = page.locator("#figurePicker button");
-    expect(await vehBtns.count()).toBe(6);
+    expect(await vehBtns.count()).toBeGreaterThanOrEqual(9); // 5 cars + police + 3 procedural figures
+
     await expect(page.locator("#figurePicker")).toContainText("Deine Farbe");
 
     // Screenshot the figure picker
@@ -188,7 +189,8 @@ test.describe("Fix-3: Figure picker, Mein Eigentum, i18n, Leave-to-lobby", () =>
     expect(rollTextDE?.trim()).toMatch(/Würfeln/i);
 
     // Open settings and toggle to EN
-    await page.locator("button[title='Einstellungen']").click();
+    // Two ⚙ buttons exist (lobby + game header) — target the in-game one.
+    await page.locator("#settingsHdrBtn").click();
     await expect(page.locator("#settingsOverlay")).toBeVisible({ timeout: 5_000 });
     await page.locator("#localeENBtn").click();
     await page.waitForTimeout(500);
@@ -246,6 +248,8 @@ test.describe("Fix-3: Figure picker, Mein Eigentum, i18n, Leave-to-lobby", () =>
     const leaveBtn = page.locator("#leaveGameBtn");
     await expect(leaveBtn).toBeVisible({ timeout: 5_000 });
     await leaveBtn.click();
+    // The leave-confirm overlay asks first — confirm with its yes button.
+    await page.locator(".confirm-overlay button").first().click();
     await page.waitForTimeout(1_000);
 
     // Game HUD must be gone

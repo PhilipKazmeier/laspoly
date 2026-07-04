@@ -4,9 +4,12 @@ This is the single entry point for anyone (human or agent) taking over the proje
 Read this, then [CHANGELOG.md](CHANGELOG.md) (full history of every fix/decision) and the
 design spec in [superpowers/specs/](superpowers/specs/).
 
-**Status:** Feature-complete, playable in the browser, 526 unit tests + Playwright e2e green,
-balance sim ~93% finish. All work is on branch **`web-rebuild`** (~80 commits), **not yet merged to
-`main` and not pushed** — merge/push only when the user asks.
+**Status:** Feature-complete and visually rebuilt ("The Back Room" overhaul, 2026-07-04 — see
+docs/idea-brief.md + docs/superpowers/plans/back-room-overhaul.md): single warm-room identity,
+3-zone HUD on design tokens, camera Director, deed-card system, visible money flow. 362 unit tests
+green, balance sim ~90% finish, e2e green except the documented pre-existing failures (§5). Work is
+on branch **`random-fable-enhancements`**, **not merged/pushed** — merge/push only when the user
+asks.
 
 ---
 
@@ -62,18 +65,29 @@ Dockerfile.web, docker-compose.web.yml, DEPLOY-WEB.md   single-container deploy
   `state` at a time: dice → token move → HUD/popups, strictly in order so bots never overlap and the
   buy/card prompt only shows after the token lands). Also the `onMessage` switch (incl. `room`,
   `turnTimer`, `resume`).
-- `board3d.ts` — Babylon scene: board geometry (`tileXZ`/`getFieldAngle`/`outerDirection` —
-  clockwise, labels read from outside), tiles + labels (mipmapped/crisp), colour bars (inner edge),
-  wood table, jail cage, action-card deck, vehicle tokens + movement animation, dice + procedural cup
-  (`playDiceAnimationAsync` waits the full visual), pip dice (face-UV atlas), ownership markers,
-  on-board per-player deeds/money, building meshes, `setView` (standard/top), `setRollHandler` +
-  `setTileClickHandler` hooks. Exposes `update`/`applyStateDiffs` which are **dead code** (not called)
-  — safe to delete in a cleanup pass.
-- `ui.ts` — all HTML overlay: lobby, room (figure picker, ready-up, game-settings, share link),
-  game HUD (header, player list + net-worth ranking, "Mein Eigentum", buy/build/mortgage/trade/travel
-  panels, deed card with current-rent highlight, action-card popup, surrender/leave-confirm,
-  game-over + rematch), chat, toasts, turn-timer, settings (DE/EN + volume sliders), full client i18n
-  `t()` table.
+- `board3d/` (directory; `board3d.ts` at src root is a re-export shim) — the Babylon scene.
+  `board3d/board3d.ts` = orchestrator (camera, lights, PBR walnut table, tokens + movement,
+  `projectTile` world→screen anchor, `flyMoney`); `tiles.ts` (board geometry, jail cage, deck);
+  `dice.ts` (cup + pip dice, `playDiceAnimationAsync` waits the full visual); `buildings.ts`
+  (buildings + ownership markers); `effects.ts` (vignette pipeline, glow, warm key light + shadows,
+  HDRI IBL, dust); `chips.ts` (money chips arcing payer→payee); `constants.ts` (BACK_ROOM palette,
+  geometry helpers, `muteColor`). **Single visual identity** — the old neon/classic theme system is
+  gone (docs/idea-brief.md is the design source of truth).
+- `director.ts` — ALL camera movement: turn grammar `focus → diceMoment → follow → present →
+  release`, full (my turn) vs calm (bots) intensity, pointer-down = user override for that turn,
+  reduced-motion → cuts. StateQueue calls it; nothing else may drive the camera.
+- `styles/tokens.css` + `styles/ui.css` — the design tokens ("The Back Room", brief §7) and all
+  overlay CSS (extracted from ui.ts; tokens.css still carries a legacy-alias block that shrinks as
+  components are rebuilt). Fonts: vendored Fraunces + Inter (`public/assets/fonts`, see ASSETS.md).
+- `ui/deed-card.ts` — THE deed card: one paper component for the buy prompt (rises from its tile,
+  anchored via `projectTile`), the tile/prop inspector, and (styling) the my-properties/trade items.
+- `ui.ts` — remaining HTML overlay: lobby, room (figure picker, ready-up, game-settings, share
+  link), 3-zone game HUD (player rail, table plaque, your rail), event ticker (hover to expand log +
+  chat), buy/build/mortgage/trade/travel flows, action-card popup, surrender/leave-confirm,
+  game-over + rematch, toasts, turn-timer (visible only ≤15 s), settings, full client i18n `t()`
+  table, `showMoneyDelta` (rail money floats).
+- `tools/capture.ts` (`npm run capture` with dev server running) — the screenshot verification
+  harness; READ its images (docs/superpowers/plans/back-room-overhaul.md gates).
 - `net.ts` — typed ws wrapper; WS URL follows the page origin (`wss:` on https), `VITE_WS_URL`
   override for split-port dev/e2e; session save/load/clear.
 - `audio.ts` — SFX player + `BgmPlayer` (plays original tracks from `/assets/music/*` if present,
@@ -144,7 +158,11 @@ the server, the bots, and the headless test/balance harness.
   deferred.
 - **Flaky/slow e2e** full-game specs (see §6) — consider a server "fast game" test flag or bots-only
   assertions instead of UI-driven game-over.
-- **Dead code:** `board3d.ts` `update()`/`applyStateDiffs()` are unused — delete in a cleanup pass.
+- **Pre-existing e2e failures** (baseline-confirmed by A/B stash runs 2026-07-04, NOT caused by the
+  back-room overhaul): `management.spec` mortgage autopilot, `playthrough.spec:88` and
+  `qa-full-game.spec:130/706` (full-game 3-minute autopilots — turn animations outpace the budget),
+  `ui-overlay.spec` 8 / 6+DE→EN / 9, `fix3-3` (strict-mode: two `button[title='Einstellungen']`).
+  Timing-sensitive anim specs flake under parallel workers — run visual specs with `--workers=1`.
 - **Balance tail:** ~7% of bot sims don't terminate within the cap when 3 wealthy players hoard cash
   (real human games end via the turn flow); revisit only if it surfaces in play.
 - Deferred QoL ideas (from the audit): deed-card on hover, end-game stats screen, observe-only join on

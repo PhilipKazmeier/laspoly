@@ -11,6 +11,8 @@ export interface RoomSummary {
   boardId: string;
   playerCount: number;
   started: boolean;
+  /** true when joining requires a password (private room) */
+  hasPassword: boolean;
 }
 
 export interface RoomPlayer {
@@ -20,13 +22,20 @@ export interface RoomPlayer {
   color?: string;
   figureIndex?: number;
   ready: boolean;
+  /** cosmetic dice skin 0-4 (no uniqueness — skins may repeat) */
+  diceSkin?: number;
+  /** uploaded standee image (validated data URL), if any */
+  customImage?: string;
 }
 
 // Available palette — client + server both import these to stay in sync.
 export const FIGURE_COLORS = ["red", "blue", "green", "yellow", "purple", "orange"] as const;
 export type FigureColor = typeof FIGURE_COLORS[number];
 // figureIndex 0-5 → car1..car5, police
-export const FIGURE_COUNT = 6;
+export const DICE_SKIN_COUNT = 5;
+/** Sentinel figureIndex for the custom-image standee (requires an uploaded image). */
+export const CUSTOM_FIGURE_INDEX = 99;
+export const FIGURE_COUNT = 9;
 
 export interface RoomView {
   id: string;
@@ -43,8 +52,8 @@ export interface RoomView {
 // ---- Wire messages ---------------------------------------------------------
 
 export type ClientMessage =
-  | { t: "createRoom"; name: string; nickname: string; boardId: string; botCount: number }
-  | { t: "joinRoom"; roomId: string; nickname: string }
+  | { t: "createRoom"; name: string; nickname: string; boardId: string; botCount: number; password?: string }
+  | { t: "joinRoom"; roomId: string; nickname: string; password?: string }
   | { t: "leaveRoom" }
   | { t: "startGame" }
   | { t: "command"; command: Command }
@@ -52,7 +61,7 @@ export type ClientMessage =
   | { t: "listRooms" }
   | { t: "resume"; roomId: string; playerId: string; token: string }
   | { t: "setLocale"; locale: "de" | "en" }
-  | { t: "chooseFigure"; color: string; figureIndex: number }
+  | { t: "chooseFigure"; color: string; figureIndex: number; diceSkin?: number }
   | { t: "setReady"; ready: boolean }
   | { t: "setGameSettings"; settings: GameSettings }
   | { t: "newGame" };

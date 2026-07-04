@@ -6,6 +6,20 @@
  */
 import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
 
+/** Poll until the next actionable prompt (or game over) instead of a fixed sleep. */
+async function waitForNextPrompt(page: Page, timeout = 12_000): Promise<void> {
+  await page.waitForFunction(() => {
+    const vis = (id: string) => {
+      const el = document.getElementById(id);
+      return !!el && el.style.display !== "none" && el.style.display !== "";
+    };
+    return vis("buyOfferPanel") || vis("endTurnBtn") || vis("rollBtn") ||
+      vis("ransomBtn") || vis("actionCardPopup") ||
+      (document.getElementById("gameOverBanner") as HTMLElement | null)?.style.display === "flex";
+  }, undefined, { timeout }).catch(() => null);
+}
+
+
 // ---- helpers ----------------------------------------------------------------
 
 /** Inject a hidden element that mirrors the latest "state" WebSocket payload. */
@@ -229,6 +243,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           buyPhaseEncountered = true;
 
           // Checklist #3: Chat input must be interactive during buy phase
+          await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
           const chatInput = page.locator("#chatInput");
           const isDisabled = await chatInput.evaluate(
             (el) => (el as HTMLInputElement).disabled,
@@ -246,7 +261,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           // Decline to keep game moving quickly (less money spent = game ends sooner)
           await page.locator("#buyOfferDeclineBtn").click();
           // After declining, turn-end phase: click "Zug beenden"
-          await page.waitForTimeout(8_000); // wait for animation + state
+          await waitForNextPrompt(page);
           const endAfterDecline = await page.locator("#endTurnBtn").isVisible().catch(() => false);
           if (endAfterDecline) await page.locator("#endTurnBtn").click();
         } else {
@@ -264,7 +279,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
           await page.locator("#rollBtn").click();
 
           // After rolling, wait for animation + state, then handle buy or turn-end.
-          await page.waitForTimeout(8_000);
+          await waitForNextPrompt(page);
           const afterBuyVisible = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
           if (afterBuyVisible) {
             await page.locator("#buyOfferDeclineBtn").click();
@@ -429,6 +444,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
       if (arrived === "buy") {
         buyPhaseReached = true;
         // Chat input must not be disabled
+        await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
         const chatInput = page.locator("#chatInput");
         await expect(chatInput).toBeEnabled();
         await chatInput.fill("hello from buy phase");
@@ -444,6 +460,7 @@ test.describe("LasPoly Phase-1 playthrough", () => {
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) {
           buyPhaseReached = true;
+          await page.locator("#eventLogPanel").hover(); // expand the ticker (chat lives inside)
           const chatInput = page.locator("#chatInput");
           await expect(chatInput).toBeEnabled();
           await chatInput.fill("buy phase open");

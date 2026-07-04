@@ -4,6 +4,9 @@ export interface Buildings {
   houses: number; // 0-4
   hotel: boolean;
   factory: boolean;
+  /** house-rule tier above the hotel (extraBuildings setting); optional so
+   *  states persisted before the rule existed stay readable */
+  skyscraper?: boolean;
 }
 
 export interface PlayerState {
@@ -18,6 +21,8 @@ export interface PlayerState {
   lastRoll: [number, number];
   color: string;
   figureIndex: number; // 0-5 → car1..car5, police (chosen vehicle model)
+  /** cosmetic dice skin 0-4; static data the engine never reads */
+  diceSkin: number;
 }
 
 export type GamePhase =
@@ -28,12 +33,37 @@ export type GamePhase =
   | "finished";
 
 export type EventId =
+  // Classic round modifiers (1 round each) — the "normal" frequency pool.
   | 'circus'
   | 'boom'
   | 'recession'
   | 'jackpot'
   | 'buildingSale'
-  | 'quietDay';
+  | 'quietDay'
+  // Dramatic events (chaos frequency only): instant one-shots…
+  | 'earthquake'
+  | 'taxAudit'
+  | 'lottery'
+  | 'windfall'
+  // …and multi-round modifiers.
+  | 'streetParty'
+  | 'powerOutage'
+  | 'marketCrash'
+  | 'goldRush';
+
+/** How often round events are drawn (game setting). */
+export type EventFrequency = "off" | "rare" | "normal" | "chaos";
+
+/**
+ * A round-modifier event currently in effect. `remainingRounds` is
+ * decremented at each round boundary; the event expires at 0. Some events
+ * carry extra data (e.g. the street group a party applies to).
+ */
+export interface ActiveEvent {
+  id: EventId;
+  remainingRounds: number;
+  group?: string;
+}
 
 export interface GameState {
   boardId: string;
@@ -60,10 +90,22 @@ export interface GameState {
   pendingSwap: PendingSwap | null;
   /** current round number, starts at 1 */
   round: number;
-  /** the special event active this round, null only before game starts */
-  activeEvent: { id: EventId } | null;
-  /** True once the current player has built one building this turn; reset on turn advance. */
-  builtThisTurn: boolean;
+  /** special events currently in effect (round modifiers with durations) */
+  activeEvents: ActiveEvent[];
+  /** event draw frequency (from game settings, default "normal") */
+  eventFrequency: EventFrequency;
+  /** street positions where building is forbidden (house rule; drawn at game start) */
+  unbuildableFields: number[];
+  /** game ends after this round with a net-worth winner (0 = off; house rule) */
+  roundLimit: number;
+  /** jailed owners collect no street/station/attraction rent (house rule) */
+  noRentInJail: boolean;
+  /** skyscraper building tier enabled (house rule) */
+  extraBuildings: boolean;
+  /** Buildings constructed by the current player this turn; reset on turn advance. */
+  buildsThisTurn: number;
+  /** Max builds per turn (game setting; 0 = unlimited, default 1). */
+  buildsPerTurn: number;
   /** True once the current player has traveled via a station this turn; reset on turn advance. */
   traveledThisTurn: boolean;
   /** Building cost multiplier (from game settings, default 1.0). */
@@ -90,7 +132,7 @@ export type Command =
   | { type: "BUY_PROPERTY" }
   | { type: "DECLINE_PROPERTY" }
   | { type: "PAY_RANSOM" }
-  | { type: "BUILD"; pos: number; building: "house" | "hotel" | "factory" }
+  | { type: "BUILD"; pos: number; building: "house" | "hotel" | "factory" | "skyscraper" }
   | { type: "SELL_BUILDING"; pos: number }
   | { type: "MORTGAGE"; pos: number }
   | { type: "UNMORTGAGE"; pos: number }
@@ -122,11 +164,22 @@ export interface GameSettings {
   startingCapitalMult?: number; // default 1.0
   buildingCostMult?: number;    // default 1.0
   botDifficulty?: "easy" | "normal" | "hard"; // default "normal"
+  eventFrequency?: EventFrequency; // default "normal"
+  /** number of random streets marked no-build at game start (house rule; default 0) */
+  unbuildableCount?: number;
+  /** end the game after N rounds with a net-worth winner (0/undefined = off) */
+  roundLimit?: number;
+  /** jailed owners collect no rent (default false) */
+  noRentInJail?: boolean;
+  /** enable the skyscraper building tier above hotels (default false) */
+  extraBuildings?: boolean;
+  /** max buildings per turn (0 = unlimited; default 1) */
+  buildsPerTurn?: number;
 }
 
 export interface NewGameOptions {
   boardId: string;
   seed: number;
-  players: { id: string; name: string; isBot: boolean; color: string; figureIndex?: number }[];
+  players: { id: string; name: string; isBot: boolean; color: string; figureIndex?: number; diceSkin?: number }[];
   settings?: GameSettings;
 }

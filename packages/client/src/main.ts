@@ -1,8 +1,9 @@
+import "./styles/tokens.css";
+import "./styles/ui.css";
 import { Net, loadSession, clearSession } from "./net.js";
 import { Board3D } from "./board3d.js";
 import { UI } from "./ui.js";
 import { audio } from "./audio.js";
-import { applyThemeClass } from "./theme.js";
 import { getBoard } from "@laspoly/shared";
 import type { GameState, FormattedEvent } from "@laspoly/shared";
 
@@ -99,9 +100,6 @@ class StateQueue {
     const prev = this.lastProcessed;
     const myId = this.net.playerId;
 
-    // 1. Board-side event hooks (no animation wait needed here).
-    this.board.handleEvents(events);
-
     // Special-event toasts can appear right away (not tied to movement).
     for (const ev of events) {
       if (ev.key.startsWith("specialEvent_")) {
@@ -125,6 +123,7 @@ class StateQueue {
 
     // 2. Diff against the last-rendered state: detect the roll and the movers.
     let rolledD1 = 0, rolledD2 = 0;
+    let rollerId: string | null = null;
     const movers: Array<{ id: string; from: number; to: number }> = [];
 
     if (prev) {
@@ -139,6 +138,7 @@ class StateQueue {
         ) {
           rolledD1 = p.lastRoll[0];
           rolledD2 = p.lastRoll[1];
+          rollerId = p.id;
         }
         const prevPos = pp.inJail ? JAIL_POS : pp.position;
         const newPos = p.inJail ? JAIL_POS : p.position;
@@ -148,12 +148,30 @@ class StateQueue {
       }
     }
 
+    // Direction: choreograph this frame (fire-and-forget tweens — the Director
+    // never adds wall-clock time to the queue). Full drama on the local
+    // player's turn, a calm lean for bots.
+    const director = this.board.director;
+    const curPlayer = state.players[state.currentPlayerIndex];
+    if (curPlayer) director.setIntensity(curPlayer.id === myId ? "full" : "calm");
+    if (rolledD1 > 0) {
+      director.diceMoment();
+    } else if (
+      state.phase === "awaiting-roll" &&
+      curPlayer &&
+      (!prev || prev.currentPlayerIndex !== state.currentPlayerIndex)
+    ) {
+      // A fresh turn begins: settle the camera on the player about to roll.
+      director.focus(curPlayer.inJail ? JAIL_POS : curPlayer.position);
+    }
+
     // (a) Dice FIRST (cup lift → shake → settle with the rolled value face-up).
     //    Safety timeout: 4 s max so the queue never stalls even in headless envs.
     if (rolledD1 > 0) {
       audio.play("dice");
+      const rollerSkin = state.players.find((p) => p.id === rollerId)?.diceSkin ?? 0;
       await Promise.race([
-        this.board.playDiceAnimationAsync(rolledD1, rolledD2),
+        this.board.playDiceAnimationAsync(rolledD1, rolledD2, rollerSkin),
         timeout(4_000),
       ]);
     }
@@ -166,6 +184,9 @@ class StateQueue {
     //    Safety timeout: 15 s per mover (12 tiles × 120 ms + margin).
     for (const { id, from, to } of movers) {
       this.board.ensureTokenExists(id, state, myId);
+      // Track the walking token (full intensity only; no-op for bot turns).
+      const moverMesh = this.board.getTokenMesh(id);
+      if (moverMesh) director.follow(moverMesh);
 
       // Jail via the Go-To-Jail field: if this move ends in jail AND the player's
       // roll lands them exactly on that field, walk the roll onto the field first,
@@ -196,8 +217,52 @@ class StateQueue {
       }
     }
 
+    // (b2) 3D card draw for ANY player's action card — the card flies from the
+    //      deck and flips to its title after the mover lands, before visuals.
+    //      (The HTML popup below stays local-player-only.)
+    const anyCardEv = events.find((ev) => ev.key === "actionCard");
+    if (anyCardEv) {
+      const title =
+        anyCardEv.text.split(": ").slice(1).join(": ").replace(/\.\s*$/, "") || anyCardEv.text;
+      audio.playUiTone("card");
+      await Promise.race([this.board.animateCardDrawAsync(title), timeout(3_000)]);
+    }
+
+    // (b3) Money made visible: diff each player's cash vs the previously
+    //      rendered state. Every delta floats off the player rail (DOM), and
+    //      chips fly across the table between the parties. State-diff based —
+    //      FormattedEvent text is localized and must never be parsed.
+    if (prev) {
+      const gains: Array<{ id: string; delta: number }> = [];
+      const losses: Array<{ id: string; delta: number }> = [];
+      for (const p of state.players) {
+        const pp = prev.players.find((pl) => pl.id === p.id);
+        if (!pp || !p.alive) continue;
+        const delta = p.money - pp.money;
+        if (delta === 0) continue;
+        this.ui.showMoneyDelta(p.id, delta);
+        (delta > 0 ? gains : losses).push({ id: p.id, delta });
+      }
+      // Chips: a single payer→payee pair is the common case (rent, trade).
+      // Anything else (tax, GO bonus, group events) flows via the bank.
+      if (losses.length === 1 && gains.length === 1) {
+        this.board.flyMoney(losses[0]!.id, gains[0]!.id, Math.abs(losses[0]!.delta));
+      } else {
+        for (const l of losses) this.board.flyMoney(l.id, null, Math.abs(l.delta));
+        for (const g of gains) this.board.flyMoney(null, g.id, g.delta);
+      }
+    }
+
     // (c) After animation: apply visuals, show action-card popup, update HUD.
     //     Everything in this block is strictly after dice + movement.
+
+    // Direction: hold on the landed tile while a buy decision is open,
+    // otherwise ease back to the table overview.
+    if (state.phase === "awaiting-buy" && curPlayer) {
+      director.present(curPlayer.position);
+    } else {
+      director.release();
+    }
 
     // Apply visuals (HUD, board, ownership, displays).
     this.board.applyVisuals(state, myId);
@@ -205,6 +270,16 @@ class StateQueue {
     // Active-player highlight.
     const activePlayer = state.players[state.currentPlayerIndex];
     this.board.setActivePlayer(activePlayer?.id ?? null);
+
+    // Soft ping when the turn passes TO the local player.
+    if (
+      myId &&
+      activePlayer?.id === myId &&
+      prev &&
+      prev.players[prev.currentPlayerIndex]?.id !== myId
+    ) {
+      audio.playUiTone("turn");
+    }
 
     // Sound effects for events.
     for (const ev of events) {
@@ -249,9 +324,6 @@ class StateQueue {
   }
 }
 
-// Apply the saved DOM theme before any UI is built (avoids a flash of the wrong
-// theme). The 3D board reads the theme itself at construction.
-applyThemeClass();
 
 const net = new Net();
 const board3d = new Board3D(document.getElementById("renderCanvas") as HTMLCanvasElement);
@@ -267,6 +339,10 @@ board3d.setRollHandler(() => {
 // Tile clicks are exposed for the HTML property-card popup (owned by the UI agent).
 board3d.setTileClickHandler((pos) => {
   ui.showDeedCard(pos);
+});
+// Tile hover → compact deed tooltip (desktop only; ui decides).
+board3d.setTileHoverHandler((pos, x, y) => {
+  ui.showDeedTooltip(pos, x, y);
 });
 
 // Track whether we are attempting a session resume (suppress initial lobby flash).
@@ -284,6 +360,15 @@ net.onMessage((msg) => {
       ui.onJoined(msg.roomId, msg.playerId);
       break;
     case "room":
+      // ALWAYS cache cosmetics (custom standee images) — even while resuming,
+      // where the room panel itself stays hidden.
+      board3d.setCustomTokens(
+        new Map(
+          msg.room.players
+            .filter((p) => p.customImage)
+            .map((p) => [p.id, p.customImage!] as [string, string]),
+        ),
+      );
       // Server sends the current room view whenever something changes (player
       // joins, figure pick, etc.). Show the room panel with the start button.
       // Also handles post-rematch reset (game-over banner → room waiting panel).
@@ -332,6 +417,9 @@ net.onMessage((msg) => {
       clearSession();
       audio.play("gameover");
       audio.stopBgm();
+      // Confetti + slow orbit around the winner (fire-and-forget; any pointer
+      // input aborts the orbit). The banner shows immediately on top.
+      board3d.playWinCelebration(msg.winnerId);
       ui.showGameOver(msg.winnerName);
       break;
     case "turnTimer":

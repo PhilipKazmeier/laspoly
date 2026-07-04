@@ -12,6 +12,7 @@ import {
   SceneLoader,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/OBJ";
+import { buildProceduralToken } from "./tokenFactory.js";
 
 // figureIndex 0-4 → car1..car5, 5 → police.
 const FIGURE_FILES = ["car1.obj", "car2.obj", "car3.obj", "car4.obj", "car5.obj", "police.obj"];
@@ -50,6 +51,26 @@ export class FigurePreview {
   /** Load + show the given figure tinted with `colorHex` (e.g. "#ef4444"). */
   async show(figureIndex: number, colorHex: string): Promise<void> {
     const token = ++this.loadToken;
+
+    // Procedural figures (top hat / pawn / rocket) render without OBJ loads.
+    if (figureIndex >= 6) {
+      if (this.current) { this.current.dispose(); this.current = null; }
+      const built = buildProceduralToken(this.scene, figureIndex);
+      if (!built) return;
+      const ext0 = built.getBoundingInfo().boundingBox.extendSize;
+      const maxDim0 = Math.max(ext0.x, ext0.y, ext0.z) * 2 || 1;
+      built.scaling.setAll(1.2 / maxDim0);
+      const c0 = Color3.FromHexString(colorHex);
+      const mat0 = new StandardMaterial("previewMat", this.scene);
+      mat0.diffuseColor = c0;
+      mat0.specularColor = new Color3(0.4, 0.4, 0.4);
+      mat0.emissiveColor = c0.scale(0.45);
+      built.material = mat0;
+      built.position.set(0, -0.4, 0);
+      this.current = built;
+      return;
+    }
+
     const file = FIGURE_FILES[figureIndex] ?? FIGURE_FILES[0]!;
     let result;
     try {

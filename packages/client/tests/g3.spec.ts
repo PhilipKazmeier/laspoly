@@ -112,6 +112,8 @@ test("1: leave game returns to lobby (createRoom visible, gameHud hidden)", asyn
 
   // Click "✕ Leave" / "✕ Verlassen"
   await page.locator("#leaveGameBtn").click();
+  // The leave-confirm overlay asks first — confirm with its yes button.
+  await page.locator(".confirm-overlay button").first().click();
   await page.waitForTimeout(800);
 
   await shot(page, "01-after-leave");
@@ -143,6 +145,8 @@ test("1b: spectator-state leave via JS injection returns to lobby", async ({ pag
 
   // The leave button should still work regardless of spectator/alive state
   await page.locator("#leaveGameBtn").click();
+  // The leave-confirm overlay asks first — confirm with its yes button.
+  await page.locator(".confirm-overlay button").first().click();
   await page.waitForTimeout(800);
 
   await shot(page, "01b-spectator-left");

@@ -5,6 +5,7 @@ import {
   mortgageValue,
   tilePrice,
   canBuild,
+  buildBlockReason,
   canSellBuilding,
   canMortgage,
   canUnmortgage,
@@ -13,559 +14,17 @@ import {
   canTravelFrom,
   netWorth,
 } from "@laspoly/shared";
-import { FIGURE_COLORS, FIGURE_COUNT } from "@laspoly/shared";
+import { FIGURE_COLORS, FIGURE_COUNT, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
 import type { RoomSummary, RoomView, GameState, FormattedEvent, StreetTile, GameSettings } from "@laspoly/shared";
 import type { Net } from "./net.js";
 import type { Board3D } from "./board3d.js";
 import { clearSession } from "./net.js";
 import { audio } from "./audio.js";
 import { FigurePreview } from "./figurePreview.js";
-import { getTheme, setTheme, type Theme } from "./theme.js";
+import { getQuality, setQuality, type Quality } from "./quality.js";
+import { renderDeedCard } from "./ui/deed-card.js";
+import { API_BASE, loadSession } from "./net.js";
 
-const css = `
-  /* ── Neon-Vegas glass design system ─────────────────────────────── */
-  :root {
-    --bg-0: #0a0913;
-    --glass: rgba(22, 19, 38, 0.72);
-    --glass-strong: rgba(15, 13, 26, 0.9);
-    --glass-light: rgba(255, 255, 255, 0.05);
-    --hairline: rgba(255, 255, 255, 0.10);
-    --hairline-soft: rgba(255, 255, 255, 0.06);
-    --text: #f3f1fb;
-    --text-dim: #a39fc0;
-    --text-mute: #6f6b8a;
-    --gold: #fbbf24;
-    --gold-deep: #f59e0b;
-    --violet: #7c3aed;
-    --magenta: #d946ef;
-    --success: #34d399;
-    --success-deep: #059669;
-    --danger: #f43f5e;
-    --danger-deep: #9f1239;
-    --info: #60a5fa;
-    --muted: rgba(255, 255, 255, 0.08);
-    --radius-lg: 16px;
-    --radius: 12px;
-    --radius-sm: 8px;
-    --shadow: 0 10px 36px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
-    --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.6);
-    --glow-gold: 0 0 20px rgba(251, 191, 36, 0.35);
-    --glow-magenta: 0 0 22px rgba(217, 70, 239, 0.4);
-    --top-hi: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    --blur: blur(16px) saturate(140%);
-    --font: 'Segoe UI', system-ui, -apple-system, 'Inter', Roboto, sans-serif;
-    --ease: 0.18s cubic-bezier(.4, 0, .2, 1);
-  }
-  .panel {
-    background: var(--glass);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg);
-    padding: 18px;
-    color: var(--text);
-    box-shadow: var(--shadow), var(--top-hi);
-  }
-  button {
-    background: linear-gradient(135deg, var(--violet), var(--magenta));
-    color: #fff;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 9px 16px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    margin: 4px 2px;
-    font-family: var(--font);
-    box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3);
-    transition: transform var(--ease), box-shadow var(--ease), filter var(--ease);
-  }
-  button:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), var(--glow-magenta); }
-  button:active { transform: translateY(0); filter: brightness(0.97); }
-  button:disabled { background: var(--muted); color: var(--text-mute); cursor: default; box-shadow: none; transform: none; filter: none; }
-  input, select {
-    background: rgba(10, 9, 18, 0.6);
-    color: var(--text);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-sm);
-    padding: 9px 12px;
-    font-size: 14px;
-    margin: 4px 0;
-    width: 100%;
-    box-sizing: border-box; /* include padding in width:100% (fixes lobby h-scrollbar, bug 2-2) */
-    font-family: var(--font);
-    transition: border-color var(--ease), box-shadow var(--ease);
-  }
-  input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18); }
-  input::placeholder { color: var(--text-mute); }
-  label { font-size: 13px; color: var(--text-dim); display: block; margin-top: 8px; }
-  #lobby {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 360px;
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
-    box-sizing: border-box;
-  }
-  #roomPanel {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 360px;
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    overflow-x: hidden; /* dialog content fits 360px; never show a h-scrollbar (bug) */
-    box-sizing: border-box;
-  }
-  #roomList { margin-top: 12px; max-height: 200px; overflow-y: auto; }
-  .room-item { padding: 10px 12px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 6px 0; cursor: pointer; background: var(--glass-light); transition: background var(--ease), border-color var(--ease), transform var(--ease); }
-  .room-item:hover { background: rgba(255,255,255,0.08); border-color: var(--hairline); transform: translateX(2px); }
-  #playerList {
-    position: absolute; top: 80px; left: 16px;
-    width: 220px;
-    max-height: calc(60vh - 48px);
-    overflow-y: auto;
-  }
-  .player-row { padding: 8px 10px; margin: 5px 0; border-radius: var(--radius-sm); border: 1px solid var(--hairline-soft); font-size: 13px; background: var(--glass-light); transition: background var(--ease), border-color var(--ease); }
-  .player-row.current-player { border-color: var(--gold); background: rgba(251,204,21,0.12); box-shadow: var(--glow-gold); }
-  .player-row.dead { opacity: 0.4; }
-  .chip-stack { display:flex; align-items:center; gap:2px; flex-wrap:wrap; margin-top:2px; }
-  .chip-img { width:16px; height:16px; object-fit:contain; image-rendering:pixelated; }
-  .chip-count { font-size:10px; color:#aaa; margin-left:1px; }
-  .deed-strip { display:flex; flex-wrap:wrap; gap:2px; margin-top:3px; }
-  .deed-chip {
-    width:12px; height:16px; border-radius:2px;
-    display:inline-block; cursor:default;
-    border:1px solid rgba(255,255,255,0.15);
-  }
-  .deed-more { font-size:10px; color:#888; align-self:center; margin-left:2px; }
-  #actionCardPopup {
-    position: absolute; top: calc(50% + 24px); left: 50%; transform: translate(-50%, -50%);
-    width: 320px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    overflow: hidden;
-    z-index: 100;
-  }
-  #actionCardPopup .ac-header {
-    background: linear-gradient(135deg, var(--gold-deep), var(--gold)); color: #2a1c02; font-weight: 700; font-size: 15px;
-    padding: 12px 16px;
-    text-align: center;
-  }
-  #actionCardPopup .ac-body {
-    padding: 16px; color: var(--text); font-size: 14px; line-height: 1.5;
-    text-align: center;
-  }
-  #actionCardPopup .ac-footer {
-    padding: 0 16px 14px; text-align: center;
-  }
-  #buyOfferPanel {
-    position: absolute; bottom: 100px; right: 16px;
-    width: 260px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold);
-    border-radius: var(--radius); padding: 0;
-    color: var(--text); overflow: hidden;
-    box-shadow: var(--shadow), var(--glow-gold);
-  }
-  #buyOfferPanel .buy-header {
-    background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color: #2a1c02;
-    font-weight: 700; font-size: 13px;
-    padding: 9px 14px;
-  }
-  #buyOfferPanel .buy-body { padding: 12px 14px; }
-  #buyOfferPanel h3 { color: var(--gold); margin: 0 0 6px; font-size: 14px; display: none; }
-  #buyOfferPanel .buy-detail { font-size: 12px; color: var(--text-dim); margin: 3px 0; }
-  #buyOfferPanel .buy-btns { display:flex; gap:8px; margin-top:10px; }
-  #eventLogPanel {
-    position: absolute; bottom: 16px; left: 16px;
-    width: 300px;
-  }
-  #eventLog {
-    height: 150px; overflow-y: auto;
-    background: rgba(0,0,0,0.35);
-    border: 1px solid var(--hairline-soft);
-    border-radius: var(--radius-sm);
-    padding: 8px;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  .event-line { margin: 2px 0; color: var(--text-dim); }
-  #chatRow { display: flex; gap: 4px; margin-top: 6px; }
-  #chatInput { flex: 1; }
-  #chatSendBtn { width: auto; }
-  #actionPanel {
-    position: absolute; bottom: 16px; right: 16px;
-    text-align: right;
-  }
-  #gameHud {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none;
-  }
-  #gameHud > * { pointer-events: auto; }
-  #gameOverBanner {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: radial-gradient(ellipse at center, rgba(40,20,60,0.7), rgba(0,0,0,0.85));
-    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-    align-items: center; justify-content: center;
-    flex-direction: column; gap: 16px;
-  }
-  #gameOverBanner h1 { font-size: 2.75rem; color: var(--gold); text-shadow: var(--glow-gold), 0 2px 12px rgba(0,0,0,0.6); letter-spacing: 1px; }
-  #spectatorBanner {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(159,18,57,0.55); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid rgba(244,63,94,0.4);
-    padding: 8px 20px; border-radius: var(--radius-sm);
-    font-size: 14px; box-shadow: var(--shadow);
-  }
-  #versionBadge {
-    position: absolute; bottom: 4px; right: 8px;
-    font-size: 11px; color: var(--text-mute);
-  }
-  #errorBanner {
-    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    background: rgba(159,18,57,0.92); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid rgba(244,63,94,0.5);
-    padding: 9px 20px; border-radius: var(--radius-sm);
-    font-size: 13px; max-width: 400px; text-align: center; box-shadow: var(--shadow);
-  }
-  #specialEventBanner {
-    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    background: rgba(20, 10, 40, 0.7); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--magenta);
-    border-radius: var(--radius-sm);
-    padding: 7px 18px;
-    font-size: 13px;
-    color: #f0d5ff;
-    box-shadow: var(--glow-magenta);
-    pointer-events: none;
-    white-space: nowrap;
-    max-width: 480px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  #myPropsPanel {
-    position: absolute; top: 80px; right: 16px;
-    width: 280px;
-    max-height: calc(70vh - 48px);
-    overflow-y: auto;
-  }
-  .prop-row { padding: 9px 10px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); margin: 5px 0; font-size: 12px; background: var(--glass-light); }
-  .prop-row .prop-name { font-weight: 600; color: var(--text); }
-  .prop-row .prop-detail { color: var(--text-dim); font-size: 11px; margin: 2px 0; }
-  .prop-btn { font-size: 11px; padding: 4px 9px; margin: 2px 1px; }
-  .prop-btn.danger { background: linear-gradient(135deg, var(--danger-deep), var(--danger)); box-shadow: 0 2px 8px rgba(244,63,94,0.25); }
-  .prop-btn.danger:hover { box-shadow: 0 4px 14px rgba(244,63,94,0.4), 0 0 16px rgba(244,63,94,0.3); }
-  #travelPanel {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 260px;
-  }
-  #tradePanel {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 340px;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-  #incomingSwapPanel {
-    position: absolute; bottom: 80px; right: 16px;
-    width: 300px;
-  }
-  .swap-section { margin: 8px 0; padding: 8px; background: var(--glass-light); border: 1px solid var(--hairline-soft); border-radius: var(--radius-sm); }
-  .swap-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
-  .swap-check-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
-  #gameHeader {
-    position: absolute; top: 0; left: 0; width: 100%; min-height: 48px;
-    background: linear-gradient(180deg, rgba(18,16,34,0.92), rgba(12,10,24,0.82));
-    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border-bottom: 1px solid var(--hairline);
-    box-shadow: 0 2px 18px rgba(0,0,0,0.45), inset 0 -2px 0 rgba(251,191,36,0.55);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 12px;
-    box-sizing: border-box;
-    z-index: 50;
-    pointer-events: none;
-    font-family: var(--font);
-  }
-  #gameHeader > * { pointer-events: auto; }
-  #headerLeft { display: flex; flex-direction: column; gap: 1px; min-width: 160px; }
-  #headerLeft .room-label { font-size: 13px; font-weight: 700; color: var(--gold); line-height: 1.2; letter-spacing: 0.3px; }
-  #headerLeft .board-label { font-size: 11px; color: var(--text-dim); line-height: 1.2; }
-  #headerCenter { flex: 1; text-align: center; padding: 0 8px; }
-  #headerTurnStatus {
-    font-size: 15px; font-weight: 700; color: var(--text);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    line-height: 1.2;
-  }
-  #headerRound { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
-  #headerEvent { font-size: 11px; color: var(--gold); margin-top: 1px; }
-  #headerRight { display: flex; align-items: center; gap: 6px; min-width: 200px; justify-content: flex-end; }
-  .hdr-btn {
-    background: var(--glass-light); border: 1px solid var(--hairline);
-    color: var(--text); border-radius: var(--radius-sm); padding: 5px 9px;
-    font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: var(--font);
-    transition: background var(--ease), border-color var(--ease);
-  }
-  .hdr-btn:hover { background: rgba(255,255,255,0.14); border-color: var(--gold); }
-  #headerVersion { font-size: 10px; color: var(--text-mute); margin-left: 4px; }
-  #turnToast {
-    position: absolute; bottom: 140px; right: 16px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold);
-    border-radius: var(--radius-sm);
-    padding: 9px 14px;
-    font-size: 13px;
-    color: var(--text);
-    max-width: 240px;
-    pointer-events: none;
-    opacity: 0;
-    box-shadow: var(--shadow), var(--glow-gold);
-    transition: opacity 0.3s ease;
-    z-index: 60;
-  }
-  #turnToast.visible { opacity: 1; }
-  #helpOverlay {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    width: 320px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg); padding: 18px;
-    color: var(--text); font-size: 13px; line-height: 1.6;
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    z-index: 80;
-  }
-  #helpOverlay h3 { color: var(--gold); margin: 0 0 10px; font-size: 14px; }
-  #helpOverlay ul { margin: 0; padding-left: 18px; }
-  #helpOverlay li { margin: 4px 0; color: var(--text-dim); }
-  #settingsOverlay {
-    position: absolute; top: 80px; right: 12px;
-    width: 200px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg); padding: 14px;
-    color: var(--text); font-size: 13px;
-    box-shadow: var(--shadow-pop), var(--top-hi);
-    z-index: 80;
-  }
-  #settingsOverlay label { color: var(--text-dim); font-size: 12px; margin-top: 6px; }
-  #deedCardPopup {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    width: 300px;
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--gold); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop), var(--glow-gold);
-    z-index: 90;
-    overflow: hidden;
-  }
-  #deedCardPopup .dc-color-bar {
-    height: 8px; width: 100%;
-  }
-  #deedCardPopup .dc-header {
-    padding: 12px 16px 6px; font-weight: 700; font-size: 15px; color: var(--gold);
-    display: flex; justify-content: space-between; align-items: flex-start;
-  }
-  #deedCardPopup .dc-close {
-    background: none; border: none; color: var(--text-dim); font-size: 18px;
-    cursor: pointer; padding: 0 0 0 8px; line-height: 1; box-shadow: none;
-  }
-  #deedCardPopup .dc-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #deedCardPopup .dc-body {
-    padding: 8px 16px 14px; color: var(--text); font-size: 12px; line-height: 1.6;
-  }
-  #deedCardPopup .dc-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--hairline-soft); padding: 3px 0; }
-  #deedCardPopup .dc-row:last-child { border-bottom: none; }
-  #deedCardPopup .dc-label { color: var(--text-dim); }
-  #deedCardPopup .dc-value { color: var(--text); text-align: right; }
-  #deedCardPopup .dc-owner { margin-top: 8px; font-size: 12px; color: var(--info); }
-  #deedCardPopup .dc-status { font-size: 11px; color: var(--danger); margin-top: 2px; }
-  #specialEventToast {
-    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(67, 20, 110, 0.78); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--magenta);
-    border-radius: var(--radius);
-    padding: 11px 16px;
-    font-size: 13px;
-    color: #f0d5ff;
-    max-width: 500px;
-    text-align: center;
-    line-height: 1.5;
-    box-shadow: var(--shadow), var(--glow-magenta);
-    z-index: 85;
-    display: flex; align-items: flex-start; gap: 10px;
-  }
-  #specialEventToast .set-text { flex: 1; }
-  #specialEventToast .set-close {
-    background: none; border: none; color: #c4b5fd; font-size: 16px;
-    cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0; box-shadow: none;
-  }
-  #specialEventToast .set-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #paymentToast {
-    position: absolute; bottom: 185px; right: 16px;
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 13px;
-    font-weight: bold;
-    color: #fff;
-    max-width: 280px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    z-index: 65;
-    line-height: 1.4;
-  }
-  #paymentToast.visible { opacity: 1; }
-  #paymentToast.paying { background: rgba(153,27,27,0.92); border: 1px solid #ef4444; }
-  #paymentToast.receiving { background: rgba(20,83,45,0.92); border: 1px solid #22c55e; }
-  #roomLinkRow { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
-  #roomLinkRow input { flex:1; font-size:12px; color:#aaa; background:#111; border:1px solid #444; border-radius:4px; padding:4px 8px; }
-  #figurePicker { margin-top: 12px; }
-  #figurePicker .fp-title { font-size: 12px; color: #aaa; margin-bottom: 6px; }
-  .fp-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
-  .fp-swatch {
-    width: 28px; height: 28px; border-radius: 5px; border: 2px solid transparent;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: #fff; font-weight: bold;
-  }
-  .fp-swatch.selected { border-color: var(--gold); box-shadow: var(--glow-gold); }
-  .fp-swatch.taken { opacity: 0.35; cursor: default; }
-  .fp-swatch:hover:not(.taken) { border-color: rgba(255,255,255,0.5); }
-  #turnTimer {
-    display: inline-block;
-    font-size: 13px;
-    font-weight: bold;
-    color: rgba(255,255,255,0.85);
-    background: rgba(0,0,0,0.35);
-    border-radius: 4px;
-    padding: 1px 7px;
-    margin-left: 6px;
-    vertical-align: middle;
-    min-width: 36px;
-    text-align: center;
-  }
-  #turnTimer.urgent {
-    color: #f87171;
-    animation: timerPulse 0.6s ease-in-out infinite alternate;
-  }
-  @keyframes timerPulse {
-    from { opacity: 1; }
-    to   { opacity: 0.45; }
-  }
-  /* Player inspector (feature 1) */
-  #playerInspector {
-    position: absolute; top: 80px; left: 250px;
-    width: 280px;
-    max-height: calc(70vh - 48px);
-    overflow-y: auto;
-    z-index: 70;
-  }
-  #playerInspector .pi-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 8px;
-  }
-  #playerInspector .pi-title { font-size: 13px; color: var(--gold); font-weight: 700; }
-  #playerInspector .pi-close {
-    background: none; border: none; color: var(--text-dim); font-size: 18px;
-    cursor: pointer; padding: 0; line-height: 1; box-shadow: none;
-  }
-  #playerInspector .pi-close:hover { color: #fff; transform: none; filter: none; box-shadow: none; }
-  #playerInspector .pi-stat { font-size: 12px; color: var(--text-dim); margin: 2px 0; }
-  #playerInspector .pi-worth { font-size: 13px; color: var(--success); font-weight: 700; margin: 4px 0; }
-  #playerInspector .pi-group { margin-top: 8px; }
-  #playerInspector .pi-group-title { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-  #playerInspector .pi-prop { font-size: 11px; color: var(--text); padding: 2px 0; border-bottom: 1px solid var(--hairline-soft); }
-  /* Net worth rank badge */
-  .nw-rank { font-size: 10px; font-weight: 700; color: #2a1c02; background: var(--gold); border-radius: 4px; padding: 0 5px; margin-left: 4px; }
-  .nw-worth { font-size: 10px; color: var(--success); margin-left: 4px; }
-  /* Player row clickable hint */
-  .player-row { cursor: pointer; }
-  .player-row:hover { background: rgba(255,255,255,0.04); }
-  /* Surrender button */
-  #surrenderBtn {
-    background: rgba(159,18,57,0.55); border: 1px solid rgba(244,63,94,0.5);
-    color: #fff; border-radius: var(--radius-sm); padding: 5px 9px;
-    font-size: 12px; cursor: pointer; white-space: nowrap;
-    font-family: var(--font); box-shadow: none;
-    transition: background var(--ease), box-shadow var(--ease);
-  }
-  #surrenderBtn:hover { background: rgba(159,18,57,0.85); box-shadow: 0 0 14px rgba(244,63,94,0.35); transform: none; filter: none; }
-  /* Room ready UI (feature 3) */
-  .rp-player-row { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 0; }
-  .rp-ready-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .rp-ready-dot.ready { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,0.6); }
-  .rp-ready-dot.not-ready { background: var(--text-mute); }
-  /* Room settings (feature 6) */
-  #roomSettingsPanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline-soft); }
-  #roomSettingsPanel .rs-title { font-size: 12px; color: var(--gold); font-weight: 700; margin-bottom: 6px; }
-  #roomSettingsPanel label { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: block; }
-  #roomSettingsPanel select { font-size: 12px; padding: 5px 8px; margin-top: 2px; }
-  #roomSettingsPanel .rs-readonly { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
-  /* Confirm overlay (non-modal, inline) */
-  .confirm-overlay {
-    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--danger);
-    border-radius: var(--radius); padding: 14px 16px; font-size: 13px; color: var(--text);
-    box-shadow: var(--shadow-pop);
-    position: absolute; z-index: 200;
-  }
-  .confirm-overlay .co-btns { display: flex; gap: 8px; margin-top: 10px; }
-  .confirm-overlay .co-msg { margin-bottom: 6px; }
-
-  /* ── Classic theme (original look) ──────────────────────────────────
-     Overriding the tokens reverts the token-driven rules (glass, radii,
-     shadows, blur, accents); the block below only re-adds the few bits that
-     the neon rules hardcode (button/header/popup gradients). */
-  body.theme-classic {
-    --glass: rgba(10, 10, 30, 0.85);
-    --glass-strong: #1a1a2e;
-    --glass-light: rgba(255, 255, 255, 0.03);
-    --hairline: #444;
-    --hairline-soft: #333;
-    --text: #eee;
-    --text-dim: #aaa;
-    --text-mute: #888;
-    --gold: #facc15;
-    --gold-deep: #eab308;
-    --success: #22c55e;
-    --danger: #ef4444;
-    --muted: #555;
-    --radius-lg: 8px;
-    --radius: 8px;
-    --radius-sm: 4px;
-    --shadow: none;
-    --shadow-pop: 0 4px 24px rgba(0, 0, 0, 0.7);
-    --glow-gold: none;
-    --glow-magenta: none;
-    --top-hi: none;
-    --blur: none;
-    --font: 'Segoe UI', Arial, sans-serif;
-    background: #1a1a2e;
-  }
-  body.theme-classic button {
-    background: #2563eb; font-weight: normal; letter-spacing: normal;
-    box-shadow: none;
-  }
-  body.theme-classic button:hover { background: #1d4ed8; transform: none; filter: none; box-shadow: none; }
-  body.theme-classic button:active { transform: none; filter: none; }
-  body.theme-classic input:focus, body.theme-classic select:focus { box-shadow: none; }
-  body.theme-classic #gameHeader {
-    background: linear-gradient(to bottom, #c2410c, #ea580c);
-    border-bottom: 2px solid #f97316;
-    box-shadow: none;
-  }
-  body.theme-classic #headerLeft .room-label { color: #fff; }
-  body.theme-classic #actionCardPopup .ac-header { background: #f97316; color: #fff; }
-  body.theme-classic #buyOfferPanel .buy-header { background: #facc15; color: #1a1a2e; }
-  body.theme-classic .prop-btn.danger { background: #991b1b; box-shadow: none; }
-  body.theme-classic .prop-btn.danger:hover { background: #7f1d1d; box-shadow: none; }
-  body.theme-classic #gameOverBanner { background: rgba(0, 0, 0, 0.75); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  body.theme-classic #gameOverBanner h1 { text-shadow: none; }
-  body.theme-classic #specialEventToast { background: rgba(88, 28, 135, 0.95); }
-  body.theme-classic #surrenderBtn:hover { box-shadow: none; }
-`;
 
 // ---------------------------------------------------------------------------
 // i18n — client-side string table (DE + EN)
@@ -575,6 +34,22 @@ type Locale = "de" | "en";
 const STRINGS: Record<Locale, Record<string, string>> = {
   de: {
     // Lobby
+    "lobby.roomName": "Spielname",
+    "lobby.password": "Passwort (privater Raum)",
+    "lobby.passwordOptional": "Leer = öffentlich",
+    "lobby.passwordPrompt": "Passwort eingeben…",
+    "lobby.join": "Beitreten",
+    "trade.youGive": "Du gibst",
+    "trade.youReceive": "Du erhältst",
+    "trade.approxValue": "Richtwert: Kaufpreise + Geld (keine Miet-Bewertung)",
+    "trade.pending": "Tauschangebot wartet auf",
+    "trade.empty": "Keine tauschbaren Grundstücke",
+    "lobby.noRooms": "Keine offenen Spiele — erstelle eins!",
+    "lobby.connecting": "Verbinde…",
+    "gameover.player": "Spieler",
+    "gameover.worth": "Vermögen",
+    "gameover.props": "Grundstücke",
+    "gameover.cash": "Bargeld",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -626,15 +101,23 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Einstellungen",
     "settings.locale": "Sprache / Locale",
     "settings.localeNote": "Hinweis: Lokale Anzeigesprache – Spielereignisse kommen vom Server.",
-    "settings.theme": "Design",
-    "settings.themeNeon": "Neon-Vegas",
-    "settings.themeClassic": "Klassisch",
+    "settings.quality": "Grafik",
+    "settings.qualityHigh": "Hoch",
+    "settings.qualityLow": "Niedrig",
+    "buildBlock.buildLimitUsed": "Baulimit für diesen Zug erreicht — nächste Runde wieder möglich.",
+    "buildBlock.needFourOnAll": "Alle Straßen der Gruppe brauchen erst 4 Häuser.",
+    "buildBlock.singleStreetNoHotel": "Auf Einzelstraßen-Gruppen kann kein Hotel gebaut werden (Balance-Regel).",
+    "buildBlock.evenBuild": "Gleichmäßig bauen: erst die anderen Straßen der Gruppe aufstocken.",
+    "buildBlock.mortgagedInGroup": "Eine Straße der Gruppe ist mit Hypothek belastet.",
+    "deed.unbuildable": "⛔ Nicht bebaubar (Hausregel)",
+    "deed.skyscraper": "Wolkenkratzer",
+    "prop.skyscraper": "Wolkenkratzer",
     // My properties panel
     "props.title": "Mein Eigentum",
     "props.trade": "Tauschen",
     "props.capital": "Kapital",
+    "props.builds": "Bauten diese Runde",
     // Buy offer
-    "buy.header": "Kaufangebot",
     "buy.price": "Preis:",
     "buy.balance": "Dein Kapital:",
     "buy.buy": "Kaufen",
@@ -681,6 +164,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "prop.unmortgage": "Ablösen",
     "prop.sell": "Verkaufen",
     // Deed card
+    "deed.title": "Besitzurkunde",
     "deed.price": "Preis",
     "deed.mortgage": "Hypothek",
     "deed.baseRent": "Grundmiete",
@@ -710,6 +194,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino-Jackpot-Nacht",
     "event.buildingSale": "🏗️ Bau-Rabatt",
     "event.quietDay": "😴 Ruhiger Tag",
+    "event.streetParty": "🎉 Straßenfest",
+    "event.powerOutage": "🔌 Stromausfall",
+    "event.marketCrash": "📉 Marktcrash",
+    "event.goldRush": "⛏️ Goldrausch",
     // Player list
     "player.jail": " (Knast)",
     // My properties panel
@@ -719,6 +207,20 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "tooltip.onlyYourTurn": "Nur in deinem Zug verfügbar",
     // Figure picker tooltip
     "figurePicker.colorTaken": "hat diese Farbe",
+    "room.diceSkin": "Würfel-Design",
+    "room.customToken": "Eigenes Bild als Figur",
+    "room.uploadHint": "PNG/JPEG, wird auf 256×256 zugeschnitten",
+    "room.uploadTooBig": "Bild konnte nicht verarbeitet werden (zu groß?)",
+    "figure.car": "Auto",
+    "figure.police": "Polizei",
+    "figure.topHat": "Zylinder",
+    "figure.pawn": "Spielstein",
+    "figure.rocket": "Rakete",
+    "dice.classic": "Klassisch",
+    "dice.neon": "Neon",
+    "dice.gold": "Gold",
+    "dice.obsidian": "Obsidian",
+    "dice.ruby": "Rubin",
     // Turn toast
     "turn.mine.toast": "Du bist am Zug",
     "turn.atReihe": "ist an der Reihe.",
@@ -767,9 +269,45 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.game.oneX": "1×",
     "settings.game.twoX": "2×",
     "settings.game.readonly": "Einstellungen (nur Host kann ändern)",
+    "settings.game.events": "Ereignisse",
+    "settings.game.eventsOff": "Aus",
+    "settings.game.eventsRare": "Selten",
+    "settings.game.eventsNormal": "Normal",
+    "settings.game.eventsChaos": "Chaos",
+    "settings.game.unbuildable": "Gesperrte Baufelder",
+    "settings.game.roundLimit": "Rundenlimit",
+    "settings.game.noLimit": "Kein Limit",
+    "settings.game.buildsPerTurn": "Bauten pro Zug",
+    "settings.game.unlimited": "Unbegrenzt",
+    "settings.game.noJailRent": "Keine Miete im Gefängnis",
+    "settings.game.extraBuildings": "Wolkenkratzer",
+    "settings.game.on": "An",
+    "settings.game.off": "Aus",
+    "rules.unbuildable": "Gesperrte Baufelder (Hausregel)",
+    "rules.roundLimit": "Rundenlimit — Sieg nach Vermögen",
+    "rules.noJailRent": "Keine Miete, solange der Besitzer im Gefängnis sitzt",
+    "rules.extraBuildings": "Wolkenkratzer aktiviert",
+    "rules.chaos": "Chaos-Ereignisse aktiv",
+    "rules.buildsPerTurn": "Angepasstes Baulimit pro Zug",
   },
   en: {
     // Lobby
+    "lobby.roomName": "Room name",
+    "lobby.password": "Password (private room)",
+    "lobby.passwordOptional": "Empty = public",
+    "lobby.passwordPrompt": "Enter password…",
+    "lobby.join": "Join",
+    "trade.youGive": "You give",
+    "trade.youReceive": "You receive",
+    "trade.approxValue": "Indicative: purchase prices + money (no rent valuation)",
+    "trade.pending": "Trade offer awaiting",
+    "trade.empty": "No tradable properties",
+    "lobby.noRooms": "No open games — create one!",
+    "lobby.connecting": "Connecting…",
+    "gameover.player": "Player",
+    "gameover.worth": "Net worth",
+    "gameover.props": "Properties",
+    "gameover.cash": "Cash",
     "lobby.title": "LasPoly",
     "lobby.nickname": "Nickname",
     "lobby.board": "Board",
@@ -821,15 +359,23 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.title": "Settings",
     "settings.locale": "Language / Locale",
     "settings.localeNote": "Note: Local display language – game events come from the server.",
-    "settings.theme": "Design",
-    "settings.themeNeon": "Neon Vegas",
-    "settings.themeClassic": "Classic",
+    "settings.quality": "Graphics",
+    "settings.qualityHigh": "High",
+    "settings.qualityLow": "Low",
+    "buildBlock.buildLimitUsed": "Build limit reached this turn — available again next turn.",
+    "buildBlock.needFourOnAll": "All streets in the group need 4 houses first.",
+    "buildBlock.singleStreetNoHotel": "Single-street groups cannot build a hotel (balance rule).",
+    "buildBlock.evenBuild": "Build evenly: raise the other streets in the group first.",
+    "buildBlock.mortgagedInGroup": "A street in this group is mortgaged.",
+    "deed.unbuildable": "⛔ No building allowed (house rule)",
+    "deed.skyscraper": "Skyscraper",
+    "prop.skyscraper": "Skyscraper",
     // My properties panel
     "props.title": "My Properties",
     "props.trade": "Trade",
     "props.capital": "Capital",
+    "props.builds": "Builds this turn",
     // Buy offer
-    "buy.header": "Purchase Offer",
     "buy.price": "Price:",
     "buy.balance": "Your capital:",
     "buy.buy": "Buy",
@@ -876,6 +422,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "prop.unmortgage": "Unmortgage",
     "prop.sell": "Sell",
     // Deed card
+    "deed.title": "Title Deed",
     "deed.price": "Price",
     "deed.mortgage": "Mortgage",
     "deed.baseRent": "Base rent",
@@ -905,6 +452,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "event.jackpot": "🎰 Casino Jackpot Night",
     "event.buildingSale": "🏗️ Building Sale",
     "event.quietDay": "😴 Quiet Day",
+    "event.streetParty": "🎉 Street Party",
+    "event.powerOutage": "🔌 Power Outage",
+    "event.marketCrash": "📉 Market Crash",
+    "event.goldRush": "⛏️ Gold Rush",
     // Player list
     "player.jail": " (Jail)",
     // My properties panel
@@ -914,6 +465,20 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "tooltip.onlyYourTurn": "Only available on your turn",
     // Figure picker tooltip
     "figurePicker.colorTaken": "has this colour",
+    "room.diceSkin": "Dice skin",
+    "room.customToken": "Your picture as token",
+    "room.uploadHint": "PNG/JPEG, cover-cropped to 256×256",
+    "room.uploadTooBig": "Could not process the image (too large?)",
+    "figure.car": "Car",
+    "figure.police": "Police",
+    "figure.topHat": "Top Hat",
+    "figure.pawn": "Pawn",
+    "figure.rocket": "Rocket",
+    "dice.classic": "Classic",
+    "dice.neon": "Neon",
+    "dice.gold": "Gold",
+    "dice.obsidian": "Obsidian",
+    "dice.ruby": "Ruby",
     // Turn toast
     "turn.mine.toast": "Your turn",
     "turn.atReihe": "is playing now.",
@@ -962,6 +527,26 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     "settings.game.oneX": "1×",
     "settings.game.twoX": "2×",
     "settings.game.readonly": "Settings (only host can change)",
+    "settings.game.events": "Events",
+    "settings.game.eventsOff": "Off",
+    "settings.game.eventsRare": "Rare",
+    "settings.game.eventsNormal": "Normal",
+    "settings.game.eventsChaos": "Chaos",
+    "settings.game.unbuildable": "Blocked build fields",
+    "settings.game.roundLimit": "Round limit",
+    "settings.game.noLimit": "No limit",
+    "settings.game.buildsPerTurn": "Builds per turn",
+    "settings.game.unlimited": "Unlimited",
+    "settings.game.noJailRent": "No rent while jailed",
+    "settings.game.extraBuildings": "Skyscrapers",
+    "settings.game.on": "On",
+    "settings.game.off": "Off",
+    "rules.unbuildable": "Blocked build fields (house rule)",
+    "rules.roundLimit": "Round limit — net-worth winner",
+    "rules.noJailRent": "No rent while the owner is in jail",
+    "rules.extraBuildings": "Skyscrapers enabled",
+    "rules.chaos": "Chaos events active",
+    "rules.buildsPerTurn": "Custom per-turn build limit",
   },
 };
 
@@ -1004,6 +589,8 @@ export class UI {
   private gameHud!: HTMLDivElement;
   private playerList!: HTMLDivElement;
   private eventLog!: HTMLDivElement;
+  private tickerText!: HTMLSpanElement;
+  private yourRail!: HTMLDivElement;
   private rollBtn!: HTMLButtonElement;
   private casinoRollBtn!: HTMLButtonElement;
   private ransomBtn!: HTMLButtonElement;
@@ -1026,6 +613,7 @@ export class UI {
   private headerTurnStatus!: HTMLDivElement;
   private headerRound!: HTMLDivElement;
   private headerEvent!: HTMLDivElement;
+  private headerRules!: HTMLDivElement;
   private headerViewBtn!: HTMLButtonElement;
   private turnToast!: HTMLDivElement;
   private turnToastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1038,11 +626,11 @@ export class UI {
   private specialEventToastTimer: ReturnType<typeof setTimeout> | null = null;
   private myColor: string = "red";
   private myFigureIndex: number = 0;
+  private myDiceSkin = 0;
   private figurePreview: FigurePreview | null = null;
   private currentLocale: Locale = _locale;
   // Payment toast (feature #4)
   private paymentToast!: HTMLDivElement;
-  private paymentToastTimer: ReturnType<typeof setTimeout> | null = null;
   // Mute button ref (feature #1)
   private muteBtn!: HTMLButtonElement;
   // Current room id for share link (feature #6)
@@ -1070,7 +658,6 @@ export class UI {
     this.root = root;
     this.net = net;
     this.board3d = board3d;
-    this.injectStyles();
     this.buildLobby();
     this.buildRoomPanel();
     this.buildGameHud();
@@ -1091,13 +678,11 @@ export class UI {
     this.checkRoomFromUrl();
   }
 
-  private injectStyles() {
-    const style = document.createElement("style");
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
 
   private buildLobby() {
+    // Lobby-first hierarchy: the list of joinable games is the primary
+    // content; creating a game is a secondary, collapsed path underneath.
+    const savedNick = localStorage.getItem("laspoly_nickname") ?? "Player";
     const lobby = document.createElement("div");
     lobby.id = "lobby";
     lobby.className = "panel";
@@ -1105,20 +690,28 @@ export class UI {
       <button id="lobbySettingsBtn" class="hdr-btn" title="${t("header.settings")}" style="position:absolute;top:12px;right:12px;">${t("header.settingsTitle")}</button>
       <h2 id="lobbyTitle" style="margin-bottom:12px;color:var(--gold);">${t("lobby.title")}</h2>
       <label id="lobbyNicknameLabel">${t("lobby.nickname")}</label>
-      <input id="nickname" type="text" placeholder="Your name" value="Player" />
-      <label id="lobbyBoardLabel">${t("lobby.board")}</label>
-      <select id="boardId"></select>
-      <label id="lobbyBotCountLabel">${t("lobby.botCount")}</label>
-      <select id="botCount">
-        <option value="0">0</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3" selected>3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-      </select>
-      <button id="createRoom" style="margin-top:16px;width:100%;">${t("lobby.createRoom")}</button>
-      <div id="roomList"></div>
+      <input id="nickname" type="text" placeholder="Your name" />
+      <div id="lobbyRoomsHeader" style="margin-top:14px;font-size:12px;color:#aaa;">${t("lobby.openRooms")}</div>
+      <div id="roomList"><div class="room-item" style="color:#888;cursor:default;">${t("lobby.connecting")}</div></div>
+      <div id="createPanel" style="margin-top:16px;border-top:1px solid var(--hairline);padding-top:10px;">
+        <div id="createGameToggle" style="color:var(--gold);font-weight:bold;font-size:13px;margin-bottom:6px;">${t("lobby.createRoom")}</div>
+        <label id="lobbyRoomNameLabel">${t("lobby.roomName")}</label>
+        <input id="roomName" type="text" maxlength="60" placeholder="" />
+        <label id="lobbyBoardLabel">${t("lobby.board")}</label>
+        <select id="boardId"></select>
+        <label id="lobbyBotCountLabel">${t("lobby.botCount")}</label>
+        <select id="botCount">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+        <label id="lobbyPasswordLabel">${t("lobby.password")}</label>
+        <input id="roomPassword" type="password" maxlength="64" autocomplete="off" placeholder="${t("lobby.passwordOptional")}" />
+        <button id="createRoom" style="margin-top:12px;width:100%;">${t("lobby.createRoom")}</button>
+      </div>
     `;
     this.root.appendChild(lobby);
     this.lobby = lobby;
@@ -1128,6 +721,12 @@ export class UI {
     this.botCountSelect = document.getElementById("botCount") as HTMLSelectElement;
     this.createRoomBtn = document.getElementById("createRoom") as HTMLButtonElement;
     this.roomList = document.getElementById("roomList") as HTMLDivElement;
+
+    // Nickname persists across sessions.
+    this.nicknameInput.value = savedNick;
+    this.nicknameInput.addEventListener("change", () => {
+      localStorage.setItem("laspoly_nickname", this.nicknameInput.value.trim() || "Player");
+    });
 
     // Populate boards
     for (const b of listBoards()) {
@@ -1147,15 +746,21 @@ export class UI {
     this.createRoomBtn.addEventListener("click", () => {
       const nickname = this.nicknameInput.value.trim() || "Player";
       this.myName = nickname;
+      localStorage.setItem("laspoly_nickname", nickname);
+      const roomNameInput = document.getElementById("roomName") as HTMLInputElement | null;
+      const roomName = roomNameInput?.value.trim() || `${nickname}'s Room`;
       const boardId = this.boardIdSelect.value || listBoards()[0]?.id || "vegas";
       const botCount = parseInt(this.botCountSelect.value, 10);
       const safeBotCount = Number.isNaN(botCount) ? 3 : Math.max(0, Math.min(5, botCount));
+      const pwInput = document.getElementById("roomPassword") as HTMLInputElement | null;
+      const password = pwInput?.value ?? "";
       this.net.send({
         t: "createRoom",
-        name: `${nickname}'s Room`,
+        name: roomName.slice(0, 60),
         nickname,
         boardId,
         botCount: safeBotCount,
+        ...(password ? { password } : {}),
       });
     });
   }
@@ -1224,21 +829,28 @@ export class UI {
     hud.appendChild(playerListPanel);
     this.playerList = playerListPanel;
 
-    // Event log
+    // Event ticker: one quiet line at rest; hovering (or focusing chat) expands
+    // to the scrollback + chat. The log never renders as an empty box.
     const logPanel = document.createElement("div");
     logPanel.id = "eventLogPanel";
     logPanel.className = "panel";
     logPanel.innerHTML = `
-      <div id="eventsLabel" style="font-size:12px;color:#aaa;margin-bottom:4px;">${t("game.events")}</div>
-      <div id="eventLog"></div>
-      <div id="chatRow">
-        <input id="chatInput" type="text" placeholder="${t("game.chat")}" />
-        <button id="chatSendBtn">${t("game.send")}</button>
+      <div id="tickerLine"><span id="eventsLabel">${t("game.events")}</span><span id="tickerText">—</span></div>
+      <div id="eventLogExpand">
+        <div id="eventLog"></div>
+        <div id="chatRow">
+          <input id="chatInput" type="text" placeholder="${t("game.chat")}" />
+          <button id="chatSendBtn">${t("game.send")}</button>
+        </div>
       </div>
     `;
     hud.appendChild(logPanel);
     this.eventLog = document.getElementById("eventLog") as HTMLDivElement;
     this.chatInput = document.getElementById("chatInput") as HTMLInputElement;
+    this.tickerText = document.getElementById("tickerText") as HTMLSpanElement;
+    // Keep the panel expanded while the chat input holds focus.
+    this.chatInput.addEventListener("focus", () => logPanel.classList.add("expanded"));
+    this.chatInput.addEventListener("blur", () => logPanel.classList.remove("expanded"));
 
     const chatSendBtn = document.getElementById("chatSendBtn") as HTMLButtonElement;
     chatSendBtn.addEventListener("click", () => this.sendChat());
@@ -1246,17 +858,23 @@ export class UI {
       if (e.key === "Enter") this.sendChat();
     });
 
-    // Action panel
+    // Your rail (zone 3): my-properties summary + the contextual action,
+    // stacked bottom-right. buildMyPropsPanel() appends into this container.
+    const yourRail = document.createElement("div");
+    yourRail.id = "yourRail";
+    hud.appendChild(yourRail);
+    this.yourRail = yourRail;
+
     const actionPanel = document.createElement("div");
     actionPanel.id = "actionPanel";
     actionPanel.className = "panel";
     actionPanel.innerHTML = `
       <button id="rollBtn">${t("game.roll")}</button>
-      <button id="casinoRollBtn" style="background:#a855f7;font-weight:bold;display:none;">${t("game.casinoRoll")}</button>
+      <button id="casinoRollBtn" class="btn-warn" style="display:none;">${t("game.casinoRoll")}</button>
       <button id="ransomBtn">${t("game.ransom")}</button>
-      <button id="endTurnBtn" style="background:#16a34a;font-size:15px;font-weight:bold;padding:10px 20px;display:none;">${t("game.endTurn")}</button>
+      <button id="endTurnBtn" class="btn-ok" style="display:none;">${t("game.endTurn")}</button>
     `;
-    hud.appendChild(actionPanel);
+    yourRail.appendChild(actionPanel);
 
     this.rollBtn = document.getElementById("rollBtn") as HTMLButtonElement;
     this.casinoRollBtn = document.getElementById("casinoRollBtn") as HTMLButtonElement;
@@ -1330,11 +948,13 @@ export class UI {
       <div id="headerTurnStatus"></div>
       <div id="headerRound"></div>
       <div id="headerEvent"></div>
+      <div id="headerRules"></div>
     `;
     hdr.appendChild(center);
     this.headerTurnStatus = center.querySelector("#headerTurnStatus") as HTMLDivElement;
     this.headerRound = center.querySelector("#headerRound") as HTMLDivElement;
     this.headerEvent = center.querySelector("#headerEvent") as HTMLDivElement;
+    this.headerRules = center.querySelector("#headerRules") as HTMLDivElement;
 
     // Turn-timer badge (sibling of turn status, inside headerCenter)
     const timerEl = document.createElement("span");
@@ -1486,10 +1106,10 @@ export class UI {
         <button id="localeENBtn" class="hdr-btn" style="font-size:12px;${sel(_locale === 'en')}">🇬🇧 EN</button>
       </div>
       <div id="settingsNote" style="margin-top:8px;font-size:11px;color:#888;">${t("settings.localeNote")}</div>
-      <label id="settingsThemeLabel" style="margin-top:10px;">${t("settings.theme")}</label>
+      <label id="settingsQualityLabel" style="margin-top:10px;">${t("settings.quality")}</label>
       <div style="display:flex;gap:6px;margin-top:4px;">
-        <button id="themeNeonBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'neon')}">${t("settings.themeNeon")}</button>
-        <button id="themeClassicBtn" class="hdr-btn" style="font-size:12px;${sel(getTheme() === 'classic')}">${t("settings.themeClassic")}</button>
+        <button id="qualityHighBtn" class="hdr-btn" style="font-size:12px;${sel(getQuality() === 'high')}">${t("settings.qualityHigh")}</button>
+        <button id="qualityLowBtn" class="hdr-btn" style="font-size:12px;${sel(getQuality() === 'low')}">${t("settings.qualityLow")}</button>
       </div>
       <label id="settingsSfxLabel" style="margin-top:10px;">${t("settings.sfxVolume")}</label>
       <input id="sfxVolumeSlider" type="range" min="0" max="100" value="${Math.round(audio.currentSfxVolume * 100)}" style="width:100%;margin-top:2px;" />
@@ -1514,13 +1134,13 @@ export class UI {
       settings.innerHTML = buildSettingsContent();
       this.wireLocaleButtons(settings, applyLocale);
       this.wireVolumeSliders(settings);
-      this.wireThemeButtons(settings);
+      this.wireQualityButtons(settings);
       // Re-render all static UI text
       this.relabelUI();
     };
     this.wireLocaleButtons(settings, applyLocale);
     this.wireVolumeSliders(settings);
-    this.wireThemeButtons(settings);
+    this.wireQualityButtons(settings);
     const savedLocale = (localStorage.getItem(LOCALE_KEY) ?? "de") as Locale;
     // Defer applyLocale to after WS is open (constructor runs before connection)
     setTimeout(() => applyLocale(savedLocale), 0);
@@ -1531,16 +1151,16 @@ export class UI {
     settings.querySelector("#localeENBtn")?.addEventListener("click", () => applyLocale("en"));
   }
 
-  private wireThemeButtons(settings: HTMLElement) {
-    // Switching theme reloads so the 3D scene rebuilds under the new palette;
-    // a mid-game reload resumes via the saved session.
-    const apply = (theme: Theme) => {
-      if (getTheme() === theme) return;
-      setTheme(theme);
+  private wireQualityButtons(settings: HTMLElement) {
+    // Switching quality reloads so the Babylon effect pipeline (bloom, glow,
+    // shadows, particles) rebuilds cleanly; mid-game reload resumes via session.
+    const apply = (quality: Quality) => {
+      if (getQuality() === quality) return;
+      setQuality(quality);
       location.reload();
     };
-    settings.querySelector("#themeNeonBtn")?.addEventListener("click", () => apply("neon"));
-    settings.querySelector("#themeClassicBtn")?.addEventListener("click", () => apply("classic"));
+    settings.querySelector("#qualityHighBtn")?.addEventListener("click", () => apply("high"));
+    settings.querySelector("#qualityLowBtn")?.addEventListener("click", () => apply("low"));
   }
 
   private wireVolumeSliders(settings: HTMLElement) {
@@ -1612,9 +1232,8 @@ export class UI {
     const helpOverlay = document.getElementById("helpOverlay") as HTMLElement & { _rebuildContent?: () => void } | null;
     if (helpOverlay?._rebuildContent) helpOverlay._rebuildContent();
 
-    // Buy offer panel
-    const buyHeader = document.querySelector("#buyOfferPanel .buy-header");
-    if (buyHeader) buyHeader.textContent = t("buy.header");
+    // Buy offer (deed card): button labels re-render with the card; the ids
+    // survive relabelling while it is open.
     const buyBtn = document.getElementById("buyOfferBuyBtn");
     if (buyBtn) buyBtn.textContent = t("buy.buy");
     const buyDeclineBtn = document.getElementById("buyOfferDeclineBtn");
@@ -1670,7 +1289,8 @@ export class UI {
     panel.id = "myPropsPanel";
     panel.className = "panel";
     hide(panel);
-    this.gameHud.appendChild(panel);
+    // Lives in the your-rail (zone 3), above the action panel.
+    this.yourRail.insertBefore(panel, this.yourRail.firstChild);
     this.myPropsPanel = panel;
   }
 
@@ -1707,6 +1327,7 @@ export class UI {
     banner.innerHTML = `
       <h1>${t("gameover.title")}</h1>
       <div id="gameOverWinner" style="font-size:1.5rem;color:#fff;"></div>
+      <div id="gameOverStats"></div>
       <div id="gameOverBtns" style="display:flex;gap:12px;margin-top:16px;align-items:center;justify-content:center;"></div>
     `;
     hide(banner);
@@ -1797,31 +1418,79 @@ export class UI {
     if (this.actionCardTimer) { clearTimeout(this.actionCardTimer); this.actionCardTimer = null; }
   }
 
+  // The buy prompt IS the deed card: it rises from the landed tile (anchored
+  // to the projected tile position every frame — the Director is moving the
+  // camera at the same time) with Kaufen/Ablehnen printed on the card.
+  private buyOfferAnchorRaf: number | null = null;
+  private buyOfferPos: number | null = null;
+
   private buildBuyOfferPanel() {
     const panel = document.createElement("div");
     panel.id = "buyOfferPanel";
-    panel.innerHTML = `
-      <div class="buy-header">${t("buy.header")}</div>
-      <div class="buy-body">
-        <div class="buy-detail buy-tile-name" id="buyTileName" style="font-weight:bold;color:var(--gold);margin-bottom:6px;font-size:13px;">—</div>
-        <div class="buy-detail" id="buyPrice">${t("buy.price")} —</div>
-        <div class="buy-detail" id="buyBalance">${t("buy.balance")} —</div>
-        <div class="buy-btns">
-          <button id="buyOfferBuyBtn" style="background:#16a34a;flex:1;">${t("buy.buy")}</button>
-          <button id="buyOfferDeclineBtn" style="background:#991b1b;flex:1;">${t("buy.decline")}</button>
-        </div>
-      </div>
-    `;
     hide(panel);
     this.gameHud.appendChild(panel);
     this.buyOfferPanel = panel;
+  }
 
-    (document.getElementById("buyOfferBuyBtn") as HTMLButtonElement).addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } })
-    );
-    (document.getElementById("buyOfferDeclineBtn") as HTMLButtonElement).addEventListener("click", () =>
-      this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } })
-    );
+  private showBuyOffer(pos: number, state: GameState) {
+    const panel = this.buyOfferPanel;
+    const me = state.players.find((p) => p.id === this.net.playerId);
+    // Re-render only when the tile changes (state ticks arrive every turn).
+    if (this.buyOfferPos !== pos || panel.style.display === "none") {
+      panel.innerHTML = "";
+      panel.appendChild(renderDeedCard({
+        state,
+        pos,
+        tr: t,
+        groupColor: (g) => this.groupCssColor(g),
+        nameId: "buyTileName",
+        priceId: "buyPrice",
+        footnote: { id: "buyBalance", text: `${t("buy.balance")} ${me?.money ?? 0} LPD` },
+        actions: [
+          {
+            id: "buyOfferBuyBtn", label: t("buy.buy"), kind: "primary",
+            onClick: () => this.net.send({ t: "command", command: { type: "BUY_PROPERTY" } }),
+          },
+          {
+            id: "buyOfferDeclineBtn", label: t("buy.decline"), kind: "quiet",
+            onClick: () => this.net.send({ t: "command", command: { type: "DECLINE_PROPERTY" } }),
+          },
+        ],
+      }));
+      panel.classList.remove("deed-rise");
+      void panel.offsetWidth; // restart the rise animation
+      panel.classList.add("deed-rise");
+      this.buyOfferPos = pos;
+    } else {
+      // Same tile, fresh state: keep the card, update the balance line.
+      const balanceEl = document.getElementById("buyBalance");
+      if (balanceEl) balanceEl.textContent = `${t("buy.balance")} ${me?.money ?? 0} LPD`;
+    }
+    show(panel, "block");
+
+    // Anchor to the tile until hidden (the camera moves underneath us).
+    if (this.buyOfferAnchorRaf === null) {
+      const step = () => {
+        if (panel.style.display === "none" || this.buyOfferPos === null) {
+          this.buyOfferAnchorRaf = null;
+          return;
+        }
+        const { x, y } = this.board3d.projectTile(this.buyOfferPos);
+        const w = panel.offsetWidth || 280;
+        const h = panel.offsetHeight || 340;
+        // Top clamp starts below the header cluster so the card can never
+        // cover the view/settings/leave buttons (e2e + usability).
+        panel.style.left = `${Math.min(Math.max(8, x - w / 2), window.innerWidth - w - 8)}px`;
+        panel.style.top = `${Math.min(Math.max(90, y - h - 24), window.innerHeight - h - 8)}px`;
+        this.buyOfferAnchorRaf = requestAnimationFrame(step);
+      };
+      this.buyOfferAnchorRaf = requestAnimationFrame(step);
+    }
+  }
+
+  private hideBuyOffer() {
+    hide(this.buyOfferPanel);
+    this.buyOfferPos = null;
   }
 
   private buildDeedCardPopup() {
@@ -1838,147 +1507,48 @@ export class UI {
     panel.innerHTML = "";
 
     if (!state) { hide(panel); this.deedCardPos = null; return; }
-
     const board = getBoard(state.boardId);
     const tile = board.tiles[pos];
     if (!tile) { hide(panel); this.deedCardPos = null; return; }
     this.deedCardPos = pos;
 
-    // Colour bar
-    const group = (tile as { group?: string }).group;
-    const barColor = group ? this.groupCssColor(group) : "#444";
-    const bar = document.createElement("div");
-    bar.className = "dc-color-bar";
-    bar.style.background = barColor;
-    panel.appendChild(bar);
-
-    // Header row: name + close
-    const hdr = document.createElement("div");
-    hdr.className = "dc-header";
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = tile.name;
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "dc-close";
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => { hide(panel); this.deedCardPos = null; });
-    hdr.appendChild(nameSpan);
-    hdr.appendChild(closeBtn);
-    panel.appendChild(hdr);
-
-    // Body
-    const body = document.createElement("div");
-    body.className = "dc-body";
-
-    // Determine the currently-applicable rent row key so we can highlight it
     const ownerId = state.ownership[pos];
-    const bld = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-    const isMortgaged = !!state.mortgaged[pos];
+    const myId = this.net.playerId;
+    const bld = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false, skyscraper: false };
 
-    // Compute which rent key applies for street tiles
-    const streetActiveKey = (() => {
-      if (!ownerId || isMortgaged) return null;
-      if (tile.type !== "street") return null;
-      if (bld.factory) return "deed.factory";
-      if (bld.hotel) return "deed.hotel";
-      if (bld.houses >= 4) return "deed.house4";
-      if (bld.houses === 3) return "deed.house3";
-      if (bld.houses === 2) return "deed.house2";
-      if (bld.houses === 1) return "deed.house1";
-      // No buildings: base rent applies if owner has monopoly (whole group owned)
-      return "deed.baseRent";
-    })();
-
-    // Station: rent tier is based on how many stations the owner has
-    const stationPositions = [5, 15, 25, 35];
-    const stationActiveKey = (() => {
-      if (!ownerId || tile.type !== "station" || isMortgaged) return null;
-      const count = stationPositions.filter(p => state.ownership[p] === ownerId).length;
-      return count >= 4 ? "deed.rentStation4"
-           : count === 3 ? "deed.rentStation3"
-           : count === 2 ? "deed.rentStation2"
-           : "deed.rentStation1";
-    })();
-
-    // Attraction: rent is dice-based; highlight tier based on how many owner has
-    const attractionActiveKey = (() => {
-      if (!ownerId || tile.type !== "attraction" || isMortgaged) return null;
-      const attrPositions = board.tiles
-        .map((t, i) => ({ t, i }))
-        .filter(({ t: tt }) => tt.type === "attraction")
-        .map(({ i }) => i);
-      const count = attrPositions.filter(p => state.ownership[p] === ownerId).length;
-      return count >= 2 ? "deed.rentAttr2" : "deed.rentAttr1";
-    })();
-
-    const rowHighlighted = (label: string, value: string, activeKey: string | null, rowKey: string) => {
-      const r = document.createElement("div");
-      r.className = "dc-row";
-      const active = activeKey === rowKey;
-      if (active) {
-        r.style.cssText = "background:rgba(250,204,21,0.2);border-radius:3px;font-weight:bold;border-bottom:1px solid #333;padding:2px 0;";
-      }
-      r.innerHTML = `<span class="dc-label" style="${active ? 'color:var(--gold);' : ''}">${label}</span><span class="dc-value" style="${active ? 'color:var(--gold);' : ''}">${value}</span>`;
-      body.appendChild(r);
-    };
-
-    const row = (label: string, value: string) => rowHighlighted(label, value, null, "");
-
-    if (tile.type === "street") {
-      const st = tile as StreetTile;
-      row(t("deed.price"), `${st.price} LPD`);
-      row(t("deed.mortgage"), `${st.mortgage} LPD`);
-      rowHighlighted(t("deed.baseRent"), `${st.rent[0]} LPD`, streetActiveKey, "deed.baseRent");
-      rowHighlighted(t("deed.house1"), `${st.rent[1]} LPD`, streetActiveKey, "deed.house1");
-      rowHighlighted(t("deed.house2"), `${st.rent[2]} LPD`, streetActiveKey, "deed.house2");
-      rowHighlighted(t("deed.house3"), `${st.rent[3]} LPD`, streetActiveKey, "deed.house3");
-      rowHighlighted(t("deed.house4"), `${st.rent[4]} LPD`, streetActiveKey, "deed.house4");
-      rowHighlighted(t("deed.hotel"), `${st.rent[5]} LPD`, streetActiveKey, "deed.hotel");
-      rowHighlighted(t("deed.factory"), `${st.factoryRevenue} LPD`, streetActiveKey, "deed.factory");
-      row(t("deed.houseCost"), `${st.houseCost} LPD`);
-      row(t("deed.hotelCost"), `${st.hotelCost} LPD`);
-      row(t("deed.factoryCost"), `${st.factoryCost} LPD`);
-    } else if (tile.type === "station") {
-      const r = board.rules.station;
-      row(t("deed.price"), `${r.price} LPD`);
-      row(t("deed.mortgage"), `${r.mortgage} LPD`);
-      rowHighlighted(t("deed.rentStation1"), `${r.rent[0] ?? 0} LPD`, stationActiveKey, "deed.rentStation1");
-      rowHighlighted(t("deed.rentStation2"), `${r.rent[1] ?? 0} LPD`, stationActiveKey, "deed.rentStation2");
-      rowHighlighted(t("deed.rentStation3"), `${r.rent[2] ?? 0} LPD`, stationActiveKey, "deed.rentStation3");
-      rowHighlighted(t("deed.rentStation4"), `${r.rent[3] ?? 0} LPD`, stationActiveKey, "deed.rentStation4");
-    } else if (tile.type === "attraction") {
-      const a = board.rules.attraction;
-      row(t("deed.price"), `${a.price} LPD`);
-      row(t("deed.mortgage"), `${a.mortgage} LPD`);
-      rowHighlighted(t("deed.rentAttr1"), `${t("deed.diceX")}${a.factorOne}`, attractionActiveKey, "deed.rentAttr1");
-      rowHighlighted(t("deed.rentAttr2"), `${t("deed.diceX")}${a.factorBoth}`, attractionActiveKey, "deed.rentAttr2");
-    }
-
-    // Owner + buildings (ownerId / bld / isMortgaged already computed above)
-    if (ownerId) {
-      const owner = state.players.find(p => p.id === ownerId);
-      const ownerDiv = document.createElement("div");
-      ownerDiv.className = "dc-owner";
-      ownerDiv.textContent = `${t("deed.owner")} ${owner?.name ?? "?"}`;
-      body.appendChild(ownerDiv);
-
-      // Bug 12: if this property belongs to ANOTHER player, offer a trade from here.
-      const myId = this.net.playerId;
-      if (myId && ownerId !== myId && (state.players.find(p => p.id === myId)?.alive ?? false)) {
-        const tradeBtn = document.createElement("button");
-        tradeBtn.className = "prop-btn";
-        tradeBtn.style.cssText = "margin-top:8px;background:#7c3aed;";
-        tradeBtn.textContent = t("props.trade");
-        tradeBtn.addEventListener("click", () => {
+    // Foreign property: offer a trade straight from the card (bug 12).
+    const actions = [];
+    if (ownerId && myId && ownerId !== myId && (state.players.find(p => p.id === myId)?.alive ?? false)) {
+      actions.push({
+        label: t("props.trade"), kind: "quiet" as const,
+        onClick: () => {
           hide(panel);
           this.deedCardPos = null;
           this.refreshTradePanel(state, myId, ownerId);
           show(this.tradePanel, "block");
-        });
-        body.appendChild(tradeBtn);
-      }
+        },
+      });
+    }
 
+    const card = renderDeedCard({
+      state, pos, tr: t,
+      groupColor: (g) => this.groupCssColor(g),
+      onClose: () => { hide(panel); this.deedCardPos = null; },
+      actions,
+    });
+
+    // Status extras under the rent table.
+    const body = card.querySelector(".deed-body");
+    if (body) {
+      if (!ownerId) {
+        const unowned = document.createElement("div");
+        unowned.className = "dc-owner deed-owner";
+        unowned.textContent = t("deed.unowned");
+        body.appendChild(unowned);
+      }
       let buildStr = "";
-      if (bld.hotel) buildStr = t("deed.hotel");
+      if ((bld as { skyscraper?: boolean }).skyscraper) buildStr = t("deed.skyscraper");
+      else if (bld.hotel) buildStr = t("deed.hotel");
       else if (bld.factory) buildStr = t("deed.factory");
       else if (bld.houses > 0) buildStr = `${bld.houses} ${bld.houses > 1 ? t("deed.houses") : t("deed.house")}`;
       if (buildStr) {
@@ -1987,21 +1557,15 @@ export class UI {
         bDiv.textContent = `${t("deed.building")} ${buildStr}`;
         body.appendChild(bDiv);
       }
-
-      if (isMortgaged) {
-        const mDiv = document.createElement("div");
-        mDiv.className = "dc-status";
-        mDiv.textContent = t("deed.mortgaged");
-        body.appendChild(mDiv);
+      if (state.unbuildableFields?.includes(pos)) {
+        const nb = document.createElement("div");
+        nb.className = "dc-status";
+        nb.textContent = t("deed.unbuildable");
+        body.appendChild(nb);
       }
-    } else {
-      const unownedDiv = document.createElement("div");
-      unownedDiv.className = "dc-owner";
-      unownedDiv.textContent = t("deed.unowned");
-      body.appendChild(unownedDiv);
     }
 
-    panel.appendChild(body);
+    panel.appendChild(card);
     show(panel, "block");
   }
 
@@ -2034,23 +1598,63 @@ export class UI {
   // Feature #4: Payment toast
   // -------------------------------------------------------------------------
   private buildPaymentToast() {
+    // Stacking container: rapid payments each get their own self-dismissing
+    // toast instead of overwriting one shared element.
     const el = document.createElement("div");
-    el.id = "paymentToast";
-    hide(el);
+    el.id = "paymentToasts";
     this.gameHud.appendChild(el);
     this.paymentToast = el;
   }
 
+  // Last cash value shown per player (drives the count-up tween).
+  private lastShownMoney: Map<string, number> = new Map();
+
+  /**
+   * Count-up tween on the freshly rendered ".money-val" spans. A 500ms
+   * force-write guarantees the final value even when rAF is throttled
+   * (headless e2e); a span replaced mid-tween just becomes a detached node.
+   */
+  private animateMoneyValues(state: GameState) {
+    for (const span of Array.from(this.playerList.querySelectorAll<HTMLElement>(".money-val"))) {
+      const pid = span.dataset["pid"];
+      if (!pid) continue;
+      const target = state.players.find((p) => p.id === pid)?.money ?? 0;
+      const from = this.lastShownMoney.get(pid);
+      this.lastShownMoney.set(pid, target);
+      if (from === undefined || from === target) continue; // already rendered as target
+      const DUR = 400;
+      const start = performance.now();
+      let raf = 0;
+      const force = setTimeout(() => {
+        cancelAnimationFrame(raf);
+        span.textContent = `LPD ${target}`;
+      }, 500);
+      const step = (now: number) => {
+        const t = Math.min((now - start) / DUR, 1);
+        span.textContent = `LPD ${Math.round(from + (target - from) * t)}`;
+        if (t < 1) raf = requestAnimationFrame(step);
+        else clearTimeout(force);
+      };
+      raf = requestAnimationFrame(step);
+    }
+  }
+
   showPaymentToast(text: string, type: "paying" | "receiving") {
-    const el = this.paymentToast;
-    el.textContent = type === "paying" ? `↑ ${text}` : `↓ ${text}`;
-    el.className = `visible ${type}`;
-    el.style.display = "block";
-    if (this.paymentToastTimer) clearTimeout(this.paymentToastTimer);
-    this.paymentToastTimer = setTimeout(() => {
-      el.classList.remove("visible");
-      this.paymentToastTimer = null;
-    }, 3500);
+    const container = this.paymentToast;
+    // Cap the stack at 4 — drop the oldest (last in column-reverse DOM order).
+    while (container.children.length >= 4) {
+      container.firstChild?.remove();
+    }
+    const toast = document.createElement("div");
+    toast.className = `payment-toast ${type}`;
+    toast.textContent = type === "paying" ? `↑ ${text}` : `↓ ${text}`;
+    container.appendChild(toast);
+    // Fade in on the next frame so the CSS transition fires.
+    requestAnimationFrame(() => toast.classList.add("visible"));
+    setTimeout(() => {
+      toast.classList.remove("visible");
+      setTimeout(() => toast.remove(), 350);
+    }, 3000);
   }
 
   // -------------------------------------------------------------------------
@@ -2253,6 +1857,12 @@ export class UI {
     // Determine if it's the local player's timer
     const isMe = this.net.playerId !== null && playerId === this.net.playerId;
 
+    // Quiet until it matters: a permanently ticking clock adds anxiety to a
+    // casual game. Only the last 15 s are shown (brief §7, HUD-at-rest).
+    if (secondsLeft > 15) {
+      el.style.display = "none";
+      return;
+    }
     el.textContent = `⏱ ${secondsLeft}s`;
     el.style.display = "inline-block";
     el.classList.toggle("urgent", secondsLeft <= 10 && isMe);
@@ -2342,7 +1952,11 @@ export class UI {
       red: "#ef4444", blue: "#3b82f6", green: "#22c55e",
       yellow: "#eab308", purple: "#a855f7", orange: "#f97316",
     };
-    const figureNames = ["Car 1", "Car 2", "Car 3", "Car 4", "Car 5", "Police"];
+    const figureNames = [
+      t("figure.car") + " 1", t("figure.car") + " 2", t("figure.car") + " 3",
+      t("figure.car") + " 4", t("figure.car") + " 5", t("figure.police"),
+      "🎩 " + t("figure.topHat"), "♟ " + t("figure.pawn"), "🚀 " + t("figure.rocket"),
+    ];
 
     // Colour is assigned by the server (bug 2): read it from this player's seat.
     const me = room.players.find((p) => p.id === this.net.playerId);
@@ -2396,7 +2010,7 @@ export class UI {
       btn.addEventListener("click", () => {
         if (this.myFigureIndex === fi) return;
         this.myFigureIndex = fi;
-        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: fi });
+        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: fi, diceSkin: this.myDiceSkin });
         void this.figurePreview?.show(fi, myHex);
         restyle();
       });
@@ -2405,6 +2019,123 @@ export class UI {
     }
     restyle();
     container.appendChild(grid);
+
+    // ---- Dice skin swatches (cosmetic; may repeat between players) --------
+    const diceTitle = document.createElement("div");
+    diceTitle.className = "fp-title";
+    diceTitle.style.marginTop = "10px";
+    diceTitle.textContent = t("room.diceSkin");
+    container.appendChild(diceTitle);
+
+    const DICE_SWATCHES: { name: string; face: string; pip: string }[] = [
+      { name: t("dice.classic"),  face: "#f4f4ee", pip: "#161616" },
+      { name: t("dice.neon"),     face: "#1a1030", pip: "#22d3ee" },
+      { name: t("dice.gold"),     face: "#d4af37", pip: "#2a1f04" },
+      { name: t("dice.obsidian"), face: "#17171c", pip: "#f2f2f2" },
+      { name: t("dice.ruby"),     face: "#7f1d1d", pip: "#ffe4e6" },
+    ];
+    const diceRow = document.createElement("div");
+    diceRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+    const diceBtns: HTMLButtonElement[] = [];
+    const restyleDice = () => {
+      diceBtns.forEach((b, i) => {
+        b.style.borderColor = this.myDiceSkin === i ? "#facc15" : "rgba(255,255,255,0.15)";
+      });
+    };
+    DICE_SWATCHES.forEach((sw, i) => {
+      const btn = document.createElement("button");
+      btn.title = sw.name;
+      btn.style.cssText = "width:34px;height:34px;border-radius:6px;cursor:pointer;border:2px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:15px;background:" + sw.face + ";color:" + sw.pip + ";";
+      btn.textContent = "⚄";
+      btn.addEventListener("click", () => {
+        if (this.myDiceSkin === i) return;
+        this.myDiceSkin = i;
+        this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: this.myFigureIndex, diceSkin: i });
+        restyleDice();
+      });
+      diceBtns.push(btn);
+      diceRow.appendChild(btn);
+    });
+    restyleDice();
+    container.appendChild(diceRow);
+
+    // ---- Custom-image standee upload ---------------------------------------
+    const customTitle = document.createElement("div");
+    customTitle.className = "fp-title";
+    customTitle.style.marginTop = "10px";
+    customTitle.textContent = t("room.customToken");
+    container.appendChild(customTitle);
+
+    const customRow = document.createElement("div");
+    customRow.style.cssText = "display:flex;gap:8px;align-items:center;";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/png,image/jpeg";
+    fileInput.id = "customTokenFile";
+    fileInput.style.cssText = "font-size:11px;max-width:180px;";
+    customRow.appendChild(fileInput);
+    const hint = document.createElement("span");
+    hint.style.cssText = "font-size:10px;color:#888;";
+    hint.textContent = t("room.uploadHint");
+    customRow.appendChild(hint);
+    container.appendChild(customRow);
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      void this.uploadCustomToken(file);
+    });
+  }
+
+  /**
+   * Client-side pipeline for the custom standee: cover-crop to 256×256 JPEG,
+   * hard size cap, POST to the server (session-token auth), then pick the
+   * custom figure. The server re-validates mime + magic bytes.
+   */
+  private async uploadCustomToken(file: File): Promise<void> {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const S = 256;
+      const canvas = document.createElement("canvas");
+      canvas.width = S;
+      canvas.height = S;
+      const ctx = canvas.getContext("2d")!;
+      // Cover-crop: scale the shorter side to S, centre the overflow.
+      const scale = Math.max(S / bitmap.width, S / bitmap.height);
+      const w = bitmap.width * scale;
+      const h = bitmap.height * scale;
+      ctx.drawImage(bitmap, (S - w) / 2, (S - h) / 2, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      if (dataUrl.length > 200_000) {
+        this.showError(t("room.uploadTooBig"));
+        return;
+      }
+      const session = loadSession();
+      if (!session) {
+        this.showError("No session");
+        return;
+      }
+      const res = await fetch(`${API_BASE}/api/token-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: session.roomId,
+          playerId: session.playerId,
+          token: session.token,
+          image: dataUrl,
+        }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        this.showError(err?.error ?? `Upload failed (${res.status})`);
+        return;
+      }
+      // Success → select the standee token.
+      this.myFigureIndex = CUSTOM_FIGURE_INDEX;
+      this.net.send({ t: "chooseFigure", color: this.myColor, figureIndex: CUSTOM_FIGURE_INDEX, diceSkin: this.myDiceSkin });
+    } catch {
+      this.showError(t("room.uploadTooBig"));
+    }
   }
 
   /** Dispose the lobby 3D vehicle preview engine (when leaving the room / game starts). */
@@ -2465,12 +2196,31 @@ export class UI {
     }
   }
 
+  /**
+   * Money legibility (plan phase 5): a signed LPD delta floats off the
+   * player's rail card. Colour: ok for gains, danger for losses.
+   */
+  showMoneyDelta(playerId: string, delta: number): void {
+    const span = this.playerList?.querySelector(`.money-val[data-pid="${playerId}"]`);
+    if (!span) return;
+    const rect = (span as HTMLElement).getBoundingClientRect();
+    const float = document.createElement("div");
+    float.className = "money-delta " + (delta > 0 ? "gain" : "loss");
+    float.textContent = `${delta > 0 ? "+" : "−"}${Math.abs(delta)} LPD`;
+    float.style.left = `${rect.right + 10}px`;
+    float.style.top = `${rect.top - 4}px`;
+    document.body.appendChild(float);
+    setTimeout(() => float.remove(), 1900);
+  }
+
   appendEventLine(text: string) {
     const line = document.createElement("div");
     line.className = "event-line";
     line.textContent = text;
     this.eventLog.appendChild(line);
     this.eventLog.scrollTop = this.eventLog.scrollHeight;
+    // The ticker always shows the latest event.
+    if (this.tickerText) this.tickerText.textContent = text;
   }
 
   private showLobbyPanel() {
@@ -2500,37 +2250,163 @@ export class UI {
     this.net.send({ t: "listRooms" });
   }
 
+  /** Belt-and-braces lobby refresh: push updates are primary, this catches stragglers. */
+  private lobbyPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  private startLobbyPolling() {
+    if (this.lobbyPollTimer) return;
+    this.lobbyPollTimer = setInterval(() => {
+      if (this.lobby.style.display === "none") { this.stopLobbyPolling(); return; }
+      this.net.send({ t: "listRooms" });
+    }, 10_000);
+  }
+
+  private stopLobbyPolling() {
+    if (this.lobbyPollTimer) {
+      clearInterval(this.lobbyPollTimer);
+      this.lobbyPollTimer = null;
+    }
+  }
+
+  // Compact deed tooltip on 3D tile hover (desktop only).
+  private deedTooltip: HTMLDivElement | null = null;
+  private deedTooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  showDeedTooltip(pos: number | null, x: number, y: number): void {
+    // Touch devices get the click-opened deed card instead.
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    if (pos === null) {
+      if (this.deedTooltipTimer) { clearTimeout(this.deedTooltipTimer); this.deedTooltipTimer = null; }
+      this.deedTooltip?.remove();
+      this.deedTooltip = null;
+      return;
+    }
+    const state = this.lastState;
+    if (!state) return;
+    const board = getBoard(state.boardId);
+    const tile = board.tiles[pos];
+    if (!tile) return;
+
+    const render = () => {
+      if (!this.deedTooltip) {
+        this.deedTooltip = document.createElement("div");
+        this.deedTooltip.id = "deedTooltip";
+        document.body.appendChild(this.deedTooltip);
+      }
+      const group = (tile as { group?: string }).group;
+      const price = tilePrice(board, tile);
+      const ownerId = state.ownership[pos];
+      const owner = ownerId ? state.players.find((p) => p.id === ownerId) : null;
+      const b = state.buildings[pos];
+      let buildStr = "";
+      if (b?.skyscraper) buildStr = t("deed.skyscraper");
+      else if (b?.hotel) buildStr = t("deed.hotel");
+      else if (b?.factory) buildStr = t("deed.factory");
+      else if (b && b.houses > 0) buildStr = `${b.houses}× ${t("deed.house")}`;
+      this.deedTooltip.innerHTML =
+        (group ? `<div class="dt-bar" style="background:${this.groupCssColor(group)};"></div>` : "") +
+        `<strong>${tile.name}</strong>` +
+        (price > 0 ? `<div>${price} LPD</div>` : "") +
+        (owner ? `<div style="color:#aaa;">${t("deed.owner")} ${owner.name}</div>` : "") +
+        (state.mortgaged[pos] ? `<div style="color:#f87171;">${t("deed.mortgaged")}</div>` : "") +
+        (buildStr ? `<div style="color:#aaa;">${buildStr}</div>` : "") +
+        (state.unbuildableFields?.includes(pos) ? `<div style="color:#f87171;">⛔</div>` : "");
+      this.deedTooltip.style.left = `${Math.min(x + 14, window.innerWidth - 210)}px`;
+      this.deedTooltip.style.top = `${Math.min(y + 14, window.innerHeight - 120)}px`;
+    };
+
+    if (this.deedTooltip) {
+      // Already visible — just follow the cursor / retarget.
+      render();
+    } else if (!this.deedTooltipTimer) {
+      // First contact: small delay so quick pans don't flicker tooltips.
+      this.deedTooltipTimer = setTimeout(() => {
+        this.deedTooltipTimer = null;
+        render();
+      }, 350);
+    }
+  }
+
+  /** Re-trigger the entry animation on a screen container. */
+  private animateIn(el: HTMLElement) {
+    el.classList.remove("screen-enter");
+    void el.offsetWidth; // reflow so the animation restarts
+    el.classList.add("screen-enter");
+  }
+
   showLobby(rooms: RoomSummary[]) {
+    this.showDeedTooltip(null, 0, 0); // clear any lingering hover tooltip
+    const wasHidden = this.lobby.style.display === "none";
     show(this.lobby);
+    if (wasHidden) this.animateIn(this.lobby);
     hide(this.roomPanel);
     hide(this.gameHud);
     hide(this.spectatorBanner);
+    this.startLobbyPolling();
 
     this.roomList.innerHTML = "";
-    if (rooms.length > 0) {
-      const header = document.createElement("div");
-      header.style.cssText = "margin-top:12px;font-size:12px;color:#aaa;";
-      header.textContent = t("lobby.openRooms");
-      this.roomList.appendChild(header);
+    const boardNames = new Map(listBoards().map((b) => [b.id, b.name]));
+    const joinable = rooms.filter((r) => !r.started);
 
-      for (const room of rooms) {
-        if (room.started) continue;
-        const item = document.createElement("div");
-        item.className = "room-item";
-        item.innerHTML = `<strong>${room.name}</strong> <span style="color:#aaa;font-size:12px;">(${room.playerCount} ${t("lobby.players")})</span>`;
-        item.addEventListener("click", () => {
-          const nickname = this.nicknameInput.value.trim() || "Player";
+    if (joinable.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "room-item";
+      empty.style.cssText = "color:#888;cursor:default;";
+      empty.textContent = t("lobby.noRooms");
+      this.roomList.appendChild(empty);
+      return;
+    }
+
+    for (const room of joinable) {
+      const item = document.createElement("div");
+      item.className = "room-item";
+      const locked = room.hasPassword;
+      item.innerHTML =
+        `<strong>${room.name}</strong>${locked ? " 🔒" : ""}` +
+        `<span style="color:#aaa;font-size:12px;margin-left:6px;">${boardNames.get(room.boardId) ?? room.boardId}</span>` +
+        `<span style="color:#aaa;font-size:12px;margin-left:6px;">👥 ${room.playerCount}</span>`;
+      item.addEventListener("click", () => {
+        const nickname = this.nicknameInput.value.trim() || "Player";
+        if (!locked) {
           this.net.send({ t: "joinRoom", roomId: room.id, nickname });
+          return;
+        }
+        // Private room: swap the card content for an inline password prompt.
+        if (item.querySelector(".room-pw-input")) return; // prompt already open
+        item.innerHTML = `<strong>${room.name}</strong> 🔒`;
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:6px;margin-top:6px;";
+        const pw = document.createElement("input");
+        pw.type = "password";
+        pw.className = "room-pw-input";
+        pw.placeholder = t("lobby.passwordPrompt");
+        pw.style.cssText = "flex:1;";
+        pw.addEventListener("click", (e) => e.stopPropagation());
+        const joinBtn = document.createElement("button");
+        joinBtn.textContent = t("lobby.join");
+        joinBtn.className = "room-pw-join";
+        joinBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.net.send({ t: "joinRoom", roomId: room.id, nickname: this.nicknameInput.value.trim() || "Player", password: pw.value });
         });
-        this.roomList.appendChild(item);
-      }
+        pw.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") joinBtn.click();
+        });
+        row.appendChild(pw);
+        row.appendChild(joinBtn);
+        item.appendChild(row);
+        pw.focus();
+      });
+      this.roomList.appendChild(item);
     }
   }
 
   onJoined(roomId: string, _playerId: string) {
     this.currentRoomId = roomId;
+    this.stopLobbyPolling();
     hide(this.lobby);
     show(this.roomPanel);
+    this.animateIn(this.roomPanel);
     this.roomInfo.textContent = t("room.waiting");
     hide(this.startGameBtn);
     // Update room link (feature #6)
@@ -2698,6 +2574,62 @@ export class UI {
       this.currentRoomSettings = { ...this.currentRoomSettings, botDifficulty: v as "easy" | "normal" | "hard" };
     });
 
+    // ---- House rules ------------------------------------------------------
+    const sendSetting = (patch: Partial<GameSettings>) => {
+      this.currentRoomSettings = { ...this.currentRoomSettings, ...patch };
+      this.net.send({ t: "setGameSettings", settings: this.currentRoomSettings });
+    };
+    const onOff = [
+      { value: "0", label: t("settings.game.off") },
+      { value: "1", label: t("settings.game.on") },
+    ];
+
+    addSetting("settings.game.events", "rsEvents", [
+      { value: "off", label: t("settings.game.eventsOff") },
+      { value: "rare", label: t("settings.game.eventsRare") },
+      { value: "normal", label: t("settings.game.eventsNormal") },
+      { value: "chaos", label: t("settings.game.eventsChaos") },
+    ], settings.eventFrequency ?? "normal", (v) => {
+      sendSetting({ eventFrequency: v as GameSettings["eventFrequency"] });
+    });
+
+    addSetting("settings.game.unbuildable", "rsUnbuildable", [
+      { value: "0", label: t("settings.game.off") },
+      { value: "2", label: "2" },
+      { value: "4", label: "4" },
+      { value: "6", label: "6" },
+    ], String(settings.unbuildableCount ?? 0), (v) => {
+      sendSetting({ unbuildableCount: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.roundLimit", "rsRoundLimit", [
+      { value: "0", label: t("settings.game.noLimit") },
+      { value: "20", label: "20" },
+      { value: "40", label: "40" },
+      { value: "60", label: "60" },
+    ], String(settings.roundLimit ?? 0), (v) => {
+      sendSetting({ roundLimit: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.buildsPerTurn", "rsBuildsPerTurn", [
+      { value: "1", label: "1" },
+      { value: "2", label: "2" },
+      { value: "3", label: "3" },
+      { value: "0", label: t("settings.game.unlimited") },
+    ], String(settings.buildsPerTurn ?? 1), (v) => {
+      sendSetting({ buildsPerTurn: parseInt(v, 10) });
+    });
+
+    addSetting("settings.game.noJailRent", "rsNoJailRent", onOff,
+      settings.noRentInJail ? "1" : "0", (v) => {
+        sendSetting({ noRentInJail: v === "1" });
+      });
+
+    addSetting("settings.game.extraBuildings", "rsExtraBuildings", onOff,
+      settings.extraBuildings ? "1" : "0", (v) => {
+        sendSetting({ extraBuildings: v === "1" });
+      });
+
     if (!isHost) {
       const note = document.createElement("div");
       note.className = "rs-readonly";
@@ -2714,7 +2646,9 @@ export class UI {
     this.disposeFigurePreview(); // free the lobby 3D vehicle preview once in-game
     hide(this.lobby);
     hide(this.roomPanel);
+    const hudWasHidden = this.gameHud.style.display === "none";
     show(this.gameHud, "block");
+    if (hudWasHidden) this.animateIn(this.gameHud);
 
     const currentPlayer = state.players[state.currentPlayerIndex];
     const isMyTurn = myId !== null && currentPlayer?.id === myId;
@@ -2734,12 +2668,41 @@ export class UI {
       this.headerTurnStatus.textContent = turnText;
       this.headerRound.textContent = `${t("turn.round")} ${state.round}`;
 
-      // Special event label in header
-      if (state.activeEvent) {
-        const eventKey = `event.${state.activeEvent.id}`;
-        this.headerEvent.textContent = t(eventKey) || state.activeEvent.id;
-      } else {
-        this.headerEvent.textContent = '';
+      // Special event label in header — pulse the plaque when it changes so
+      // an economy-phase shift is a *moment*, not a silently swapped word.
+      const evLabel = state.activeEvents.length > 0
+        ? state.activeEvents.map((e) => t(`event.${e.id}`) || e.id).join(" · ")
+        : "";
+      if (evLabel !== this.headerEvent.textContent) {
+        this.headerEvent.textContent = evLabel;
+        const plaque = this.headerEvent.closest("#headerCenter");
+        if (plaque && evLabel) {
+          plaque.classList.remove("plaque-pulse");
+          void (plaque as HTMLElement).offsetWidth;
+          plaque.classList.add("plaque-pulse");
+        }
+      }
+    }
+
+    // Compact active-house-rule badges (tooltips carry the explanation).
+    if (this.headerRules) {
+      const badges: { icon: string; tip: string }[] = [];
+      if (state.unbuildableFields.length > 0)
+        badges.push({ icon: `⛔${state.unbuildableFields.length}`, tip: t("rules.unbuildable") });
+      if (state.roundLimit > 0)
+        badges.push({ icon: `⏱${state.roundLimit}`, tip: t("rules.roundLimit") });
+      if (state.noRentInJail) badges.push({ icon: "🚫🔒", tip: t("rules.noJailRent") });
+      if (state.extraBuildings) badges.push({ icon: "🏙", tip: t("rules.extraBuildings") });
+      if (state.eventFrequency === "chaos") badges.push({ icon: "🎲⚡", tip: t("rules.chaos") });
+      if (state.buildsPerTurn !== 1)
+        badges.push({ icon: `🔨${state.buildsPerTurn === 0 ? "∞" : state.buildsPerTurn}`, tip: t("rules.buildsPerTurn") });
+      this.headerRules.innerHTML = "";
+      for (const b of badges) {
+        const span = document.createElement("span");
+        span.textContent = b.icon;
+        span.title = b.tip;
+        span.style.marginRight = "6px";
+        this.headerRules.appendChild(span);
       }
     }
 
@@ -2762,7 +2725,7 @@ export class UI {
       const row = document.createElement("div");
       row.className = "player-row" + (isCurrent ? " current-player" : "") + (!p.alive ? " dead" : "");
 
-      const dot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
+      const dot = `<span class="chip-disc" data-color="${p.color}"></span>`;
       const rollStr = p.lastRoll[0] > 0 ? ` [${p.lastRoll[0]}+${p.lastRoll[1]}]` : "";
       const jail = p.inJail ? t("player.jail") : "";
       const rank = rankMap.get(p.id);
@@ -2773,7 +2736,7 @@ export class UI {
       // without them). LPD amount + net-worth badge remain.
       // Cash on its own line below (bug 3): "LPD <money>" sits next to the amount,
       // not glued to the "NW" net-worth badge above it.
-      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span style="display:block;color:#aaa;font-size:11px;margin-top:2px;">LPD ${p.money}</span>`;
+      row.innerHTML = `${dot}<strong>${p.name}</strong>${p.isBot ? " (Bot)" : ""}${jail}${rollStr}${rankBadge}${worthStr}${this.renderDeedStrip(state, p.id)}<span class="money-val" data-pid="${p.id}">LPD ${p.money}</span>`;
 
       // Feature 1: clicking row opens inspector
       row.addEventListener("click", () => {
@@ -2786,6 +2749,9 @@ export class UI {
       });
       this.playerList.appendChild(row);
     }
+
+    // Animate changed cash values (count-up tween on the fresh spans).
+    this.animateMoneyValues(state);
 
     // Refresh inspector if open
     if (this.inspectedPlayerId && this.playerInspector.style.display !== "none") {
@@ -2856,20 +2822,11 @@ export class UI {
     if (showEndTurn) { show(this.endTurnBtn, "inline-block"); this.endTurnBtn.disabled = false; }
     else { hide(this.endTurnBtn); this.endTurnBtn.disabled = true; }
 
-    // Buy offer panel (tile name / price / balance)
+    // Buy offer: the deed card rises from the landed tile.
     if (showBuy && myId && state.pendingPurchase !== null) {
-      const board = getBoard(state.boardId);
-      const tile = board.tiles[state.pendingPurchase];
-      const price = tile ? tilePrice(board, tile) : 0;
-      const tileNameEl = document.getElementById("buyTileName");
-      const priceEl = document.getElementById("buyPrice");
-      const balanceEl = document.getElementById("buyBalance");
-      if (tileNameEl) tileNameEl.textContent = tile?.name ?? "—";
-      if (priceEl) priceEl.textContent = `${t("buy.price")} ${price} LPD`;
-      if (balanceEl) balanceEl.textContent = `${t("buy.balance")} ${me?.money ?? 0} LPD`;
-      show(this.buyOfferPanel, "block");
+      this.showBuyOffer(state.pendingPurchase, state);
     } else {
-      hide(this.buyOfferPanel);
+      this.hideBuyOffer();
     }
 
     // Spectator banner
@@ -2932,8 +2889,34 @@ export class UI {
   }
 
   showGameOver(winnerName: string, _winnerId?: string) {
+    this.showDeedTooltip(null, 0, 0); // clear any lingering hover tooltip
     const winnerEl = document.getElementById("gameOverWinner");
     if (winnerEl) winnerEl.textContent = `${t("gameover.winner")} ${winnerName}`;
+
+    // Final standings from the last rendered state (net worth, props, cash).
+    const statsEl = document.getElementById("gameOverStats");
+    const state = this.lastState;
+    if (statsEl && state) {
+      const rows = state.players
+        .map((p) => ({
+          p,
+          worth: p.alive ? netWorth(state, p.id) : 0,
+          props: Object.values(state.ownership).filter((id) => id === p.id).length,
+        }))
+        .sort((a, b) => (Number(b.p.alive) - Number(a.p.alive)) || (b.worth - a.worth));
+      statsEl.innerHTML =
+        `<table style="margin:12px auto 0;border-collapse:collapse;font-size:13px;color:#ddd;">` +
+        `<tr style="color:#aaa;font-size:11px;"><th style="padding:2px 10px;"></th><th style="padding:2px 10px;text-align:left;">${t("gameover.player")}</th><th style="padding:2px 10px;">${t("gameover.worth")}</th><th style="padding:2px 10px;">${t("gameover.props")}</th><th style="padding:2px 10px;">${t("gameover.cash")}</th></tr>` +
+        rows.map((r, i) =>
+          `<tr style="${!r.p.alive ? "opacity:0.45;" : i === 0 ? "color:var(--gold);font-weight:bold;" : ""}">` +
+          `<td style="padding:3px 10px;">${!r.p.alive ? "✝" : `#${i + 1}`}</td>` +
+          `<td style="padding:3px 10px;text-align:left;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${r.p.color};margin-right:6px;"></span>${r.p.name}</td>` +
+          `<td style="padding:3px 10px;">${r.worth}</td>` +
+          `<td style="padding:3px 10px;">${r.props}</td>` +
+          `<td style="padding:3px 10px;">${r.p.money}</td></tr>`
+        ).join("") +
+        `</table>`;
+    }
 
     // Rematch button (feature 5): only host sees it
     const rematchBtn = document.getElementById("gameOverRematch") as HTMLButtonElement | null;
@@ -2972,7 +2955,7 @@ export class UI {
     // Building cost multiplier from special event (buildingSale halves costs)
     // state.buildingCostMult is the base multiplier (from settings)
     // When buildingSale is active, the engine halves costs. We show the halved cost in the panel.
-    const eventMult = state.activeEvent?.id === "buildingSale" ? 0.5 : 1.0;
+    const eventMult = state.activeEvents.some((e) => e.id === "buildingSale") ? 0.5 : 1.0;
     const costMult = (state.buildingCostMult ?? 1.0) * eventMult;
 
     // Header with capital + trade button
@@ -2996,14 +2979,23 @@ export class UI {
     headerRow.appendChild(tradeBtn);
     header.appendChild(headerRow);
 
-    // Cash line
+    // Cash line: amount in display type + the physical chip stack
     const cashLine = document.createElement("div");
-    cashLine.style.cssText = "font-size:12px;color:#86efac;";
-    cashLine.textContent = `${t("props.capital")}: ${me?.money ?? 0} LPD`;
+    cashLine.className = "capital-line";
+    cashLine.innerHTML = `<span class="capital-amount">${t("props.capital")}: ${me?.money ?? 0} LPD</span>${this.renderChipStack(me?.money ?? 0)}`;
     header.appendChild(cashLine);
 
+    // Builds-remaining indicator (per-turn build limit)
+    const buildsLine = document.createElement("div");
+    const exhausted = state.buildsPerTurn > 0 && state.buildsThisTurn >= state.buildsPerTurn;
+    buildsLine.id = "buildsLeftLine";
+    buildsLine.style.cssText = `font-size:11px;color:${exhausted ? "#f87171" : "#aaa"};`;
+    const limitStr = state.buildsPerTurn === 0 ? "∞" : String(state.buildsPerTurn);
+    buildsLine.textContent = `${t("props.builds")}: ${state.buildsThisTurn}/${limitStr}`;
+    header.appendChild(buildsLine);
+
     // buildingSale indicator
-    if (state.activeEvent?.id === "buildingSale") {
+    if (state.activeEvents.some((e) => e.id === "buildingSale")) {
       const saleLabel = document.createElement("div");
       saleLabel.style.cssText = "font-size:11px;color:#f97316;";
       saleLabel.textContent = t("props.buildingSaleActive");
@@ -3036,15 +3028,19 @@ export class UI {
         : "";
 
       let buildingStr = "";
-      if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
+      if (b.skyscraper) buildingStr = `[${t("deed.skyscraper")}]`;
+      else if (b.hotel) buildingStr = `[${t("deed.hotel")}]`;
       else if (b.factory) buildingStr = `[${t("deed.factory")}]`;
       else if (b.houses > 0) buildingStr = `[${b.houses} ${b.houses > 1 ? t("deed.houses") : t("deed.house")}]`;
       else buildingStr = "—";
 
       const mortgageStr = isMortgaged ? ` <span style='color:#f87171;'>[${t("deed.mortgaged")}]</span>` : "";
+      const noBuildStr = state.unbuildableFields?.includes(pos)
+        ? ` <span title="${t("deed.unbuildable")}">⛔</span>`
+        : "";
 
       row.innerHTML = `
-        <div class="prop-name">${groupColor}${tile.name}${mortgageStr}</div>
+        <div class="prop-name">${groupColor}${tile.name}${mortgageStr}${noBuildStr}</div>
         <div class="prop-detail">${t("deed.building")} ${buildingStr}</div>
       `;
       row.style.cursor = "pointer";
@@ -3066,35 +3062,63 @@ export class UI {
           if (unaffordable) btn.title = `Benötigt ${cost} LPD (du hast ${myMoney} LPD)`;
           else if (!canAct) btn.title = t("tooltip.onlyYourTurn");
         } else {
-          btn.addEventListener("click", onClick);
+          // stopPropagation: the whole property row opens the deed card on
+          // click — building/selling/mortgaging must NOT bubble into that.
+          btn.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
         }
+        return btn;
+      };
+
+      /** Disabled build button explaining WHY the build is blocked. */
+      const makeBlockedBtn = (label: string, reasonKey: string): HTMLButtonElement => {
+        const btn = document.createElement("button");
+        btn.className = "prop-btn";
+        btn.textContent = label;
+        btn.disabled = true;
+        btn.style.opacity = "0.4";
+        btn.title = t(`buildBlock.${reasonKey}`);
         return btn;
       };
 
       // BUILD buttons (only for streets with whole-group ownership)
       if (tile.type === "street") {
         const st = tile as StreetTile;
-        // Compute discounted costs
-        const hCost = Math.floor(st.houseCost * costMult);
-        const htCost = Math.floor(st.hotelCost * costMult);
-        const fCost = Math.floor(st.factoryCost * costMult);
+        // Compute discounted costs (Math.round matches the engine's
+        // buildingChargeCost rounding — was Math.floor, a cosmetic mismatch).
+        const hCost = Math.round(st.houseCost * costMult);
+        const htCost = Math.round(st.hotelCost * costMult);
+        const fCost = Math.round(st.factoryCost * costMult);
 
         if (canBuild(state, pos, "house")) {
           btnRow.appendChild(makeBtn(
             `${t("prop.house")} (${hCost} LPD)`, hCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "house" } })
           ));
+        } else {
+          const reason = buildBlockReason(state, pos, "house");
+          if (reason) btnRow.appendChild(makeBlockedBtn(`${t("prop.house")} (${hCost} LPD)`, reason));
         }
         if (canBuild(state, pos, "hotel")) {
           btnRow.appendChild(makeBtn(
             `${t("prop.hotel")} (${htCost} LPD)`, htCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "hotel" } })
           ));
+        } else {
+          const reason = buildBlockReason(state, pos, "hotel");
+          if (reason) btnRow.appendChild(makeBlockedBtn(`${t("prop.hotel")} (${htCost} LPD)`, reason));
         }
         if (canBuild(state, pos, "factory")) {
           btnRow.appendChild(makeBtn(
             `${t("prop.factory")} (${fCost} LPD)`, fCost, "prop-btn",
             () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "factory" } })
+          ));
+        }
+        if (canBuild(state, pos, "skyscraper")) {
+          const skyMult = board.rules.skyscraper?.costMult ?? 2.0;
+          const skCost = Math.round(st.hotelCost * skyMult * costMult);
+          btnRow.appendChild(makeBtn(
+            `${t("prop.skyscraper")} (${skCost} LPD)`, skCost, "prop-btn",
+            () => this.net.send({ t: "command", command: { type: "BUILD", pos, building: "skyscraper" } })
           ));
         }
         if (canSellBuilding(state, pos)) {
@@ -3185,148 +3209,178 @@ export class UI {
 
     const board = getBoard(state.boardId);
     const alivePlayers = state.players.filter((p) => p.alive && p.id !== myId);
+    const me = state.players.find((p) => p.id === myId);
+    if (alivePlayers.length === 0 || !me) { hide(panel); return; }
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:10px;";
+    title.style.cssText = "font-size:13px;color:var(--gold);font-weight:bold;margin-bottom:8px;";
     title.textContent = t("trade.title");
     panel.appendChild(title);
 
-    // Target player selector
-    const targetLabel = document.createElement("label");
-    targetLabel.textContent = t("trade.offerTo");
-    panel.appendChild(targetLabel);
-
-    const targetSelect = document.createElement("select");
+    // ---- Target player chips -------------------------------------------
+    const chipRow = document.createElement("div");
+    let targetId = preselectTarget && alivePlayers.some((p) => p.id === preselectTarget)
+      ? preselectTarget
+      : alivePlayers[0]!.id;
+    const chips = new Map<string, HTMLButtonElement>();
     for (const p of alivePlayers) {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.name;
-      targetSelect.appendChild(opt);
+      const chip = document.createElement("button");
+      chip.className = "player-chip" + (p.id === targetId ? " selected" : "");
+      chip.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${p.color};display:inline-block;"></span>${p.name}`;
+      chip.addEventListener("click", () => {
+        targetId = p.id;
+        chips.forEach((c, id) => c.classList.toggle("selected", id === targetId));
+        rebuildReceiveColumn();
+        updateSummary();
+      });
+      chips.set(p.id, chip);
+      chipRow.appendChild(chip);
     }
-    if (preselectTarget && alivePlayers.some((p) => p.id === preselectTarget)) {
-      targetSelect.value = preselectTarget;
-    }
-    panel.appendChild(targetSelect);
+    panel.appendChild(chipRow);
 
-    // My props to give (unbuilt, unmortgaged only)
-    const myProps = ownedPropsOf(state, myId).filter((pos) => {
+    // ---- Two-column offer builder ---------------------------------------
+    const eligibleOf = (pid: string) => ownedPropsOf(state, pid).filter((pos) => {
       const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-      return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+      return !(b.houses > 0 || b.hotel || b.factory || b.skyscraper) && !state.mortgaged[pos];
     });
 
-    const giveSection = document.createElement("div");
-    giveSection.className = "swap-section";
-    giveSection.innerHTML = `<div class="swap-label">${t("trade.give")}</div>`;
+    const grid = document.createElement("div");
+    grid.className = "trade-grid";
+    const giveCol = document.createElement("div");
+    const recvCol = document.createElement("div");
+    grid.appendChild(giveCol);
+    grid.appendChild(recvCol);
+    panel.appendChild(grid);
 
-    const giveChecks = new Map<number, HTMLInputElement>();
-    for (const pos of myProps) {
-      const tile = board.tiles[pos];
-      if (!tile) continue;
-      const row = document.createElement("div");
-      row.className = "swap-check-row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      const lbl = document.createElement("label");
-      lbl.textContent = tile.name;
-      row.appendChild(cb);
-      row.appendChild(lbl);
-      giveSection.appendChild(row);
-      giveChecks.set(pos, cb);
-    }
+    const giveSel = new Set<number>();
+    const recvSel = new Set<number>();
 
-    const giveMoneyRow = document.createElement("div");
-    giveMoneyRow.className = "swap-check-row";
-    const giveMoneyInput = document.createElement("input");
-    giveMoneyInput.type = "number";
-    giveMoneyInput.min = "0";
-    giveMoneyInput.value = "0";
-    giveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
-    giveMoneyInput.id = "giveMoneyInput";
-    const giveMoneyLbl = document.createElement("label");
-    giveMoneyLbl.textContent = t("trade.giveMoney");
-    giveMoneyRow.appendChild(giveMoneyLbl);
-    giveMoneyRow.appendChild(giveMoneyInput);
-    const giveMoneyUnit = document.createElement("span");
-    giveMoneyUnit.textContent = " LPD";
-    giveMoneyRow.appendChild(giveMoneyUnit);
-    giveSection.appendChild(giveMoneyRow);
-    panel.appendChild(giveSection);
-
-    // Target props to receive
-    const receiveSection = document.createElement("div");
-    receiveSection.className = "swap-section";
-    panel.appendChild(receiveSection);
-
-    const receiveMoneySection = document.createElement("div");
-    receiveMoneySection.className = "swap-section";
-    const receiveMoneyInput = document.createElement("input");
-    receiveMoneyInput.type = "number";
-    receiveMoneyInput.min = "0";
-    receiveMoneyInput.value = "0";
-    receiveMoneyInput.style.cssText = "width:80px;display:inline;margin-left:4px;";
-    receiveMoneyInput.id = "receiveMoneyInput";
-    const recvLbl = document.createElement("label");
-    recvLbl.textContent = t("trade.receiveMoneyLabel");
-    const recvUnit = document.createElement("span");
-    recvUnit.textContent = " LPD";
-    receiveMoneySection.innerHTML = `<div class="swap-label">${t("trade.receiveMoney")}</div>`;
-    const recvMoneyRow = document.createElement("div");
-    recvMoneyRow.className = "swap-check-row";
-    recvMoneyRow.appendChild(recvLbl);
-    recvMoneyRow.appendChild(receiveMoneyInput);
-    recvMoneyRow.appendChild(recvUnit);
-    receiveMoneySection.appendChild(recvMoneyRow);
-    panel.appendChild(receiveMoneySection);
-
-    const receiveChecks = new Map<number, HTMLInputElement>();
-
-    const rebuildReceiveSection = () => {
-      const tId = targetSelect.value;
-      const targetName = targetSelect.options[targetSelect.selectedIndex]?.text ?? "?";
-      receiveSection.innerHTML = `<div class="swap-label">${t("trade.receive")} ${targetName}):</div>`;
-      receiveChecks.clear();
-      const theirProps = ownedPropsOf(state, tId).filter((pos) => {
-        const b = state.buildings[pos] ?? { houses: 0, hotel: false, factory: false };
-        return !(b.houses > 0 || b.hotel || b.factory) && !state.mortgaged[pos];
+    const makeCard = (pos: number, selSet: Set<number>) => {
+      const tile = board.tiles[pos]!;
+      const group = (tile as { group?: string }).group;
+      const card = document.createElement("div");
+      card.className = "trade-card";
+      card.innerHTML =
+        `<span class="tc-chip" style="background:${group ? this.groupCssColor(group) : "#555"};"></span>` +
+        `<span>${tile.name}</span>` +
+        `<span class="tc-value">${tilePrice(board, tile)}</span>`;
+      card.addEventListener("click", () => {
+        if (selSet.has(pos)) selSet.delete(pos);
+        else selSet.add(pos);
+        card.classList.toggle("selected", selSet.has(pos));
+        updateSummary();
       });
-      for (const pos of theirProps) {
-        const tile = board.tiles[pos];
-        if (!tile) continue;
-        const row = document.createElement("div");
-        row.className = "swap-check-row";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        const lbl = document.createElement("label");
-        lbl.textContent = tile.name;
-        row.appendChild(cb);
-        row.appendChild(lbl);
-        receiveSection.appendChild(row);
-        receiveChecks.set(pos, cb);
-      }
+      return card;
     };
 
-    rebuildReceiveSection();
-    targetSelect.addEventListener("change", rebuildReceiveSection);
+    const makeMoneyStepper = (col: HTMLElement, maxOf: () => number): HTMLInputElement => {
+      const row = document.createElement("div");
+      row.className = "money-stepper";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.value = "0";
+      const clamp = () => {
+        const v = Math.max(0, Math.min(maxOf(), parseInt(input.value, 10) || 0));
+        input.value = String(v);
+        updateSummary();
+      };
+      const step = (d: number) => {
+        input.value = String((parseInt(input.value, 10) || 0) + d);
+        clamp();
+      };
+      for (const [label, d] of [["−100", -100], ["−10", -10]] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.addEventListener("click", () => step(d));
+        row.appendChild(b);
+      }
+      row.appendChild(input);
+      for (const [label, d] of [["+10", 10], ["+100", 100]] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.addEventListener("click", () => step(d));
+        row.appendChild(b);
+      }
+      const unit = document.createElement("span");
+      unit.textContent = "LPD";
+      unit.style.cssText = "font-size:11px;color:#aaa;";
+      row.appendChild(unit);
+      input.addEventListener("change", clamp);
+      col.appendChild(row);
+      return input;
+    };
 
-    // Offer + cancel buttons
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
+    // Give column (mine — static per open)
+    giveCol.innerHTML = `<div class="trade-col-title">${t("trade.youGive")}</div>`;
+    const myEligible = eligibleOf(myId);
+    if (myEligible.length === 0) {
+      const none = document.createElement("div");
+      none.style.cssText = "font-size:11px;color:#777;";
+      none.textContent = t("trade.empty");
+      giveCol.appendChild(none);
+    }
+    for (const pos of myEligible) giveCol.appendChild(makeCard(pos, giveSel));
+    const giveMoney = makeMoneyStepper(giveCol, () => me.money);
+
+    // Receive column (target's — rebuilt on chip change)
+    let recvMoney!: HTMLInputElement;
+    const recvCards = document.createElement("div");
+    const rebuildReceiveColumn = () => {
+      recvSel.clear();
+      recvCol.innerHTML = `<div class="trade-col-title">${t("trade.youReceive")}</div>`;
+      recvCards.innerHTML = "";
+      const theirEligible = eligibleOf(targetId);
+      if (theirEligible.length === 0) {
+        const none = document.createElement("div");
+        none.style.cssText = "font-size:11px;color:#777;";
+        none.textContent = t("trade.empty");
+        recvCards.appendChild(none);
+      }
+      for (const pos of theirEligible) recvCards.appendChild(makeCard(pos, recvSel));
+      recvCol.appendChild(recvCards);
+      recvMoney = makeMoneyStepper(recvCol, () => state.players.find((p) => p.id === targetId)?.money ?? 0);
+    };
+    rebuildReceiveColumn();
+
+    // ---- Live value summary ---------------------------------------------
+    const summary = document.createElement("div");
+    summary.id = "tradeSummary";
+    panel.appendChild(summary);
 
     const offerBtn = document.createElement("button");
+
+    const legValue = (sel: Set<number>, money: number) =>
+      [...sel].reduce((sum, pos) => sum + tilePrice(board, board.tiles[pos]!), 0) + money;
+
+    const updateSummary = () => {
+      const give = legValue(giveSel, parseInt(giveMoney.value, 10) || 0);
+      const recv = legValue(recvSel, parseInt(recvMoney.value, 10) || 0);
+      const delta = recv - give;
+      const deltaColor = delta === 0 ? "#aaa" : delta > 0 ? "#22c55e" : "#ef4444";
+      summary.innerHTML =
+        `<span>${t("trade.youGive")}: <strong>${give}</strong></span>` +
+        `<span style="color:${deltaColor};font-weight:bold;">Δ ${delta > 0 ? "+" : ""}${delta}</span>` +
+        `<span>${t("trade.youReceive")}: <strong>${recv}</strong></span>`;
+      summary.title = t("trade.approxValue");
+      offerBtn.disabled = giveSel.size === 0 && recvSel.size === 0 &&
+        (parseInt(giveMoney.value, 10) || 0) === 0 && (parseInt(recvMoney.value, 10) || 0) === 0;
+      offerBtn.style.opacity = offerBtn.disabled ? "0.4" : "1";
+    };
+    updateSummary();
+
+    // ---- Offer / cancel ---------------------------------------------------
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;margin-top:12px;";
     offerBtn.textContent = t("trade.offer");
     offerBtn.addEventListener("click", () => {
-      const toId = targetSelect.value;
-      const giveProps = [...giveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
-      const recvProps = [...receiveChecks.entries()].filter(([, cb]) => cb.checked).map(([pos]) => pos);
-      const giveMoneyVal = parseInt(giveMoneyInput.value, 10) || 0;
-      const recvMoneyVal = parseInt(receiveMoneyInput.value, 10) || 0;
       this.net.send({
         t: "command",
         command: {
           type: "PROPOSE_SWAP",
-          toId,
-          give: { props: giveProps, money: giveMoneyVal },
-          receive: { props: recvProps, money: recvMoneyVal },
+          toId: targetId,
+          give: { props: [...giveSel], money: parseInt(giveMoney.value, 10) || 0 },
+          receive: { props: [...recvSel], money: parseInt(recvMoney.value, 10) || 0 },
         },
       });
       hide(panel);
@@ -3346,13 +3400,25 @@ export class UI {
     const panel = this.incomingSwapPanel;
     const swap = state.pendingSwap;
 
-    if (!swap || swap.toId !== myId) {
+    if (!swap || (swap.toId !== myId && swap.fromId !== myId)) {
       hide(panel);
       return;
     }
 
     panel.innerHTML = "";
     const board = getBoard(state.boardId);
+
+    // Proposer view: just a pending note while the counterparty decides.
+    if (swap.fromId === myId) {
+      const to = state.players.find((p) => p.id === swap.toId);
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:12px;color:var(--gold);";
+      note.textContent = `${t("trade.pending")} ${to?.name ?? "?"}…`;
+      panel.appendChild(note);
+      show(panel, "block");
+      return;
+    }
+
     const from = state.players.find((p) => p.id === swap.fromId);
 
     const title = document.createElement("div");
@@ -3360,21 +3426,66 @@ export class UI {
     title.textContent = `${t("swap.from")} ${from?.name ?? "?"}`;
     panel.appendChild(title);
 
-    const giveNames = swap.give.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
-    const recvNames = swap.receive.props.map((pos) => board.tiles[pos]?.name ?? `Pos ${pos}`).join(", ") || "—";
+    // Read-only two-column view FROM THE RECIPIENT's perspective:
+    // their "give" leg is what I RECEIVE; their "receive" leg is what I GIVE.
+    const cardList = (positions: number[], money: number): HTMLElement => {
+      const wrap = document.createElement("div");
+      for (const pos of positions) {
+        const tile = board.tiles[pos];
+        if (!tile) continue;
+        const group = (tile as { group?: string }).group;
+        const card = document.createElement("div");
+        card.className = "trade-card";
+        card.style.cursor = "default";
+        card.innerHTML =
+          `<span class="tc-chip" style="background:${group ? this.groupCssColor(group) : "#555"};"></span>` +
+          `<span>${tile.name}</span>` +
+          `<span class="tc-value">${tilePrice(board, tile)}</span>`;
+        wrap.appendChild(card);
+      }
+      if (money > 0 || positions.length === 0) {
+        const m = document.createElement("div");
+        m.style.cssText = "font-size:12px;color:#ccc;margin-top:4px;";
+        m.textContent = `+ ${money} LPD`;
+        wrap.appendChild(m);
+      }
+      return wrap;
+    };
 
-    const info = document.createElement("div");
-    info.style.cssText = "font-size:12px;color:#ccc;margin-bottom:10px;";
-    info.innerHTML = `
-      <div><strong>${t("swap.give")}</strong> ${recvNames} + ${swap.receive.money} LPD</div>
-      <div><strong>${t("swap.receive")}</strong> ${giveNames} + ${swap.give.money} LPD</div>
-    `;
-    panel.appendChild(info);
+    const grid = document.createElement("div");
+    grid.className = "trade-grid";
+
+    const giveCol = document.createElement("div");
+    giveCol.innerHTML = `<div class="trade-col-title">${t("trade.youGive")}</div>`;
+    giveCol.appendChild(cardList(swap.receive.props, swap.receive.money));
+    const recvCol = document.createElement("div");
+    recvCol.innerHTML = `<div class="trade-col-title">${t("trade.youReceive")}</div>`;
+    recvCol.appendChild(cardList(swap.give.props, swap.give.money));
+    grid.appendChild(giveCol);
+    grid.appendChild(recvCol);
+    panel.appendChild(grid);
+
+    // Value delta from my perspective.
+    const legValue = (positions: number[], money: number) =>
+      positions.reduce((sum, pos) => sum + tilePrice(board, board.tiles[pos]!), 0) + money;
+    const iGive = legValue(swap.receive.props, swap.receive.money);
+    const iGet = legValue(swap.give.props, swap.give.money);
+    const delta = iGet - iGive;
+    const summary = document.createElement("div");
+    summary.id = "tradeSummary";
+    const deltaColor = delta === 0 ? "#aaa" : delta > 0 ? "#22c55e" : "#ef4444";
+    summary.innerHTML =
+      `<span>${t("trade.youGive")}: <strong>${iGive}</strong></span>` +
+      `<span style="color:${deltaColor};font-weight:bold;">Δ ${delta > 0 ? "+" : ""}${delta}</span>` +
+      `<span>${t("trade.youReceive")}: <strong>${iGet}</strong></span>`;
+    summary.title = t("trade.approxValue");
+    panel.appendChild(summary);
 
     const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:8px;";
+    btnRow.style.cssText = "display:flex;gap:8px;margin-top:10px;";
 
     const acceptBtn = document.createElement("button");
+    acceptBtn.style.background = "#16a34a";
     acceptBtn.textContent = t("swap.accept");
     acceptBtn.addEventListener("click", () => {
       this.net.send({ t: "command", command: { type: "RESPOND_SWAP", accept: true } });

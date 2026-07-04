@@ -1,0 +1,1067 @@
+// ---------------------------------------------------------------------------
+// board3d/board3d.ts — the Board3D orchestrator: scene/camera/lights/table,
+// player-token management and movement animation, active-player highlight,
+// per-player on-board displays, and delegation to DiceRig (dice cup + roll),
+// BuildingRenderer (buildings + ownership markers) and tiles.ts (static
+// geometry). Public API is unchanged from the original single-file board3d.ts.
+// ---------------------------------------------------------------------------
+import {
+  Engine,
+  Scene,
+  ArcRotateCamera,
+  HemisphericLight,
+  DirectionalLight,
+  Vector3,
+  Matrix,
+  MeshBuilder,
+  StandardMaterial,
+  PBRMaterial,
+  Texture,
+  Color3,
+  DynamicTexture,
+  AbstractMesh,
+  Mesh,
+  SceneLoader,
+} from "@babylonjs/core";
+import "@babylonjs/loaders/OBJ";
+import { getBoard, listBoards, JAIL_POS, CUSTOM_FIGURE_INDEX } from "@laspoly/shared";
+import type { GameState } from "@laspoly/shared";
+import { getQuality } from "../quality.js";
+import {
+  ScenePalette,
+  BACK_ROOM,
+  GROUP_COLORS,
+  PLAYER_COLOR_HEX,
+  STATION_POSITIONS,
+  playerColor3,
+  brighten,
+  tileXZ,
+  TOKEN_Y,
+  LABEL_Y,
+  RING_Y,
+  HOP_DURATION_MS,
+  HOP_HEIGHT,
+} from "./constants.js";
+import { drawBoard } from "./tiles.js";
+import { DiceRig } from "./dice.js";
+import { BuildingRenderer } from "./buildings.js";
+import { Effects } from "./effects.js";
+import { animateCardDrawAsync } from "./cards.js";
+import { buildProceduralToken, makeStandee } from "../tokenFactory.js";
+import { Director } from "../director.js";
+import { flyChips } from "./chips.js";
+
+export class Board3D {
+  private engine: Engine;
+  private scene: Scene;
+  private tokenMeshes: Map<string, AbstractMesh> = new Map();
+  private currentBoardId: string | null = null;
+  private readonly palette: ScenePalette = BACK_ROOM;
+  // Car OBJ models (player tokens): one merged template mesh per car index 1-5
+  private carModels: Map<number, Mesh> = new Map();
+  private carsLoaded = false;
+  // Procedural token templates (figureIndex 6-8), built lazily.
+  private procTemplates: Map<number, Mesh> = new Map();
+  // Uploaded standee images per player (cached from RoomView broadcasts).
+  private customImages: Map<string, string> = new Map();
+  private lastState: GameState | null = null;
+  private lastMyId: string | null = null;
+  private tokenLabels: Map<string, AbstractMesh> = new Map();
+  // Per-player: queue of [x, z] world positions to hop through
+  private moveQueues: Map<string, Array<[number, number]>> = new Map();
+  private moveAnimating: Set<string> = new Set();
+  private prevPositions: Map<string, number> = new Map();
+  private dice: DiceRig;
+  private buildings: BuildingRenderer;
+  /** Camera choreography — public so the StateQueue can direct the turn. */
+  readonly director!: Director;
+  private effects: Effects;
+  private camera!: ArcRotateCamera;
+  private tokenRings: Map<string, AbstractMesh> = new Map();
+  // Interaction hooks
+  private rollHandler: (() => void) | null = null;
+  private tileClickHandler: ((pos: number) => void) | null = null;
+  private tileHoverHandler: ((pos: number | null, x: number, y: number) => void) | null = null;
+  private lastHoverPos: number | null = null;
+  private lastHoverCheck = 0;
+  // Active-player highlight ring (feature #3)
+  private activeHighlightMesh: AbstractMesh | null = null;
+  private activeHighlightPlayerId: string | null = null;
+  private activeHighlightObs: ReturnType<typeof this.scene.onBeforeRenderObservable.add> | null = null;
+  // Resolvers for animateMoveAsync
+  private moveResolvers: Map<string, () => void> = new Map();
+  constructor(canvas: HTMLCanvasElement) {
+    this.engine = new Engine(canvas, true);
+    this.scene = new Scene(this.engine);
+
+    // The Back Room: warm near-black beyond the table (matches --color-bg-0
+    // #14100c) — the vignette in Effects implies the rest of the room.
+    this.scene.clearColor = this.palette.clear;
+
+    // ---- Camera ------------------------------------------------------------
+    this.camera = new ArcRotateCamera(
+      "camera",
+      -Math.PI / 2,
+      Math.PI / 3.2,
+      32,
+      Vector3.Zero(),
+      this.scene
+    );
+    this.camera.attachControl(canvas, true);
+    this.camera.lowerRadiusLimit = 15;
+    this.camera.upperRadiusLimit = 80;
+    this.camera.upperBetaLimit = Math.PI / 2.2;
+    this.camera.lowerBetaLimit = 0.15; // prevent fully-vertical "mirror" glare
+
+    // ---- Lighting ----------------------------------------------------------
+    // One warm key light (lives in Effects, drives the shadows) over a low
+    // warm ambient — a lamp over the table, not an evenly-lit showroom.
+    // Specular stays suppressed on the flat surfaces so the felt + board read
+    // legibly from a top-down view (no white blowout).
+    const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
+    ambient.intensity = 0.55;
+    ambient.diffuse = this.palette.ambientDiffuse;
+    ambient.groundColor = new Color3(0.16, 0.11, 0.07); // bounce off dark wood
+    ambient.specular = new Color3(0, 0, 0);
+    // Flat top-down fill: barely-there under the key light; carries the board
+    // alone at low quality (where the key/shadow light is skipped).
+    const fill = new DirectionalLight("fill", new Vector3(0, -1, 0), this.scene);
+    fill.diffuse = new Color3(1, 0.92, 0.8);
+    fill.specular = new Color3(0, 0, 0);
+
+    // ---- Post-processing / glow / shadows (quality-gated) -------------------
+    this.effects = new Effects(this.scene, getQuality());
+    this.effects.initPipeline(this.camera);
+    this.effects.initGlow();
+    this.effects.initShadows();
+    this.effects.initEnvironment();
+    fill.intensity = getQuality() === "low" ? 0.5 : 0.12;
+
+    // ---- Pointer picking: tile clicks + dice-cup click → roll --------------
+    this.scene.onPointerObservable.add((pointerInfo) => {
+      // Hover (POINTERMOVE = 4): throttled tile lookup for the deed tooltip.
+      if (pointerInfo.type === 4 && this.tileHoverHandler) {
+        const now = performance.now();
+        if (now - this.lastHoverCheck < 80) return;
+        this.lastHoverCheck = now;
+        const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+        const name = pick?.pickedMesh?.name ?? "";
+        const pos = name.startsWith("tile_") ? parseInt(name.slice(5), 10) : null;
+        const ev = pointerInfo.event as PointerEvent;
+        if (pos !== this.lastHoverPos) {
+          this.lastHoverPos = pos;
+          this.tileHoverHandler(Number.isNaN(pos as number) ? null : pos, ev.clientX, ev.clientY);
+        } else if (pos !== null) {
+          // Same tile — keep the tooltip following the cursor.
+          this.tileHoverHandler(pos, ev.clientX, ev.clientY);
+        }
+        return;
+      }
+      if (pointerInfo.type !== 1) return; // POINTERDOWN
+      const picked = pointerInfo.pickInfo;
+      if (!picked?.hit || !picked.pickedMesh) return;
+      const meshName = picked.pickedMesh.name;
+      if (meshName.startsWith("tile_")) {
+        const pos = parseInt(meshName.slice(5), 10);
+        if (!isNaN(pos) && this.tileClickHandler) this.tileClickHandler(pos);
+      } else if (meshName === "diceCup") {
+        if (this.rollHandler) this.rollHandler();
+      }
+    });
+
+    // ---- The wooden table ---------------------------------------------------
+    // Real dark-walnut PBR (vendored CC0 maps, see public/assets/ASSETS.md).
+    // Large enough that wood fills the frame at every camera angle — the table
+    // IS the room's floor as far as the player ever sees.
+    const table = MeshBuilder.CreateBox(
+      "table",
+      { width: 60, height: 0.5, depth: 60 },
+      this.scene
+    );
+    table.position.y = -0.45;
+    const tableMat = new PBRMaterial("tableMat", this.scene);
+    const woodAlbedo = new Texture("/assets/tex/wood_dark_diff_1k.jpg", this.scene);
+    const woodNormal = new Texture("/assets/tex/wood_dark_nor_1k.jpg", this.scene);
+    woodAlbedo.uScale = woodAlbedo.vScale = 6;
+    woodNormal.uScale = woodNormal.vScale = 6;
+    tableMat.albedoTexture = woodAlbedo;
+    tableMat.bumpTexture = woodNormal;
+    // Darken + de-red the albedo: the room is lamplit, the table shouldn't
+    // read as noon-bright cherry flooring.
+    tableMat.albedoColor = new Color3(0.6, 0.56, 0.52);
+    tableMat.metallic = 0;
+    tableMat.roughness = 0.55; // varnished, not lacquered
+    table.material = tableMat;
+    this.effects.addShadowReceiver(table);
+
+    // ---- Initial board -------------------------------------------------------
+    const boards = listBoards();
+    if (boards.length > 0 && boards[0]) {
+      this.drawBoardOnce(boards[0].id);
+    }
+
+    // Preload car models (async, best-effort)
+    this.preloadCarModels();
+
+    // Dice cup + dice
+    this.dice = new DiceRig(this.scene, this.palette, this.effects);
+    // Buildings + ownership markers
+    this.buildings = new BuildingRenderer(this.scene, this.effects);
+    // The camera director (turn choreography) — owns all camera movement.
+    this.director = new Director(this.scene, this.camera);
+
+    this.engine.runRenderLoop(() => this.scene.render());
+    window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  /** Draw the static board geometry exactly once per board id. */
+  private drawBoardOnce(boardId: string) {
+    if (this.currentBoardId === boardId) return;
+    this.currentBoardId = boardId;
+    drawBoard(this.scene, this.palette, getBoard(boardId));
+    // Large static surfaces receive token/building shadows (no-op on low quality).
+    for (const m of this.scene.meshes) {
+      if (m.name === "boardBase" || m.name === "felt" || m.name.startsWith("tile_")) {
+        this.effects.addShadowReceiver(m);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Asset preloading
+  // -------------------------------------------------------------------------
+  private async preloadCarModels(): Promise<void> {
+    // figureIndex 0-4 → car1..car5, 5 → police. Keyed by figureIndex.
+    const files = ["car1.obj", "car2.obj", "car3.obj", "car4.obj", "car5.obj", "police.obj"];
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const result = await SceneLoader.ImportMeshAsync("", "/assets/", files[i]!, this.scene);
+        // OBJ loads as one or more real meshes; merge geometry into a single template.
+        const realMeshes = result.meshes.filter(
+          (m): m is Mesh => m instanceof Mesh && m.getTotalVertices() > 0
+        );
+        if (realMeshes.length === 0) continue;
+        const merged =
+          realMeshes.length === 1
+            ? realMeshes[0]!
+            : Mesh.MergeMeshes(realMeshes, true, true, undefined, false, false);
+        if (!merged) continue;
+
+        // Raw car spans ~0.3 units; normalise to a ~0.7-unit token (fits a tile,
+        // leaves room for up to 4 tokens clustered without overlapping).
+        const bounds = merged.getBoundingInfo().boundingBox.extendSize;
+        const maxDim = Math.max(bounds.x, bounds.y, bounds.z) * 2 || 1;
+        const target = 0.7;
+        merged.scaling.setAll(target / maxDim);
+        merged.name = `carTemplate_${i}`; // i = figureIndex 0-5
+        merged.setEnabled(false);
+        merged.isPickable = false;
+        this.carModels.set(i, merged);
+      } catch {
+        // Silently skip; cylinder fallback used in rebuildTokens()
+      }
+    }
+    this.carsLoaded = true;
+    // If a state arrived before models finished loading, rebuild tokens now
+    if (this.lastState) {
+      this.rebuildTokens(this.lastState, this.lastMyId);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Token management
+  // -------------------------------------------------------------------------
+
+  /** Return a clone of car model `idx` (1–5) tinted by `color`, or undefined if not ready. */
+  private cloneCarToken(idx: number, color: Color3, playerId: string): AbstractMesh | undefined {
+    const template = this.carModels.get(idx);
+    if (!template) return undefined;
+
+    const clone = template.clone(`token_${playerId}`);
+    if (!clone) return undefined;
+    clone.setEnabled(true);
+    clone.isPickable = false;
+    // Tint by overriding material with a bright, self-lit colour so the car
+    // reads clearly as that player's colour (the raw OBJ material is dark).
+    // Brighten dark player colours so they don't render near-black.
+    const bright = brighten(color);
+    const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
+    mat.diffuseColor = bright;
+    mat.specularColor = new Color3(0.4, 0.4, 0.4);
+    mat.emissiveColor = bright.scale(0.7);
+    clone.material = mat;
+    // Apply to any sub-meshes too (multi-material merges keep a MultiMaterial)
+    clone.getChildMeshes().forEach((c) => { c.material = mat; });
+    this.effects.addShadowCaster(clone);
+    return clone;
+  }
+
+  /** Clone a procedural token template (figureIndex 6-8), tinted like the cars. */
+  private cloneProceduralToken(figureIndex: number, color: Color3, playerId: string): AbstractMesh | undefined {
+    let tpl = this.procTemplates.get(figureIndex);
+    if (!tpl) {
+      const built = buildProceduralToken(this.scene, figureIndex);
+      if (!built) return undefined;
+      built.setEnabled(false);
+      built.isPickable = false;
+      this.procTemplates.set(figureIndex, built);
+      tpl = built;
+    }
+    const clone = tpl.clone(`token_${playerId}`);
+    if (!clone) return undefined;
+    clone.setEnabled(true);
+    clone.isPickable = false;
+    const bright = brighten(color);
+    const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
+    mat.diffuseColor = bright;
+    mat.specularColor = new Color3(0.4, 0.4, 0.4);
+    mat.emissiveColor = bright.scale(0.7);
+    clone.material = mat;
+    this.effects.addShadowCaster(clone);
+    return clone;
+  }
+
+  /** Build the right token mesh for a player: standee, procedural, car, or fallback. */
+  private makeTokenMesh(playerId: string, figureIndex: number, color: Color3): AbstractMesh {
+    if (figureIndex === CUSTOM_FIGURE_INDEX) {
+      const img = this.customImages.get(playerId);
+      // Standee planes are neither glow-registered nor shadow casters (alpha
+      // planes cast ugly shadows).
+      if (img) return makeStandee(this.scene, img, brighten(color), `token_${playerId}`);
+    }
+    if (figureIndex >= 6 && figureIndex !== CUSTOM_FIGURE_INDEX) {
+      const proc = this.cloneProceduralToken(figureIndex, color, playerId);
+      if (proc) return proc;
+    }
+    if (this.carsLoaded) {
+      return this.cloneCarToken(figureIndex, color, playerId) ?? this.makeFallbackToken(playerId, color);
+    }
+    return this.makeFallbackToken(playerId, color);
+  }
+
+  /** Fallback token: a coloured cylinder (clearly visible on tile). */
+  private makeFallbackToken(playerId: string, color: Color3): AbstractMesh {
+    const mesh = MeshBuilder.CreateCylinder(
+      `token_fb_${playerId}`,
+      { diameter: 0.35, height: 0.45, tessellation: 8 },
+      this.scene
+    );
+    const mat = new StandardMaterial(`tokenMat_${playerId}`, this.scene);
+    mat.diffuseColor = color;
+    mat.emissiveColor = color.scale(0.6); // glow a bit so tokens stand out
+    mesh.material = mat;
+    this.effects.addShadowCaster(mesh);
+    return mesh;
+  }
+
+  /** Floating billboard name label above a token. */
+  private addTokenLabel(playerId: string, name: string, color: string) {
+    const tex = new DynamicTexture(`lblTex_${playerId}`, { width: 128, height: 32 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, 128, 32);
+    // `color` may be a CSS name (e.g. "red") or hex — both are valid fillStyle.
+    ctx.fillStyle = color;
+    ctx.font = "bold 14px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(name, 64, 16);
+    tex.update();
+
+    // Half-size billboard so names read small and uniform across all tokens (bug 1).
+    const plane = MeshBuilder.CreatePlane(`lbl_${playerId}`, { width: 0.45, height: 0.11 }, this.scene);
+    plane.billboardMode = 7;
+    const mat = new StandardMaterial(`lblMat_${playerId}`, this.scene);
+    mat.diffuseTexture = tex;
+    mat.backFaceCulling = false;
+    mat.emissiveColor = new Color3(1, 1, 1);
+    plane.material = mat;
+    plane.isPickable = false;
+    this.tokenLabels.set(playerId, plane);
+  }
+
+  /** Bright halo ring under a token so each player's colour is unmistakable. */
+  private ensureTokenRing(playerId: string, color: string): AbstractMesh {
+    let ring = this.tokenRings.get(playerId);
+    if (!ring) {
+      const ringColor = brighten(playerColor3(color));
+      ring = MeshBuilder.CreateTorus(
+        `ring_${playerId}`,
+        { diameter: 0.55, thickness: 0.12, tessellation: 16 },
+        this.scene
+      );
+      const ringMat = new StandardMaterial(`ringMat_${playerId}`, this.scene);
+      // Emissive carries the hue (so it pops regardless of lighting angle),
+      // with a touch of diffuse for shading. specular off to avoid white blowout.
+      ringMat.diffuseColor = ringColor.scale(0.3);
+      ringMat.emissiveColor = ringColor;
+      ringMat.specularColor = new Color3(0, 0, 0);
+      ring.material = ringMat;
+      ring.isPickable = false;
+      // NOT glow-registered: the halo glow bleeds over the car token and makes
+      // it unreadable (verified by screenshot). The emissive material already
+      // makes the ring pop; glow stays reserved for cup + ownership frames.
+      this.tokenRings.set(playerId, ring);
+    }
+    return ring;
+  }
+
+  /** (Re)build all token meshes & labels from state, positioning non-animating tokens. */
+  private rebuildTokens(state: GameState, myId: string | null) {
+    // Remove tokens for players who left
+    for (const [id, mesh] of this.tokenMeshes) {
+      if (!state.players.find((p) => p.id === id)) {
+        mesh.dispose();
+        this.tokenMeshes.delete(id);
+        const lbl = this.tokenLabels.get(id);
+        if (lbl) { lbl.dispose(); this.tokenLabels.delete(id); }
+        const ring = this.tokenRings.get(id);
+        if (ring) { ring.dispose(); this.tokenRings.delete(id); }
+      }
+    }
+
+    // Group players by position for overlap offsets
+    const byPos: Map<number, string[]> = new Map();
+    for (const p of state.players) {
+      if (!p.alive) continue;
+      const arr = byPos.get(p.position) ?? [];
+      arr.push(p.id);
+      byPos.set(p.position, arr);
+    }
+
+    for (const player of state.players) {
+      if (!player.alive) {
+        const old = this.tokenMeshes.get(player.id);
+        if (old) { old.dispose(); this.tokenMeshes.delete(player.id); }
+        const lbl = this.tokenLabels.get(player.id);
+        if (lbl) { lbl.dispose(); this.tokenLabels.delete(player.id); }
+        const ring = this.tokenRings.get(player.id);
+        if (ring) { ring.dispose(); this.tokenRings.delete(player.id); }
+        continue;
+      }
+
+      const [x, z] = tileXZ(player.position);
+      const group = byPos.get(player.position) ?? [];
+      const i = group.indexOf(player.id);
+      // 2×2 cluster grid: clear non-overlapping offsets for up to 4 tokens/tile.
+      const GRID_STEP = 0.45;
+      const offsetX = (i % 2) * GRID_STEP - GRID_STEP / 2;
+      const offsetZ = Math.floor(i / 2) * GRID_STEP - GRID_STEP / 2;
+
+      // Upgrade a fallback cylinder to a car model once models load
+      const existing = this.tokenMeshes.get(player.id);
+      if (existing && this.carsLoaded && existing.name.startsWith("token_fb_")) {
+        existing.dispose();
+        this.tokenMeshes.delete(player.id);
+      }
+
+      let mesh = this.tokenMeshes.get(player.id);
+      if (!mesh) {
+        const color = playerColor3(player.color);
+        mesh = this.makeTokenMesh(player.id, player.figureIndex ?? 0, color);
+        this.tokenMeshes.set(player.id, mesh);
+        if (!this.tokenLabels.has(player.id)) {
+          this.addTokenLabel(player.id, player.name, player.color);
+        }
+      }
+
+      const targetX = x + offsetX;
+      const targetZ = z + offsetZ;
+      // Initialise prevPositions on first sight so first move animates from a real tile
+      if (!this.prevPositions.has(player.id)) {
+        this.prevPositions.set(player.id, player.position);
+      }
+      // Don't teleport tokens mid-animation; driveAnimation() handles positioning
+      if (!this.moveAnimating.has(player.id)) {
+        mesh.position.set(targetX, TOKEN_Y, targetZ);
+        const lbl = this.tokenLabels.get(player.id);
+        if (lbl) lbl.position.set(targetX, LABEL_Y, targetZ);
+        const ring = this.ensureTokenRing(player.id, player.color);
+        ring.position.set(targetX, RING_Y, targetZ);
+      }
+    }
+
+    void myId;
+  }
+
+  /**
+   * Ensure a token mesh (+ label + ring) exists for `playerId`, positioned at the
+   * player's CURRENT tile, before an animation begins. Used by the serial state
+   * queue so animateMoveAsync always has a mesh to move. No-op if it exists.
+   */
+  ensureTokenExists(playerId: string, state: GameState, _myId: string | null): void {
+    if (this.tokenMeshes.has(playerId)) return;
+    const player = state.players.find((p) => p.id === playerId);
+    if (!player) return;
+    const color = playerColor3(player.color);
+    const mesh = this.makeTokenMesh(playerId, player.figureIndex ?? 0, color);
+    this.tokenMeshes.set(playerId, mesh);
+    if (!this.tokenLabels.has(playerId)) {
+      this.addTokenLabel(playerId, player.name, player.color);
+    }
+    const [x, z] = tileXZ(player.position);
+    mesh.position.set(x, TOKEN_Y, z);
+    const lbl = this.tokenLabels.get(playerId);
+    if (lbl) lbl.position.set(x, LABEL_Y, z);
+    const ring = this.ensureTokenRing(playerId, player.color);
+    ring.position.set(x, RING_Y, z);
+  }
+
+  /**
+   * Snap a player's token straight to a tile with no walk animation. Used when a
+   * player buys out of jail: they reappear on the P field rather than walking
+   * there (bug 8b). Ensures the token exists first.
+   */
+  snapPlayerToTile(playerId: string, pos: number, state: GameState, myId: string | null): void {
+    this.ensureTokenExists(playerId, state, myId);
+    this.prevPositions.set(playerId, pos);
+    this.snapTokenToTile(playerId, pos);
+  }
+
+  // -------------------------------------------------------------------------
+  // Public state application (called by the serial state queue in main.ts)
+  // -------------------------------------------------------------------------
+
+  /** Apply all non-animation visual updates (buildings, ownership, HUD, board). Called after animation resolves. */
+  applyVisuals(state: GameState, myId: string | null, animate = true): void {
+    const firstState = this.lastState === null;
+    this.lastState = state;
+    this.lastMyId = myId;
+    this.drawBoardOnce(state.boardId);
+    this.rebuildTokens(state, myId);
+    const changedBuildings = this.buildings.update(state);
+    // Drop-in placement animation for freshly built positions — skipped on
+    // reconnect snaps and on the very first render (everything is "new" then).
+    if (animate && !firstState) this.buildings.animateDropIn(changedBuildings);
+  }
+
+  /** Instantly snap all tokens to positions in `state` (reconnect / fast-forward). */
+  snapToState(state: GameState, myId: string | null): void {
+    // Clear any in-flight animations
+    this.moveQueues.clear();
+    this.moveAnimating.clear();
+    // Reset prevPositions so next diff starts clean
+    for (const p of state.players) {
+      const pos = p.inJail ? JAIL_POS : p.position;
+      this.prevPositions.set(p.id, pos);
+    }
+    this.applyVisuals(state, myId, false);
+  }
+
+  // -------------------------------------------------------------------------
+  // Money made visible: chips fly payer→payee (DOM deltas live in the player
+  // rail — see ui.showMoneyDelta). null endpoint = the bank (table centre).
+  // -------------------------------------------------------------------------
+  flyMoney(fromId: string | null, toId: string | null, amount: number): void {
+    const endpoint = (id: string | null): Vector3 => {
+      if (id) {
+        const tok = this.tokenMeshes.get(id);
+        if (tok) return tok.position.clone();
+      }
+      return new Vector3(0, 0.2, 0); // the bank: centre felt, by the cup
+    };
+    flyChips(this.scene, endpoint(fromId), endpoint(toId), amount);
+  }
+
+  setCustomTokens(images: Map<string, string>): void {
+    for (const [pid, url] of images) {
+      if (this.customImages.get(pid) !== url) {
+        this.customImages.set(pid, url);
+        const existing = this.tokenMeshes.get(pid);
+        if (existing) { existing.dispose(); this.tokenMeshes.delete(pid); }
+      }
+    }
+  }
+
+  /** Register a callback invoked when the player clicks the dice cup to roll. */
+  setRollHandler(cb: () => void): void {
+    this.rollHandler = cb;
+  }
+
+  /** Register a callback called with the tile position (0–39) when a tile is clicked. */
+  setTileClickHandler(cb: (pos: number) => void): void {
+    this.tileClickHandler = cb;
+  }
+
+  /** Register a hover callback (pos or null on leave, plus cursor coords). */
+  setTileHoverHandler(cb: (pos: number | null, x: number, y: number) => void): void {
+    this.tileHoverHandler = cb;
+  }
+
+  /** Switch camera between angled standard view and flat top-down view. */
+  setView(v: 'standard' | 'top'): void {
+    this.director.setView(v);
+  }
+
+  /**
+   * Bring the dice cup back when the turn advances to a player awaiting a roll
+   * (the cup was hidden after the previous roll settled). Called by the serial
+   * state queue (main.ts) using the previously-rendered state for comparison.
+   */
+  prepareCupForTurn(state: GameState, prev: GameState | null): void {
+    const needsRoll = (s: GameState) => s.phase === "awaiting-roll" || s.phase === "awaiting-casino";
+    if (!prev) {
+      if (needsRoll(state)) this.dice.showCup();
+      return;
+    }
+    // Bring the cup back at the start of a roll OR when entering the casino (which
+    // also needs a manual roll, bug 2-8).
+    if (
+      needsRoll(state) &&
+      (prev.phase !== state.phase || prev.currentPlayerIndex !== state.currentPlayerIndex)
+    ) {
+      this.dice.showCup();
+    }
+  }
+
+  /**
+   * Plays the dice animation and resolves EXACTLY when the dice have settled
+   * (see DiceRig.playDiceAnimationAsync for the safety-timeout contract).
+   */
+  playDiceAnimationAsync(d1: number, d2: number, skinIdx = 0): Promise<void> {
+    return this.dice.playDiceAnimationAsync(d1, d2, skinIdx);
+  }
+
+  /**
+   * Action-card draw: a card rises from the deck, flips to reveal `title`,
+   * hovers, fades. Internal safety timeout — safe to await from the queue.
+   */
+  animateCardDrawAsync(title: string): Promise<void> {
+    return animateCardDrawAsync(this.scene, title);
+  }
+
+  // -------------------------------------------------------------------------
+  // Token movement
+  // -------------------------------------------------------------------------
+  private enqueueMove(playerId: string, from: number, to: number) {
+    const RING = 40;
+
+    // Into jail: the cage sits at the felt centre and JAIL_POS (40) is not a real
+    // ring tile, so slide straight to the cage instead of walking tiles (walking
+    // toward 40 never terminates on the ring). Callers that want the "walk onto
+    // the Go-To-Jail field first" effect pass that as a separate prior move.
+    if (to === JAIL_POS) {
+      const existing = this.moveQueues.get(playerId) ?? [];
+      this.moveQueues.set(playerId, [...existing, [0, 0]]);
+      if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+      return;
+    }
+
+    const forwardDist = (((to - from) % RING) + RING) % RING;
+
+    // A forward distance > 12 can't be a dice roll (max 6+6). It's an action-card
+    // jump (often a backward move expressed as a large forward wrap). Don't walk
+    // the long way clockwise — jump straight to the destination tile.
+    if (forwardDist > 12) {
+      const dest = tileXZ(to);
+      const existing = this.moveQueues.get(playerId) ?? [];
+      this.moveQueues.set(playerId, [...existing, dest]);
+      if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+      return;
+    }
+
+    // Normal forward dice move: walk tile-by-tile clockwise.
+    const path: Array<[number, number]> = [];
+    let cur = from;
+    let guard = 0;
+    while (cur !== to && guard++ < RING) {
+      cur = (cur + 1) % RING;
+      path.push(tileXZ(cur));
+    }
+    if (path.length === 0) return;
+    const existing = this.moveQueues.get(playerId) ?? [];
+    this.moveQueues.set(playerId, [...existing, ...path]);
+    if (!this.moveAnimating.has(playerId)) this.driveAnimation(playerId);
+  }
+
+  /** Enqueues a token move from `from` to `to` and resolves when the token arrives at `to`. */
+  animateMoveAsync(playerId: string, from: number, to: number): Promise<void> {
+    // No movement: resolve immediately so the queue never stalls.
+    if (from === to) return Promise.resolve();
+
+    // Station → station TRAVEL: dive underground and emerge at the destination
+    // instead of walking the ring. forwardDist > 4 excludes the rare adjacent
+    // dice-step between neighbouring stations.
+    const RING = 40;
+    const forwardDist = (((to - from) % RING) + RING) % RING;
+    if (STATION_POSITIONS.has(from) && STATION_POSITIONS.has(to) && forwardDist > 4) {
+      return this.animateSubwayTravel(playerId, from, to);
+    }
+    return new Promise<void>((resolve) => {
+      let done = false;
+      let timer: ReturnType<typeof setTimeout>;
+      // Wrapped resolver: clears the safety timer and resolves exactly once.
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+
+      // If a resolver for this player is already registered (e.g. two state
+      // updates for the same player arrived back-to-back), fire the stale one
+      // immediately so it doesn't leak.
+      const stale = this.moveResolvers.get(playerId);
+      if (stale) { this.moveResolvers.delete(playerId); stale(); }
+
+      this.moveResolvers.set(playerId, finish);
+      this.enqueueMove(playerId, from, to);
+
+      // Safety net: token moves are driven by onBeforeRenderObservable. If the
+      // render loop stalls (e.g. headless/background-tab requestAnimationFrame
+      // throttling), force-complete so the serial state queue can NEVER deadlock
+      // and the game always makes progress. Snaps the token to its destination.
+      const hops = forwardDist > 12 ? 1 : forwardDist;
+      const capMs = hops * HOP_DURATION_MS + 1800;
+      timer = setTimeout(() => {
+        if (done) return;
+        this.moveQueues.delete(playerId);
+        this.moveAnimating.delete(playerId);
+        this.snapTokenToTile(playerId, to);
+        if (this.moveResolvers.get(playerId) === finish) this.moveResolvers.delete(playerId);
+        finish();
+      }, capMs);
+    });
+  }
+
+  /** Instantly place a player's token (and its label/ring) on a tile. Jail-aware. */
+  private snapTokenToTile(playerId: string, pos: number) {
+    const [x, z] = pos === JAIL_POS ? [0, 0] : tileXZ(pos);
+    const mesh = this.tokenMeshes.get(playerId);
+    if (mesh) { mesh.position.set(x, TOKEN_Y, z); mesh.rotation.y = 0; }
+    const lbl = this.tokenLabels.get(playerId);
+    if (lbl) lbl.position.set(x, LABEL_Y, z);
+    const ring = this.tokenRings.get(playerId);
+    if (ring) ring.position.set(x, RING_Y, z);
+  }
+
+  /**
+   * Subway-style travel: the token dives DOWN below the board (subway entrance),
+   * teleports to the destination station while hidden underground, then emerges
+   * UP at the destination. One self-contained queued animation that resolves on
+   * completion (so the serial queue can await it).
+   */
+  private animateSubwayTravel(playerId: string, _from: number, to: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const mesh = this.tokenMeshes.get(playerId);
+      const lbl = this.tokenLabels.get(playerId);
+      const ring = this.tokenRings.get(playerId);
+      if (!mesh) { resolve(); return; }
+
+      // eslint-disable-next-line prefer-const
+      let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+
+      const [destX, destZ] = tileXZ(to);
+      const DIVE_MS = 420;
+      const EMERGE_MS = 420;
+      const TOTAL_MS = DIVE_MS + EMERGE_MS;
+      const startY = mesh.position.y; // ≈ 0.35
+      const UNDERGROUND = -1.6;
+      let phase: "dive" | "emerge" = "dive";
+      let elapsed = 0;
+      let lastTime = performance.now();
+      let done = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        this.scene.onBeforeRenderObservable.remove(obs);
+        clearTimeout(safetyTimer);
+        mesh.position.set(destX, startY, destZ);
+        mesh.rotation.y = 0;
+        if (lbl) lbl.position.set(destX, LABEL_Y, destZ);
+        if (ring) ring.position.set(destX, RING_Y, destZ);
+        resolve();
+      };
+
+      // Safety timer so the promise resolves even when rAF is throttled.
+      const safetyTimer = setTimeout(finish, TOTAL_MS + 200);
+
+      obs = this.scene.onBeforeRenderObservable.add(() => {
+        const now = performance.now();
+        elapsed += now - lastTime;
+        lastTime = now;
+
+        if (phase === "dive") {
+          const t = Math.min(elapsed / DIVE_MS, 1);
+          mesh.position.y = startY + (UNDERGROUND - startY) * t;
+          mesh.rotation.y = t * Math.PI * 4; // spin while descending
+          if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
+          if (ring) ring.position.y = mesh.position.y;
+          if (t >= 1) {
+            // Teleport to destination while invisible underground.
+            mesh.position.x = destX;
+            mesh.position.z = destZ;
+            if (lbl) { lbl.position.x = destX; lbl.position.z = destZ; }
+            if (ring) { ring.position.x = destX; ring.position.z = destZ; }
+            phase = "emerge";
+            elapsed = 0;
+          }
+        } else {
+          const t = Math.min(elapsed / EMERGE_MS, 1);
+          mesh.position.y = UNDERGROUND + (startY - UNDERGROUND) * t;
+          mesh.rotation.y = (1 - t) * Math.PI * 4;
+          if (lbl) lbl.position.set(destX, mesh.position.y + 0.8, destZ);
+          if (ring) ring.position.set(destX, RING_Y, destZ);
+          if (t >= 1) finish();
+        }
+      });
+    });
+  }
+
+  private driveAnimation(playerId: string) {
+    const mesh = this.tokenMeshes.get(playerId);
+    if (!mesh) {
+      this.moveAnimating.delete(playerId);
+      const res = this.moveResolvers.get(playerId);
+      if (res) { this.moveResolvers.delete(playerId); res(); }
+      return;
+    }
+
+    const queue = this.moveQueues.get(playerId);
+    if (!queue || queue.length === 0) {
+      this.moveAnimating.delete(playerId);
+      const res = this.moveResolvers.get(playerId);
+      if (res) { this.moveResolvers.delete(playerId); res(); }
+      // Resolve FIRST, then squash — the landing bounce is pure garnish and
+      // must never delay the serial state queue.
+      this.playLandingSquash(mesh);
+      return;
+    }
+
+    this.moveAnimating.add(playerId);
+    const next = queue.shift()!;
+    const targetX = next[0];
+    const targetZ = next[1];
+    this.moveQueues.set(playerId, queue);
+
+    // Speed ramp: long moves accelerate mid-run (the safety cap in
+    // animateMoveAsync assumes HOP_DURATION_MS per hop, so ramping only ever
+    // makes hops FASTER — the cap stays valid).
+    const hopMs = queue.length >= 5 ? 85 : HOP_DURATION_MS;
+
+    const startX = mesh.position.x;
+    const startZ = mesh.position.z;
+    const startY = mesh.position.y;
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(hopTimer);
+      mesh.position.set(targetX, TOKEN_Y, targetZ);
+      const lbl = this.tokenLabels.get(playerId);
+      if (lbl) lbl.position.set(targetX, LABEL_Y, targetZ);
+      const ring2 = this.tokenRings.get(playerId);
+      if (ring2) ring2.position.set(targetX, RING_Y, targetZ);
+      this.driveAnimation(playerId);
+    };
+
+    // Safety timer: advance to the next hop even if rAF is throttled.
+    const hopTimer = setTimeout(finish, hopMs + 80);
+
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / hopMs, 1);
+      // Ease-in-out on the horizontal glide; the vertical arc keeps raw t so
+      // the hop peaks mid-stride.
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      mesh.position.x = startX + (targetX - startX) * e;
+      mesh.position.z = startZ + (targetZ - startZ) * e;
+      mesh.position.y = startY + HOP_HEIGHT * 4 * t * (1 - t);
+
+      const lbl = this.tokenLabels.get(playerId);
+      if (lbl) lbl.position.set(mesh.position.x, mesh.position.y + 0.8, mesh.position.z);
+      const ring = this.tokenRings.get(playerId);
+      if (ring) ring.position.set(mesh.position.x, RING_Y, mesh.position.z);
+
+      if (t >= 1) finish();
+    });
+  }
+
+  /**
+   * Landing squash: a quick scale dip when a token finishes its walk.
+   * Fire-and-forget garnish with its own safety reset — never awaited.
+   */
+  private playLandingSquash(mesh: AbstractMesh): void {
+    const SQUASH_MS = 140;
+    const origY = mesh.scaling.y; // car tokens carry a normalization scale
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      mesh.scaling.y = origY;
+    };
+    const safety = setTimeout(finish, SQUASH_MS + 200);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / SQUASH_MS, 1);
+      // Dip to 0.82 at mid-squash, back to 1 (parabolic).
+      const dip = 1 - 0.18 * 4 * t * (1 - t);
+      mesh.scaling.y = origY * dip;
+      if (t >= 1) finish();
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Win celebration: confetti at the winner token + a slow camera orbit.
+  // Fire-and-forget; any pointer input aborts the orbit so the user regains
+  // camera control instantly.
+  // -------------------------------------------------------------------------
+  playWinCelebration(winnerId: string): void {
+    const token = this.tokenMeshes.get(winnerId);
+    const pos = token ? token.position : Vector3.Zero();
+    this.effects.confettiBurst(pos.x, pos.y + 0.4, pos.z);
+
+    // The orbit itself lives in the Director (pointer-down aborts it there).
+    const ORBIT_MS = 8000;
+    this.director.celebrate();
+    setTimeout(() => this.director.stopCelebration(), ORBIT_MS);
+  }
+
+  /** The token mesh for a player, if it exists (Director follow targets). */
+  getTokenMesh(playerId: string): AbstractMesh | null {
+    return this.tokenMeshes.get(playerId) ?? null;
+  }
+
+  /**
+   * Screen-space pixel position of a tile centre — the anchor for DOM
+   * elements that pretend to sit on the table (the rising deed card).
+   * Recompute every frame while anchored: the Director moves the camera.
+   */
+  projectTile(pos: number): { x: number; y: number } {
+    const [wx, wz] = tileXZ(pos);
+    const p = Vector3.Project(
+      new Vector3(wx, 0.15, wz),
+      Matrix.Identity(),
+      this.scene.getTransformMatrix(),
+      this.camera.viewport.toGlobal(
+        this.engine.getRenderWidth(),
+        this.engine.getRenderHeight(),
+      ),
+    );
+    // Engine pixels → CSS pixels (retina safety).
+    const scale = 1 / this.engine.getHardwareScalingLevel();
+    return { x: p.x / scale, y: p.y / scale };
+  }
+
+  // -------------------------------------------------------------------------
+  // Active-player highlight (feature #3)
+  // A hovering marker placed ABOVE the active token to make the current
+  // player unmistakable. This is purely additive — it never touches existing
+  // token/label/ring/animation code.
+  // -------------------------------------------------------------------------
+  setActivePlayer(playerId: string | null): void {
+    // No-op if already tracking this player (avoids recreating each state tick)
+    if (playerId === this.activeHighlightPlayerId) {
+      // Still update position in case the token moved
+      this._updateActiveHighlightPosition();
+      return;
+    }
+
+    // Tear down any previous highlight
+    if (this.activeHighlightObs) {
+      this.scene.onBeforeRenderObservable.remove(this.activeHighlightObs);
+      this.activeHighlightObs = null;
+    }
+    if (this.activeHighlightMesh) {
+      this.activeHighlightMesh.dispose();
+      this.activeHighlightMesh = null;
+    }
+
+    this.activeHighlightPlayerId = playerId;
+    if (!playerId) return;
+
+    // One-shot pulse on the new active player's halo ring so the turn change
+    // is felt on the board itself (not just in the HUD).
+    this.pulseRing(playerId);
+
+    // Floating downward-pointing cone hovering ABOVE the active token (bug 2-7).
+    // (Replaces the old flat disc under the token, which also showed under jailed
+    // players in the cage — that under-token indicator is gone now.)
+    const cone = MeshBuilder.CreateCylinder(
+      "activeHighlight",
+      { diameterTop: 0, diameterBottom: 0.34, height: 0.42, tessellation: 16 },
+      this.scene
+    );
+    cone.rotation.x = Math.PI; // apex points DOWN toward the token
+    cone.isPickable = false;
+
+    const mat = new StandardMaterial("activeHighlightMat", this.scene);
+    mat.diffuseColor = new Color3(1, 0.85, 0.1);
+    mat.emissiveColor = new Color3(0.95, 0.8, 0.05);
+    mat.specularColor = new Color3(0, 0, 0);
+    mat.backFaceCulling = false;
+    cone.material = mat;
+    this.activeHighlightMesh = cone;
+
+    // Position it immediately
+    this._updateActiveHighlightPosition();
+
+    // Bob up/down so it reads as a hovering marker.
+    let elapsed = 0;
+    let lastTime = performance.now();
+    this.activeHighlightObs = this.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      this._updateActiveHighlightPosition(elapsed);
+    });
+  }
+
+  /** Quick scale pulse on a player's halo ring (turn start). Own safety reset. */
+  private pulseRing(playerId: string): void {
+    const ring = this.tokenRings.get(playerId);
+    if (!ring) return;
+    const PULSE_MS = 500;
+    const orig = ring.scaling.clone();
+    let elapsed = 0;
+    let lastTime = performance.now();
+    let done = false;
+    // eslint-disable-next-line prefer-const
+    let obs: ReturnType<typeof this.scene.onBeforeRenderObservable.add>;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.scene.onBeforeRenderObservable.remove(obs);
+      clearTimeout(safety);
+      if (!ring.isDisposed()) ring.scaling.copyFrom(orig);
+    };
+    const safety = setTimeout(finish, PULSE_MS + 200);
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      if (ring.isDisposed()) { finish(); return; }
+      const now = performance.now();
+      elapsed += now - lastTime;
+      lastTime = now;
+      const t = Math.min(elapsed / PULSE_MS, 1);
+      const s = 1 + 0.45 * 4 * t * (1 - t); // swell to 1.45 mid-pulse
+      ring.scaling.set(orig.x * s, orig.y, orig.z * s);
+      if (t >= 1) finish();
+    });
+  }
+
+  private _updateActiveHighlightPosition(elapsed = 0): void {
+    const mesh = this.activeHighlightMesh;
+    const pid = this.activeHighlightPlayerId;
+    if (!mesh || !pid) return;
+    const token = this.tokenMeshes.get(pid);
+    if (token) {
+      const bob = 0.12 * Math.sin((elapsed / 500) * Math.PI);
+      mesh.position.set(token.position.x, token.position.y + 1.05 + bob, token.position.z);
+      mesh.rotation.y = elapsed / 600; // slow spin
+    }
+  }
+}

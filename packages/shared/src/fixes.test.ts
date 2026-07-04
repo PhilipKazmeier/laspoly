@@ -253,7 +253,7 @@ describe("Balance: single-street groups build houses but not hotels (one-per-tur
       // House build is now allowed (single-street ban reverted)
       const { state } = applyCommand(s, { type: "BUILD", pos, building: "house" });
       expect(state.buildings[pos]?.houses).toBe(1);
-      expect(state.builtThisTurn).toBe(true);
+      expect(state.buildsThisTurn).toBe(1);
       // legalCommands offered BUILD before the build happened
       expect(legalCommands(s)).toContain("BUILD");
     });
@@ -267,7 +267,7 @@ describe("Balance: single-street groups build houses but not hotels (one-per-tur
       const { state: s1 } = applyCommand(s, { type: "BUILD", pos, building: "house" });
       expect(s1.buildings[pos]?.houses).toBe(1);
       // One-build-per-turn: a 2nd build this turn is rejected, and BUILD is gone from legalCommands
-      expect(() => applyCommand(s1, { type: "BUILD", pos, building: "house" })).toThrow(/one building per turn/);
+      expect(() => applyCommand(s1, { type: "BUILD", pos, building: "house" })).toThrow(/build limit reached/);
       expect(legalCommands(s1)).not.toContain("BUILD");
     });
 

@@ -9,6 +9,20 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
 
+/** Poll until the next actionable prompt (or game over) instead of a fixed sleep. */
+async function waitForNextPrompt(page: Page, timeout = 12_000): Promise<void> {
+  await page.waitForFunction(() => {
+    const vis = (id: string) => {
+      const el = document.getElementById(id);
+      return !!el && el.style.display !== "none" && el.style.display !== "";
+    };
+    return vis("buyOfferPanel") || vis("endTurnBtn") || vis("rollBtn") ||
+      vis("ransomBtn") || vis("actionCardPopup") ||
+      (document.getElementById("gameOverBanner") as HTMLElement | null)?.style.display === "flex";
+  }, undefined, { timeout }).catch(() => null);
+}
+
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SS = path.join(__dirname, "__screenshots__");
@@ -139,7 +153,7 @@ test.describe("UI Overlay Fixes", () => {
         continue; // back to top of loop — now awaiting-roll for next player
       } else {
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(8_000); // wait for animation
+        await waitForNextPrompt(page);
         const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (buyNow) await page.locator("#buyOfferBuyBtn").click();
       }
@@ -226,21 +240,23 @@ test.describe("UI Overlay Fixes", () => {
     await page.locator("#createRoom").click();
     await expect(page.locator("#startGame")).toBeVisible({ timeout: 10_000 });
 
-    // Figure picker must be rendered
+    // Current picker design: colour is server-assigned; the player picks a
+    // figure from ≥9 buttons next to a live 3D preview canvas.
     await expect(page.locator("#figurePicker")).toBeVisible();
-    const swatches = await page.locator(".fp-swatch").count();
-    console.log(`Figure swatches count: ${swatches}`);
-    // 6 colours × 6 figures = 36 swatches
-    expect(swatches).toBeGreaterThan(0);
+    await expect(page.locator("#figurePicker canvas")).toBeVisible({ timeout: 5_000 });
+    const figBtns = page.locator("#figurePicker button");
+    const btnCount = await figBtns.count();
+    console.log(`Figure buttons count: ${btnCount}`);
+    expect(btnCount).toBeGreaterThanOrEqual(9);
+    await expect(page.locator("#figurePicker")).toContainText("Deine Farbe");
     await shot(page, "8-lobby-figure-picker");
 
-    // Click the first swatch and check it becomes selected
-    const firstSwatch = page.locator(".fp-swatch").first();
-    await firstSwatch.click();
+    // Picking another figure moves the gold selection border (no crash).
+    await figBtns.nth(2).click();
     await page.waitForTimeout(300);
-    const selectedCount = await page.locator(".fp-swatch.selected").count();
-    console.log(`Selected swatches after click: ${selectedCount}`);
-    expect(selectedCount).toBeGreaterThanOrEqual(1);
+    const borderColor = await figBtns.nth(2).evaluate((el) => (el as HTMLElement).style.borderColor);
+    console.log(`Selected button border: ${borderColor}`);
+    expect(borderColor).toContain("250, 204, 21"); // #facc15
     await shot(page, "8-figure-swatch-selected");
   });
 
@@ -299,7 +315,7 @@ test.describe("UI Overlay Fixes", () => {
       } else {
         await page.locator("#rollBtn").click();
       }
-      await page.waitForTimeout(8_000); // wait for animation
+      await waitForNextPrompt(page);
       const buyNow = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
       if (buyNow) await page.locator("#buyOfferDeclineBtn").click();
 
@@ -350,7 +366,8 @@ test.describe("UI Overlay Fixes", () => {
     await shot(page, "6-log-german");
 
     // Toggle to EN via settings
-    await page.locator("button[title='Einstellungen']").click();
+    // Two ⚙ buttons exist (lobby + game header) — target the in-game one.
+    await page.locator("#settingsHdrBtn").click();
     await page.waitForTimeout(200);
     await expect(page.locator("#settingsOverlay")).toBeVisible();
     await page.locator("#localeENBtn").click();
@@ -393,7 +410,7 @@ test.describe("UI Overlay Fixes", () => {
         continue;
       } else {
         await page.locator("#rollBtn").click();
-        await page.waitForTimeout(8_000); // wait for animation
+        await waitForNextPrompt(page);
         const b = await page.locator("#buyOfferPanel").isVisible().catch(() => false);
         if (b) await page.locator("#buyOfferDeclineBtn").click();
       }

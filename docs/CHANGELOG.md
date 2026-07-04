@@ -4,6 +4,34 @@ Living record of what was built, every bug fixed, and every non-obvious decision
 Newest first. Design rationale lives in [superpowers/specs](superpowers/specs/);
 per-task plans in [superpowers/plans](superpowers/plans/).
 
+## 2026-07-04 — "The Back Room" visual overhaul (phases 0–6)
+
+Design source of truth: [../docs/idea-brief.md](../docs/idea-brief.md); plan:
+[superpowers/plans/back-room-overhaul.md](superpowers/plans/back-room-overhaul.md).
+Commits `10107b4..` on `random-fable-enhancements`.
+
+- **Phase 0** — vendored CC0/OFL assets (Fraunces/Inter woff2, dark-wood PBR, warm HDRI;
+  `public/assets/ASSETS.md`) + `tools/capture.ts` screenshot gate harness.
+- **Phase 1** — the scene became a room: starfield + neon rim deleted, single BACK_ROOM palette
+  (neon/classic 3D theme system removed), PBR walnut table, warm key light + shadows + vignette,
+  wrought-iron jail, muted group-colour bars.
+- **Phase 2** — all CSS extracted to `styles/tokens.css` (+ legacy-alias bridge) / `styles/ui.css`;
+  3-zone HUD (player rail with chip discs / table plaque / your rail with capital chip stack);
+  event log → hover-expanding ticker; turn timer visible only ≤15 s; DOM theme toggle removed;
+  on-board seat money displays deleted; figure names localized.
+- **Phase 3** — `director.ts`: all camera movement through one turn grammar (focus → dice → follow
+  → present → release), full vs calm intensity, user pointer always wins, reduced-motion cuts.
+- **Phase 4** — `ui/deed-card.ts`: one paper deed card as buy prompt (rises from the landed tile via
+  `Board3D.projectTile`, Kaufen/Ablehnen printed on it), inspector, and prop/trade item styling.
+  Contrast-aware band ink for light group colours.
+- **Phase 5** — money made visible: engine emits rent-modifier events (`rentMod*` — monopoly,
+  recession, street party, circus, power outage) with DE/EN templates; chips arc payer→payee
+  (`board3d/chips.ts`); signed deltas float off the player rail; economy-phase changes pulse the
+  plaque.
+- **Phase 6** — dead paths removed (empty `handleEvents`, canvas money floats, `buy.header` keys,
+  `makeWoodTexture`), HANDOFF rewritten, pre-existing e2e failures baseline-documented (A/B stash
+  runs distinguish them from overhaul regressions).
+
 ## Architecture decisions (why)
 
 - **TS monorepo, pure deterministic engine in `packages/shared`.** `reduce(state, command) → {state, events}`

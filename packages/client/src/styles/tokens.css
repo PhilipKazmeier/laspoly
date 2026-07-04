@@ -1,0 +1,148 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   LasPoly design tokens — "The Back Room" (docs/idea-brief.md §7)
+   A private casino table off the Strip: felt, walnut, brass, paper.
+   Crafted · warm · confident. Nothing glows unless it's lit.
+   Single dark theme by design — the game is a dark room.
+   Components must consume tokens, never raw hex.
+   ───────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("/assets/fonts/fraunces-600-latin.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/assets/fonts/inter-var-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* color — neutrals (warm, brass-tinted) */
+  --color-bg-0: #14100c;
+  --color-bg-1: #1c1610;
+  --color-surface-1: #221b13;
+  --color-surface-2: #2b2218;
+  --color-line: #3a2f21;
+  --color-text-hi: #ede3d1;
+  --color-text-mid: #b8a98f;
+  --color-text-low: #85765f;
+  /* color — materials */
+  --color-felt: #1b3a2c;
+  --color-felt-deep: #122a1f;
+  --color-brass: #c9a35c;
+  --color-brass-bright: #e2c079;
+  --color-paper: #f1e8d4;
+  --color-paper-shade: #e0d2b7;
+  --color-card-ink: #292115;
+  /* color — semantic (desaturated to brass level) */
+  --color-ok: #5f9a6e;
+  --color-danger: #b3564a;
+  --color-warn: #c77f3f;
+  --color-info: #6f8ba3;
+  /* color — player chips */
+  --chip-red: #c05b4d;
+  --chip-blue: #5b7fa6;
+  --chip-green: #5f9a6e;
+  --chip-gold: #d4b45a;
+  --chip-purple: #8d6fa8;
+  --chip-orange: #c9803f;
+  --chip-teal: #58a099;
+  --chip-black: #262421;
+  /* type */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-ui: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --text-12: 12px; --text-14: 14px; --text-16: 16px; --text-18: 18px;
+  --text-22: 22px; --text-28: 28px; --text-36: 36px;
+  /* space (4px grid; components default 16/24, panels 24/32) */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px; --space-12: 48px; --space-16: 64px;
+  /* radius — controls · cards (physical corner) · chips/badges */
+  --radius-control: 4px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  /* elevation — candlelight, not neon */
+  --shadow-raised: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-overlay: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 18px 60px rgba(0, 0, 0, 0.6);
+  /* motion — decisive start, soft landing, no bounce */
+  --duration-fast: 140ms;
+  --duration-base: 240ms;
+  --duration-cinematic: 600ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   LEGACY ALIASES — bridge for rules written against the old Neon-Vegas
+   variable names. Every component rebuilt in the phase-2 HUD work must use
+   the canonical tokens above; this block shrinks as ui.css is rebuilt and
+   is deleted entirely in the final sweep (plan phase 6).
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --bg-0: var(--color-bg-0);
+  --glass: rgba(34, 27, 19, 0.86);
+  --glass-strong: rgba(20, 16, 12, 0.94);
+  --glass-light: rgba(241, 232, 212, 0.05);
+  --hairline: rgba(241, 232, 212, 0.12);
+  --hairline-soft: rgba(241, 232, 212, 0.07);
+  --text: var(--color-text-hi);
+  --text-dim: var(--color-text-mid);
+  --text-mute: var(--color-text-low);
+  --gold: var(--color-brass);
+  --gold-deep: #b08c47;
+  --violet: #9a7b3f;            /* old purple CTAs → brass gradient */
+  --magenta: var(--color-brass);
+  --success: var(--color-ok);
+  --success-deep: #4a7d59;
+  --danger: var(--color-danger);
+  --danger-deep: #8f4238;
+  --info: var(--color-info);
+  --muted: rgba(241, 232, 212, 0.08);
+  --radius-lg: var(--radius-card);
+  --radius: 8px;
+  --radius-sm: var(--radius-control);
+  --shadow: var(--shadow-overlay);
+  --shadow-pop: var(--shadow-modal);
+  --glow-gold: 0 4px 16px rgba(201, 163, 92, 0.22);
+  --glow-magenta: 0 4px 16px rgba(201, 163, 92, 0.18);
+  --top-hi: inset 0 1px 0 rgba(241, 232, 212, 0.07);
+  --blur: blur(14px) saturate(112%);
+  --font: var(--font-ui);
+  --ease: 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── page base (moved from index.html; semantics preserved) ────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg-0);
+}
+#renderCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  touch-action: none;
+}
+#ui {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  font-family: var(--font-ui);
+  color: var(--color-text-hi);
+  -webkit-font-smoothing: antialiased;
+}
+#ui * { pointer-events: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

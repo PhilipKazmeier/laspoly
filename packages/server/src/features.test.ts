@@ -420,7 +420,7 @@ describe("Fix 6 — bot uses actual charge cost (buildingCostMult) to decide bui
     gs.ownership[1] = "A"; // Alice owns brown (single-street group)
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
-    gs.builtThisTurn = false;
+    gs.buildsThisTurn = 0;
 
     const cmd = botDecide(gs);
     // Bot must NOT attempt a BUILD (it would throw "Cannot afford house")
@@ -442,7 +442,7 @@ describe("Fix 6 — bot uses actual charge cost (buildingCostMult) to decide bui
     gs.ownership[1] = "A"; // brown single-street
     gs.currentPlayerIndex = 0;
     gs.phase = "awaiting-roll";
-    gs.builtThisTurn = false;
+    gs.buildsThisTurn = 0;
 
     const cmd = botDecide(gs);
     expect(cmd.type).toBe("BUILD");
@@ -479,5 +479,59 @@ describe("Fix 8 — GameRoom.updateSettings clamps multipliers", () => {
     const clamped = Math.min(5, Math.max(0.25, raw));
     room.updateSettings({ startingCapitalMult: clamped });
     expect(room.settings.startingCapitalMult).toBe(2.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// House-rule settings: server validation + round-trip into game state
+// ---------------------------------------------------------------------------
+
+import { createGame as createGameHR } from "@laspoly/shared";
+
+describe("house-rule settings round-trip", () => {
+  it("all six house-rule settings survive updateSettings → start → GameState", () => {
+    const room = new GameRoom("HR Room", "vegas", 1);
+    room.addHuman("Host");
+    room.updateSettings({
+      eventFrequency: "chaos",
+      unbuildableCount: 4,
+      roundLimit: 40,
+      noRentInJail: true,
+      extraBuildings: true,
+      buildsPerTurn: 3,
+    });
+    expect(room.toView().settings).toMatchObject({
+      eventFrequency: "chaos",
+      unbuildableCount: 4,
+      roundLimit: 40,
+      noRentInJail: true,
+      extraBuildings: true,
+      buildsPerTurn: 3,
+    });
+
+    const state = room.start(7);
+    expect(state.eventFrequency).toBe("chaos");
+    expect(state.unbuildableFields.length).toBe(4);
+    expect(state.roundLimit).toBe(40);
+    expect(state.noRentInJail).toBe(true);
+    expect(state.extraBuildings).toBe(true);
+    expect(state.buildsPerTurn).toBe(3);
+  });
+
+  it("defaults leave the historical state shape", () => {
+    const state = createGameHR({
+      boardId: "vegas",
+      seed: 1,
+      players: [
+        { id: "a", name: "A", isBot: true, color: "red" },
+        { id: "b", name: "B", isBot: true, color: "blue" },
+      ],
+    });
+    expect(state.eventFrequency).toBe("normal");
+    expect(state.unbuildableFields).toEqual([]);
+    expect(state.roundLimit).toBe(0);
+    expect(state.noRentInJail).toBe(false);
+    expect(state.extraBuildings).toBe(false);
+    expect(state.buildsPerTurn).toBe(1);
   });
 });
